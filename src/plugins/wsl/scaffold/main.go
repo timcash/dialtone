@@ -95,12 +95,16 @@ func runSrcV3(command, repoRoot string, args []string) error {
 		return wsl_ops.List(args)
 	case "create", "spawn":
 		return wsl_ops.Create(args)
+	case "start":
+		return wsl_ops.Start(args)
 	case "stop":
 		return wsl_ops.Stop(args)
 	case "delete", "rm":
 		return wsl_ops.Delete(args)
 	case "exec":
 		return wsl_ops.Exec(args)
+	case "terminal", "open-terminal":
+		return wsl_ops.OpenTerminal(args)
 	case "fmt":
 		pkg := "./plugins/wsl/src_v3/..."
 		return go_plugin.RunGo("fmt", pkg)
@@ -222,9 +226,11 @@ func printUsage() {
 	logs.Raw("  list         List WSL instances")
 	logs.Raw("  status       Alias for list")
 	logs.Raw("  create       Create Alpine-backed WSL instance")
+	logs.Raw("  start        Start a WSL instance and keep it running")
 	logs.Raw("  stop         Stop a WSL instance")
 	logs.Raw("  delete       Delete a WSL instance")
 	logs.Raw("  exec         Run a command inside a WSL instance")
+	logs.Raw("  terminal     Open a desktop terminal attached to a WSL shell")
 	logs.Raw("  test         Run tests")
 	logs.Raw("")
 	logs.Raw("Notes:")

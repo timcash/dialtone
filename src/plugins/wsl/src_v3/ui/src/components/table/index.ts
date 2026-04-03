@@ -5,6 +5,7 @@ import { logInfo } from "../../util/logging";
 class TableControl implements VisualizationControl {
     private ws: WebSocket | null = null;
     private stoppingNames = new Set<string>();
+    private startingNames = new Set<string>();
     private isVisible = false;
 
     constructor(private container: HTMLElement) {
@@ -20,6 +21,22 @@ class TableControl implements VisualizationControl {
                     if (name) {
                         logInfo('ui/table', `[UI_ACTION] User clicked STOP for: ${name}`);
                         this.stopNode(name);
+                    }
+                }
+                const startBtn = target.closest('.start-btn') as HTMLButtonElement;
+                if (startBtn) {
+                    const name = startBtn.dataset.name;
+                    if (name) {
+                        logInfo('ui/table', `[UI_ACTION] User clicked START for: ${name}`);
+                        this.startNode(name);
+                    }
+                }
+                const terminalBtn = target.closest('.terminal-btn') as HTMLButtonElement;
+                if (terminalBtn) {
+                    const name = terminalBtn.dataset.name;
+                    if (name) {
+                        logInfo('ui/table', `[UI_ACTION] User clicked TERMINAL for: ${name}`);
+                        this.openTerminal(name);
                     }
                 }
                 const deleteBtn = target.closest('.delete-btn') as HTMLButtonElement;
@@ -110,13 +127,20 @@ class TableControl implements VisualizationControl {
             } else if (inst.state === 'Stopped') {
                 this.stoppingNames.delete(inst.name);
             }
+            if (inst.state === 'Running') {
+                this.startingNames.delete(inst.name);
+            }
         });
 
         tbody.innerHTML = instances.map(inst => {
             const isStopping = this.stoppingNames.has(inst.name);
+            const isStarting = this.startingNames.has(inst.name);
+            const isRunning = inst.state === 'Running';
             const statusColor = inst.state === 'Running' ? '#00ff88' : (inst.state === 'Stopped' ? '#ff4444' : '#ff8800');
             const stopBtnClass = isStopping ? 'stop-btn is-stopping' : 'stop-btn';
             const stopBtnText = isStopping ? 'STOPPING...' : 'STOP';
+            const startBtnClass = isStarting ? 'start-btn is-starting' : 'start-btn';
+            const startBtnText = isStarting ? 'STARTING...' : 'START';
 
             return `
                 <tr style="border-bottom: 1px solid #222;">
@@ -130,7 +154,10 @@ class TableControl implements VisualizationControl {
                     <td style="padding: 12px; color: #aaa; font-family: monospace;">${inst.memory}</td>
                     <td style="padding: 12px; color: #aaa; font-family: monospace;">${inst.disk}</td>
                     <td style="padding: 12px; text-align: right;">
-                        <button class="${stopBtnClass}" data-name="${inst.name}" aria-label="Stop Node ${inst.name}" style="background: #331111; color: #ff4444; border: 1px solid #552222; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 4px;">${stopBtnText}</button>
+                        <button class="terminal-btn" data-name="${inst.name}" aria-label="Open Terminal ${inst.name}" style="background: #0d2c1f; color: #8cffc5; border: 1px solid #1f6b4a; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 4px;">TERMINAL</button>
+                        ${isRunning
+                            ? `<button class="${stopBtnClass}" data-name="${inst.name}" aria-label="Stop Node ${inst.name}" style="background: #331111; color: #ff4444; border: 1px solid #552222; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 4px;">${stopBtnText}</button>`
+                            : `<button class="${startBtnClass}" data-name="${inst.name}" aria-label="Start Node ${inst.name}" style="background: #102d20; color: #00ff88; border: 1px solid #1f6b4a; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 4px;">${startBtnText}</button>`}
                         <button class="delete-btn" data-name="${inst.name}" aria-label="Delete Node ${inst.name}" style="background: #222; color: #888; border: 1px solid #444; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">DELETE</button>
                     </td>
                 </tr>
@@ -138,21 +165,44 @@ class TableControl implements VisualizationControl {
         }).join('');
     }
 
-    private async stopNode(name: string) {
-        this.stoppingNames.add(name);
+    private async startNode(name: string) {
+        this.startingNames.add(name);
         this.refresh();
         try {
-            await fetch(`/api/stop?name=${name}`);
+            await fetch(`/api/start?name=${encodeURIComponent(name)}`);
+        } catch (e) {
+            console.error('[WSL] Start failed', e);
+            this.startingNames.delete(name);
+        }
+    }
+
+    private async stopNode(name: string) {
+        this.stoppingNames.add(name);
+        this.startingNames.delete(name);
+        this.refresh();
+        try {
+            await fetch(`/api/stop?name=${encodeURIComponent(name)}`);
         } catch (e) {
             console.error('[WSL] Stop failed', e);
             this.stoppingNames.delete(name);
         }
     }
 
+    private async openTerminal(name: string) {
+        try {
+            const res = await fetch(`/api/open-terminal?name=${encodeURIComponent(name)}`);
+            if (!res.ok) {
+                throw new Error(await res.text());
+            }
+        } catch (e) {
+            console.error('[WSL] Open terminal failed', e);
+        }
+    }
+
     private async deleteNode(name: string) {
         if (!confirm(`Really delete ${name}?`)) return;
         try {
-            await fetch(`/api/delete?name=${name}`);
+            await fetch(`/api/delete?name=${encodeURIComponent(name)}`);
             this.refresh();
         } catch (e) {
             console.error('[WSL] Delete failed', e);

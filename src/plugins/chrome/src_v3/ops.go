@@ -462,7 +462,7 @@ func stopRemoteService(node sshv1.MeshNode, role string) error {
 	if role == "" {
 		role = defaultRole
 	}
-	_, shutdownErr := sendRemoteCommand(node, commandRequest{Command: "shutdown", Role: role, TimeoutMS: 1200})
+	_, shutdownErr := sendRemoteCommand(node, commandRequest{Command: "shutdown", Role: role, TimeoutMS: 7000})
 	remoteBin, err := remoteBinaryPath(node)
 	if err != nil {
 		if shutdownErr != nil {

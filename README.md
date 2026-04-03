@@ -459,6 +459,21 @@ If you are on Windows, you must use [wsl-tmux.cmd](wsl-tmux.cmd) so WSL REPL and
 .\wsl-tmux.cmd interrupt
 ```
 
+For Windows-side distro lifecycle control, keep those commands local to the host:
+
+```powershell
+.\dialtone.ps1 wsl src_v3 status
+.\dialtone.ps1 wsl src_v3 start --name Ubuntu-24.04
+.\dialtone.ps1 wsl src_v3 stop --name Ubuntu-24.04
+.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04
+```
+
+The `terminal` command is now the quickest "ready to work" path on Windows:
+
+- it ensures the distro is running
+- it opens a real Windows desktop terminal already inside the WSL repo root
+- it queues `./dialtone.sh chrome src_v3 deploy --host legion --role dev --service` so the Chrome `legion/dev` role starts warming immediately
+
 Preferred tmux rhythm:
 
 1. send one command with `.\wsl-tmux.cmd "..."`

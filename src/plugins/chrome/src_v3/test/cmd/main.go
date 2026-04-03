@@ -295,27 +295,10 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int, act
 				appendTargetLogsToStep(sc, host, role, lines)
 				return testv1.StepRunResult{}, fmt.Errorf("open before recovery check failed: %w", err)
 			}
-			resp, err := chromev3.SendCommandByTarget(host, chromev3.CommandRequest{
-				Command: "eval",
-				Role:    role,
-				Script: `JSON.stringify({
-				  href: String(location.href || ""),
-				  title: String(document.title || ""),
-				  text: String((document.body && document.body.innerText) || "").slice(0, 400)
-				})`,
-			})
+			snapshot, err := probeRecoverySnapshot(host, role)
 			if err != nil {
 				appendTargetLogsToStep(sc, host, role, lines)
-				return testv1.StepRunResult{}, fmt.Errorf("eval recovery probe failed: %w", err)
-			}
-			var snapshot struct {
-				Href  string `json:"href"`
-				Title string `json:"title"`
-				Text  string `json:"text"`
-			}
-			if err := json.Unmarshal([]byte(strings.TrimSpace(resp.Value)), &snapshot); err != nil {
-				appendTargetLogsToStep(sc, host, role, lines)
-				return testv1.StepRunResult{}, fmt.Errorf("decode recovery probe: %w", err)
+				return testv1.StepRunResult{}, err
 			}
 			sc.Infof("recovery-probe href=%q title=%q text=%q", strings.TrimSpace(snapshot.Href), strings.TrimSpace(snapshot.Title), strings.TrimSpace(snapshot.Text))
 			if hasRecoveryIndicator(snapshot.Href, snapshot.Title, snapshot.Text) {
@@ -325,6 +308,56 @@ func addChromeSuiteSteps(reg *testv1.Registry, host, role string, lines int, act
 			appendTargetLogsToStep(sc, host, role, lines)
 			return testv1.StepRunResult{
 				Report: fmt.Sprintf("chrome src_v3 showed no recovery UI for role %s on %s", role, defaultIfBlank(host, "local")),
+			}, nil
+		},
+	})
+
+	reg.Add(testv1.Step{
+		Name:    "chrome-restart-preserves-profile-without-recovery-window",
+		Timeout: 90 * time.Second,
+		RunWithContext: func(sc *testv1.StepContext) (testv1.StepRunResult, error) {
+			before, err := chromev3.EnsureServiceByTarget(host, role, false)
+			if err != nil {
+				appendTargetLogsToStep(sc, host, role, lines)
+				return testv1.StepRunResult{}, fmt.Errorf("ensure service before restart check: %w", err)
+			}
+			if _, err := chromev3.SendCommandByTarget(host, chromev3.CommandRequest{
+				Command: "open",
+				Role:    role,
+				URL:     "about:blank",
+			}); err != nil {
+				appendTargetLogsToStep(sc, host, role, lines)
+				return testv1.StepRunResult{}, fmt.Errorf("open before restart check failed: %w", err)
+			}
+			beforeProfile := strings.TrimSpace(before.ProfileDir)
+			sc.Infof("restart-probe before profile_dir=%q browser_pid=%d service_pid=%d", beforeProfile, before.BrowserPID, before.ServicePID)
+
+			after, err := chromev3.RestartServiceByTarget(host, role)
+			if err != nil {
+				appendTargetLogsToStep(sc, host, role, lines)
+				return testv1.StepRunResult{}, fmt.Errorf("restart service for role %s failed: %w", role, err)
+			}
+			afterProfile := strings.TrimSpace(after.ProfileDir)
+			sc.Infof("restart-probe after profile_dir=%q browser_pid=%d service_pid=%d", afterProfile, after.BrowserPID, after.ServicePID)
+			if beforeProfile != "" && afterProfile != "" && beforeProfile != afterProfile {
+				appendTargetLogsToStep(sc, host, role, lines)
+				return testv1.StepRunResult{}, fmt.Errorf("chrome profile changed across restart for role %s: before=%q after=%q", role, beforeProfile, afterProfile)
+			}
+
+			snapshot, err := probeRecoverySnapshot(host, role)
+			if err != nil {
+				appendTargetLogsToStep(sc, host, role, lines)
+				return testv1.StepRunResult{}, err
+			}
+			sc.Infof("restart-recovery-probe href=%q title=%q text=%q", strings.TrimSpace(snapshot.Href), strings.TrimSpace(snapshot.Title), strings.TrimSpace(snapshot.Text))
+			if hasRecoveryIndicator(snapshot.Href, snapshot.Title, snapshot.Text) {
+				appendTargetLogsToStep(sc, host, role, lines)
+				return testv1.StepRunResult{}, fmt.Errorf("chrome recovery UI detected after restart for role %s: href=%q title=%q text=%q", role, strings.TrimSpace(snapshot.Href), strings.TrimSpace(snapshot.Title), strings.TrimSpace(snapshot.Text))
+			}
+
+			appendTargetLogsToStep(sc, host, role, lines)
+			return testv1.StepRunResult{
+				Report: fmt.Sprintf("chrome src_v3 restart preserved profile %q and showed no recovery UI for role %s on %s", defaultIfBlank(afterProfile, beforeProfile), role, defaultIfBlank(host, "local")),
 			}, nil
 		},
 	})
@@ -560,6 +593,32 @@ func logRemoteLogBlocks(sc *testv1.StepContext, stdout, stderr string) {
 	}
 }
 
+type recoverySnapshot struct {
+	Href  string `json:"href"`
+	Title string `json:"title"`
+	Text  string `json:"text"`
+}
+
+func probeRecoverySnapshot(host, role string) (recoverySnapshot, error) {
+	resp, err := chromev3.SendCommandByTarget(host, chromev3.CommandRequest{
+		Command: "eval",
+		Role:    role,
+		Script: `({
+		  href: String(location.href || ""),
+		  title: String(document.title || ""),
+		  text: String((document.body && document.body.innerText) || "").slice(0, 400)
+		})`,
+	})
+	if err != nil {
+		return recoverySnapshot{}, fmt.Errorf("eval recovery probe failed: %w", err)
+	}
+	var snapshot recoverySnapshot
+	if err := json.Unmarshal([]byte(strings.TrimSpace(resp.Value)), &snapshot); err != nil {
+		return recoverySnapshot{}, fmt.Errorf("decode recovery probe: %w", err)
+	}
+	return snapshot, nil
+}
+
 func resolveActionFlowOptions() actionFlowOptions {
 	return normalizeActionFlowOptions(actionFlowOptions{
 		InteractionCount: envIntDefault("DIALTONE_CHROME_SRC_V3_INTERACTION_COUNT", 6),
@@ -628,7 +687,7 @@ func buildActionFlowRequests(role, marker string, opts actionFlowOptions) []chro
 		chromev3.CommandRequest{
 			Command: "eval",
 			Role:    role,
-			Script: `JSON.stringify({
+			Script: `({
 			  status: String((document.querySelector('[aria-label="Status"]') || {}).textContent || ""),
 			  count: String(window.__dialtoneClickCount || 0),
 			  value: String((document.querySelector('[aria-label="Name Input"]') || {}).value || "")

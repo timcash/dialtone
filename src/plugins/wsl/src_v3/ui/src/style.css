@@ -67,10 +67,22 @@
   100% { background-color: #331111; border-color: #552222; }
 }
 
+@keyframes pulse-green {
+  0% { background-color: #102d20; border-color: #1f6b4a; }
+  50% { background-color: #13482f; border-color: #00ff88; }
+  100% { background-color: #102d20; border-color: #1f6b4a; }
+}
+
 .stop-btn.is-stopping {
   animation: pulse-orange 1s infinite;
   pointer-events: none;
   opacity: 0.8;
+}
+
+.start-btn.is-starting {
+  animation: pulse-green 1s infinite;
+  pointer-events: none;
+  opacity: 0.85;
 }
 
 .settings-container {
@@ -95,7 +107,7 @@
 }
 
 /* Action buttons in table */
-.stop-btn, .delete-btn {
+.terminal-btn, .start-btn, .stop-btn, .delete-btn {
     padding: 4px 8px;
     font-size: 11px;
     font-weight: 700;
@@ -103,6 +115,8 @@
     margin-left: 4px;
 }
 
+.terminal-btn { background: #0d2c1f; color: #8cffc5; border-color: #1f6b4a; }
+.start-btn { background: #102d20; color: #00ff88; border-color: #1f6b4a; }
 .stop-btn { background: #331111; color: #ff4444; border-color: #552222; }
 .delete-btn { background: #222; color: #888; border-color: #444; }
 

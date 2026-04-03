@@ -67,6 +67,21 @@ func Stop(args []string) error {
 	return wslv3.StopInstance(strings.TrimSpace(*name))
 }
 
+func Start(args []string) error {
+	fs := flag.NewFlagSet("wsl-start", flag.ContinueOnError)
+	name := fs.String("name", "", "WSL instance name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*name) == "" {
+		rest := fs.Args()
+		if len(rest) > 0 {
+			*name = strings.TrimSpace(rest[0])
+		}
+	}
+	return wslv3.StartInstance(strings.TrimSpace(*name))
+}
+
 func Delete(args []string) error {
 	fs := flag.NewFlagSet("wsl-delete", flag.ContinueOnError)
 	name := fs.String("name", "", "WSL instance name")
@@ -98,4 +113,17 @@ func Exec(args []string) error {
 		fmt.Println(out)
 	}
 	return err
+}
+
+func OpenTerminal(args []string) error {
+	fs := flag.NewFlagSet("wsl-terminal", flag.ContinueOnError)
+	name := fs.String("name", "", "WSL instance name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if strings.TrimSpace(*name) == "" && len(rest) > 0 {
+		*name = strings.TrimSpace(rest[0])
+	}
+	return wslv3.OpenTerminal(strings.TrimSpace(*name))
 }

@@ -155,17 +155,27 @@ func startLocalService(role string) error {
 
 func stopLocalService(role string) error {
 	role = normalizeRole(role)
+	var browserPID int
 	if resp, err := sendLocalCommand(commandRequest{Command: "status", Role: role}); err == nil {
-		if resp.BrowserPID > 0 {
-			_ = killPID(resp.BrowserPID)
+		browserPID = resp.BrowserPID
+		if _, shutdownErr := sendLocalCommand(commandRequest{Command: "shutdown", Role: role, TimeoutMS: 6000}); shutdownErr != nil {
+			logs.Warn("chrome src_v3 local shutdown request failed for role=%s; falling back to forced stop: %v", role, shutdownErr)
 		}
 	}
 	pidPath := localServicePIDPath(role)
 	pid, err := readPIDFile(pidPath)
-	if err != nil {
-		return nil
+	if err == nil {
+		_ = waitForPIDExit(pid, 3*time.Second)
+		if processAlive(pid) {
+			_ = killPID(pid)
+		}
 	}
-	_ = killPID(pid)
+	if browserPID > 0 {
+		_ = waitForPIDExit(browserPID, 3*time.Second)
+		if processAlive(browserPID) {
+			_ = killPID(browserPID)
+		}
+	}
 	_ = os.Remove(pidPath)
 	return nil
 }

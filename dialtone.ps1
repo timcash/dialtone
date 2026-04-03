@@ -58,6 +58,72 @@ function Convert-EnvPathToWsl {
     return ($Path -replace '\\', '/')
 }
 
+function Get-WslPluginSubcommand {
+    param([string[]]$Args)
+    if ($Args.Length -lt 2) { return "" }
+
+    $first = $Args[1].Trim().ToLowerInvariant()
+    if ($first -match '^src_v\d+$') {
+        if ($Args.Length -lt 3) { return "" }
+        return $Args[2].Trim().ToLowerInvariant()
+    }
+
+    if ($Args.Length -ge 3) {
+        $second = $Args[2].Trim().ToLowerInvariant()
+        if ($second -match '^src_v\d+$') {
+            return $first
+        }
+    }
+
+    return $first
+}
+
+function Should-InvokeWslPluginViaShell {
+    if ($ScriptArgs.Length -eq 0 -or $ScriptArgs[0] -ne "wsl") {
+        return $false
+    }
+
+    $subcommand = Get-WslPluginSubcommand -Args $ScriptArgs
+    switch ($subcommand) {
+        { $_ -in @("", "help", "-h", "--help", "list", "ls", "status", "create", "spawn", "start", "stop", "delete", "rm", "exec", "terminal", "open-terminal") } {
+            return $false
+        }
+        default {
+            return $true
+        }
+    }
+}
+
+function Use-WindowsLocalDialtonePaths {
+    if ($ScriptArgs.Length -eq 0 -or $ScriptArgs[0] -ne "wsl") {
+        return
+    }
+    if (Should-InvokeWslPluginViaShell) {
+        return
+    }
+
+    $localHome = Join-Path $env:USERPROFILE ".dialtone"
+    $localEnv = Join-Path $env:USERPROFILE ".dialtone_env"
+
+    if ([string]::IsNullOrWhiteSpace($env:DIALTONE_HOME) -or $env:DIALTONE_HOME.StartsWith("/")) {
+        $env:DIALTONE_HOME = $localHome
+    }
+    if ([string]::IsNullOrWhiteSpace($env:DIALTONE_ENV) -or $env:DIALTONE_ENV.StartsWith("/")) {
+        $env:DIALTONE_ENV = $localEnv
+    }
+    if ([string]::IsNullOrWhiteSpace($env:DIALTONE_REPO_ROOT) -or $env:DIALTONE_REPO_ROOT.StartsWith("/")) {
+        $env:DIALTONE_REPO_ROOT = $ScriptDir
+    }
+    if ([string]::IsNullOrWhiteSpace($env:DIALTONE_GO_CACHE_DIR) -or $env:DIALTONE_GO_CACHE_DIR.StartsWith("/")) {
+        $env:DIALTONE_GO_CACHE_DIR = Join-Path $env:DIALTONE_ENV "cache/go"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:DIALTONE_BUN_CACHE_DIR) -or $env:DIALTONE_BUN_CACHE_DIR.StartsWith("/")) {
+        $env:DIALTONE_BUN_CACHE_DIR = Join-Path $env:DIALTONE_ENV "cache/bun"
+    }
+
+    $env:DIALTONE_SRC_ROOT = Join-Path $ScriptDir "src"
+}
+
 function Invoke-WslPluginViaShell {
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
         throw "WSL is required for dialtone.ps1 wsl ..."
@@ -88,7 +154,7 @@ function Invoke-WslPluginViaShell {
     exit $LASTEXITCODE
 }
 
-if ($ScriptArgs.Length -gt 0 -and $ScriptArgs[0] -eq "wsl") {
+if (Should-InvokeWslPluginViaShell) {
     Invoke-WslPluginViaShell
 }
 
@@ -206,6 +272,7 @@ if (Test-Path $EnvFile) {
         [System.Environment]::SetEnvironmentVariable($_.Name, [string]$_.Value, "Process")
     }
 }
+Use-WindowsLocalDialtonePaths
 
 Enter-NixShellIfNeeded
 
@@ -231,6 +298,7 @@ if ($env:DIALTONE_ENV.StartsWith("~")) {
 
 $env:GOROOT = Join-Path $env:DIALTONE_ENV "go"
 $GoBin = Join-Path $env:GOROOT "bin/go.exe"
+$GoToolCompile = Join-Path $env:GOROOT "pkg/tool/windows_amd64/compile.exe"
 $BunBin = Join-Path $env:DIALTONE_ENV "bun/bin/bun.exe"
 
 # Optional global log mirror: pass --stdout anywhere to mirror logs to stdout
@@ -244,10 +312,11 @@ foreach ($arg in $args) {
 }
 
 # 2. Resolve Go
-if (!(Test-Path $GoBin)) {
+if (!(Test-Path $GoBin) -or !(Test-Path $GoToolCompile)) {
     $goCmd = Get-Command go -ErrorAction SilentlyContinue
     if ($goCmd) {
         $GoBin = $goCmd.Source
+        $env:GOROOT = Split-Path -Parent (Split-Path -Parent $GoBin)
     } else {
         Write-Host "DIALTONE> Go runtime missing and 'go' is not on PATH."
         Write-Host "DIALTONE> Enable Nix mode (DIALTONE_USE_NIX=1) or install managed Go into DIALTONE_ENV."
@@ -256,13 +325,13 @@ if (!(Test-Path $GoBin)) {
 }
 
 # 3. Setup PATH and GOROOT
+$SelectedGoBinDir = Split-Path -Parent $GoBin
 if (Test-Path $BunBin) {
-    $env:PATH = "$(Join-Path $env:DIALTONE_ENV 'go/bin');$(Join-Path $env:DIALTONE_ENV 'bun/bin');$env:PATH"
+    $env:PATH = "$SelectedGoBinDir;$(Join-Path $env:DIALTONE_ENV 'bun/bin');$env:PATH"
     $env:DIALTONE_BUN_BIN = $BunBin
 } else {
-    $managedGoBin = Join-Path $env:DIALTONE_ENV "go/bin"
-    if (Test-Path $managedGoBin) {
-        $env:PATH = "$managedGoBin;$env:PATH"
+    if (Test-Path $SelectedGoBinDir) {
+        $env:PATH = "$SelectedGoBinDir;$env:PATH"
     }
 }
 $env:DIALTONE_GO_BIN = $GoBin
@@ -270,7 +339,16 @@ $env:DIALTONE_GO_BIN = $GoBin
 # 4. Hand over to Go-based orchestrator
 Push-Location -Path $env:DIALTONE_SRC_ROOT
 try {
-    & "$GoBin" run dev.go $PassThruArgs
+    $RunLocalWslPlugin = $PassThruArgs.Count -gt 0 -and $PassThruArgs[0] -eq "wsl" -and -not (Should-InvokeWslPluginViaShell)
+    if ($RunLocalWslPlugin) {
+        $PluginArgs = @()
+        if ($PassThruArgs.Count -gt 1) {
+            $PluginArgs = $PassThruArgs.GetRange(1, $PassThruArgs.Count - 1)
+        }
+        & "$GoBin" run ./plugins/wsl/scaffold/main.go $PluginArgs
+    } else {
+        & "$GoBin" run dev.go $PassThruArgs
+    }
     $code = $LASTEXITCODE
 }
 finally {

@@ -20,7 +20,7 @@ We are currently migrating to `src_v3`, which aligns the plugin with the latest 
 - [ ] **Test Validation:** Complete end-to-end run of the `src_v3` test suite (currently blocked by WSL timeouts).
 - [ ] **Windows Task Scheduler Integration:** Migration of "Daemon" persistence logic natively into Go.
 - [ ] **Advanced Telemetry:** CPU/Memory sparklines are still UI placeholders.
-- [ ] **Terminal Integration:** One-click "Open Terminal" button integration in the new UI.
+- [x] **Terminal Integration:** The table now exposes a one-click desktop terminal launcher that opens an interactive WSL shell with a short usage banner.
 
 ## CLI Commands
 
@@ -32,6 +32,15 @@ Use the `./dialtone.ps1` (Windows) or `./dialtone.sh` (Linux/WSL) wrapper:
 
 # 🏗️ Build: Compile UI assets and Go server
 .\dialtone wsl src_v3 build
+
+# ▶ Start: Keep a distro running from the Windows host side
+.\dialtone.ps1 wsl src_v3 start --name Ubuntu-24.04
+
+# ⏹ Stop: Terminate a distro from the Windows host side
+.\dialtone.ps1 wsl src_v3 stop --name Ubuntu-24.04
+
+# 🖥️ Terminal: Start the distro if needed, open a desktop terminal in the WSL repo, and queue Chrome warmup
+.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04
 
 # 💨 Test: Modernized verification suite
 .\dialtone wsl src_v3 test
@@ -49,6 +58,6 @@ Use the `./dialtone.ps1` (Windows) or `./dialtone.sh` (Linux/WSL) wrapper:
 
 ## Technical Architecture
 
-1. **Orchestration:** Go `os/exec` wraps `wsl.exe`. Output is sanitized (null-byte stripping) for reliable JSON parsing.
+1. **Orchestration:** Go `os/exec` wraps `wsl.exe`, Windows Terminal, and Windows `cmd.exe` fallbacks. The terminal flow now starts the distro, opens the shell in the WSL repo root, and queues the Chrome `legion/dev` service warmup before handing control to the user prompt.
 2. **WebSocket Hub:** A centralized hub broadcasts state changes to all connected UI clients.
 3. **Snappy UI:** The UI uses CSS mandatory scroll-snapping and `IntersectionObserver` to manage section-specific logic (pausing 3D visuals, toggling global chrome).

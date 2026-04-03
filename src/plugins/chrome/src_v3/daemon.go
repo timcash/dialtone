@@ -155,9 +155,11 @@ func (d *daemonState) init() error {
 	return nil
 }
 
-func (d *daemonState) handle(req commandRequest) commandResponse {
+func (d *daemonState) handle(req commandRequest) (resp commandResponse) {
 	logs.Info("chrome src_v3 daemon handle: %s", req.Command)
-	resp := d.baseResponse()
+	// Keep resp as a named return so the deferred refresh below becomes the
+	// actual command reply after browser-side state changes.
+	resp = d.baseResponse()
 	defer func() {
 		command := strings.TrimSpace(req.Command)
 		if resp.OK && command != "close" && command != "shutdown" {
@@ -464,15 +466,41 @@ func (d *daemonState) refreshResponse(resp commandResponse) commandResponse {
 	return resp
 }
 
+func reportedManagedProcessCount(goos string, browserPID int, enumeratedCount int, enumeratedErr error, browserAlive bool) (int, error) {
+	if browserPID <= 0 {
+		return 0, nil
+	}
+	if goos == "windows" {
+		// The Windows daemon owns exactly one managed browser per role. Process
+		// enumeration is still useful to surface duplicates, but it is too racy to
+		// be the primary truth immediately after launch.
+		if enumeratedErr == nil && enumeratedCount > 1 {
+			return enumeratedCount, nil
+		}
+		return 1, nil
+	}
+	if enumeratedErr == nil {
+		if enumeratedCount <= 0 && browserAlive {
+			return 1, nil
+		}
+		return enumeratedCount, nil
+	}
+	if browserAlive {
+		return 1, nil
+	}
+	return 0, enumeratedErr
+}
+
 func (d *daemonState) fillStatus(resp *commandResponse) error {
 	d.mu.Lock()
 	pid := d.browserPID
 	role := d.role
+	chromePort := d.chromePort
 	currentURL := strings.TrimSpace(d.currentURL)
 	managedTarget := strings.TrimSpace(d.managedTarget)
 	consoleLines := append([]string(nil), d.consoleLines...)
 	resp.BrowserPID = pid
-	resp.ChromePort = d.chromePort
+	resp.ChromePort = chromePort
 	resp.NATSPort = d.natsPort
 	resp.CurrentURL = currentURL
 	if managedTarget != "" {
@@ -504,13 +532,14 @@ func (d *daemonState) fillStatus(resp *commandResponse) error {
 		}
 		return nil
 	}
-	if processCount, err := countLocalChromeProcessesQuick(role, 400*time.Millisecond); err == nil {
-		resp.ProcessCount = processCount
-	} else {
-		// Keep routine status replies fast; a slow Windows process enumeration
-		// should not block later browser commands on the shared daemon mutex.
-		resp.ProcessCount = 1
-		logs.Warn("chrome src_v3 unable to refresh process count for role=%s: %v", role, err)
+	browserAlive := false
+	if runtime.GOOS != "windows" {
+		browserAlive = d.isBrowserAlive(pid, chromePort)
+	}
+	processCount, processCountErr := countLocalChromeProcessesQuick(role, 400*time.Millisecond)
+	resp.ProcessCount, processCountErr = reportedManagedProcessCount(runtime.GOOS, pid, processCount, processCountErr, browserAlive)
+	if processCountErr != nil {
+		logs.Warn("chrome src_v3 unable to refresh process count for role=%s: %v", role, processCountErr)
 	}
 
 	// Use cached managed-tab metadata for status snapshots so routine health checks

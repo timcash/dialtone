@@ -13,6 +13,7 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	cdbrowser "github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
 	cdpage "github.com/chromedp/cdproto/page"
 	cdruntime "github.com/chromedp/cdproto/runtime"
@@ -72,6 +73,19 @@ const managedConsoleReadScript = `(() => {
 	}
 	return window.__dialtoneConsoleLines.slice(-200);
 })()`
+
+const (
+	gracefulBrowserCloseCommandTimeout = 2 * time.Second
+	gracefulBrowserExitWaitTimeout     = 4 * time.Second
+)
+
+var (
+	gracefulCloseBrowserFunc  = gracefulCloseBrowser
+	killBrowserPIDFunc        = killPID
+	waitForBrowserPIDExitFunc = waitForPIDExit
+	cleanupProfileLocksFunc   = cleanupChromeProfileLocks
+	persistDaemonStateFunc    = func(d *daemonState) { d.persistState() }
+)
 
 func (d *daemonState) isBrowserAlive(pid int, port int) bool {
 	if pid <= 0 {
@@ -655,16 +669,46 @@ func (d *daemonState) closeTab(index int) error {
 }
 
 func (d *daemonState) closeBrowser() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	logs.Info("chrome src_v3 closing browser intentionally")
+	d.mu.Lock()
+	pid := d.browserPID
+	profileDir := d.profileDir
+	tabCtx := d.tabCtx
+	allocCtx := d.allocCtx
+	cancelAlloc := d.cancelAlloc
+	cancelTab := d.cancelTab
 	d.intentionalStop = true
-	if d.cancelAlloc != nil {
-		d.cancelAlloc()
+	d.unexpectedErr = nil
+	d.mu.Unlock()
+
+	gracefulErr := gracefulCloseBrowserFunc(tabCtx, allocCtx)
+	if pid > 0 {
+		if waitErr := waitForBrowserPIDExitFunc(pid, gracefulBrowserExitWaitTimeout); waitErr == nil {
+			gracefulErr = nil
+		} else {
+			if gracefulErr != nil {
+				logs.Warn("chrome src_v3 Browser.close did not complete for pid=%d: %v", pid, gracefulErr)
+			} else {
+				logs.Warn("chrome src_v3 browser pid=%d still running after graceful close wait: %v", pid, waitErr)
+			}
+			if err := killBrowserPIDFunc(pid); err != nil {
+				logs.Error("chrome src_v3 killPID %d failed: %v", pid, err)
+			}
+		}
 	}
-	if d.cancelTab != nil {
-		d.cancelTab()
+	if cancelTab != nil {
+		cancelTab()
 	}
+	if cancelAlloc != nil {
+		cancelAlloc()
+	}
+	if runtime.GOOS == "windows" {
+		if err := cleanupProfileLocksFunc(profileDir); err != nil {
+			logs.Warn("chrome src_v3 cleanup profile locks failed for %s: %v", profileDir, err)
+		}
+	}
+
+	d.mu.Lock()
 	d.allocCtx = nil
 	d.cancelAlloc = nil
 	d.tabCtx = nil
@@ -672,15 +716,37 @@ func (d *daemonState) closeBrowser() error {
 	d.managedTarget = ""
 	d.browserWS = ""
 	d.currentURL = ""
-	d.unexpectedErr = nil
-	if d.browserPID > 0 {
-		if err := killPID(d.browserPID); err != nil {
-			logs.Error("chrome src_v3 killPID %d failed: %v", d.browserPID, err)
-		}
-	}
+	d.consoleLines = nil
 	d.browserPID = 0
-	d.persistState()
+	d.mu.Unlock()
+
+	persistDaemonStateFunc(d)
 	return nil
+}
+
+func gracefulCloseBrowser(tabCtx, allocCtx context.Context) error {
+	if err := gracefulCloseBrowserContext(tabCtx); err == nil {
+		return nil
+	}
+	if allocCtx == nil {
+		return errBrowserClosed
+	}
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+	return gracefulCloseBrowserContext(ctx)
+}
+
+func gracefulCloseBrowserContext(ctx context.Context) error {
+	if ctx == nil {
+		return errBrowserClosed
+	}
+	chromeCtx := chromedp.FromContext(ctx)
+	if chromeCtx == nil || chromeCtx.Browser == nil {
+		return errBrowserClosed
+	}
+	closeCtx, cancel := context.WithTimeout(ctx, gracefulBrowserCloseCommandTimeout)
+	defer cancel()
+	return cdbrowser.Close().Do(cdp.WithExecutor(closeCtx, chromeCtx.Browser))
 }
 
 func (d *daemonState) resetSession() error {

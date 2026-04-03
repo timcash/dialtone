@@ -1,229 +1,187 @@
-# Plan
+# WSL Terminal + Chrome E2E Plan
 
-This is the current working plan for Dialtone.
+This plan replaces the old broad repo plan with one focused end-to-end test plan for the Windows host, the WSL terminal bootstrap path, and the Chrome `src_v3` daemon warmup flow.
 
-It replaces the old repo-wide plugin sync checklist and the old REPL-only test plan with one shorter root plan that matches the current repo shape.
+## Goal
 
-## Ground Rules
+From Windows, one command should make the developer environment feel ready:
 
-- Treat [README.md](README.md) and [src/plugins/README.md](src/plugins/README.md) as the public contract.
-- Store normal configuration in `env/dialtone.json`.
-- If a one-off override is needed, prefix that single `./dialtone.sh ...` command instead of exporting shell state.
-- Optional behavior belongs on `--flags`, not hidden env vars.
-- Prefer `./dialtone.sh <plugin> <src_vN> <command>` over raw toolchain commands.
-- On Windows, keep WSL-side testing visible through [wsl-tmux.cmd](wsl-tmux.cmd).
+- the target WSL distro is running
+- a real Windows desktop terminal opens
+- that terminal lands inside the WSL Dialtone repo
+- the shell prints a short usage banner
+- the Chrome `src_v3` service for `host=legion role=dev` is being warmed automatically through the README-supported deploy path
+- the user can enter the WSL `dialtone>` REPL and immediately drive Chrome tests through the normal plugin workflow
 
-## Current Status
+## Default Assumptions
 
-These focused paths are currently in decent shape and should stay green while we continue:
+- Windows repo: `C:\Users\timca\dialtone`
+- WSL repo: `/home/user/dialtone`
+- WSL distro: `Ubuntu-24.04`
+- Chrome service host: `legion`
+- Chrome service role: `dev`
 
-- `repl src_v3` focused dispatch test
-- `test src_v1` focused browser-context test
-- `ui src_v1` focused build-and-serve browser test
-- `cad src_v1` focused self-check
-- `cloudflare src_v1` focused preflight
-- `ssh src_v1` focused resolve/transport test
-- `chrome src_v3` focused deploy/start test
-- `robot src_v2` focused UI-table test
+If those change, update the matching config or command flags before rerunning this plan.
 
-The recent alignment work also pushed the core plugins closer to the desired model:
+## Main Entry Commands
 
-- shared config lookups go through `config src_v1`
-- core dev/browser attach behavior is flag-driven instead of env-toggle-driven
-- one-off attach/default-attach flows are more consistent across `test`, `ui`, `cad`, and `robot`
-- shared browser-service communication still goes through REPL/NATS and the `chrome src_v3` daemon
-- `logs`, `ui`, and `ssh` top-level legacy CLI glue now routes through version-owned entrypoints
-- the `robot` scaffold now parses the top-level CLI contract and dispatches into `src/plugins/robot/src_v2`
-- `robot src_v2` entry/dispatch and remote-ops command families now live in separate version-owned files
-- `robot src_v2` diagnostic now verifies the latest release-channel manifest/artifact digests and checks the public UI at `https://rover-1.dialtone.earth`
-- `robot src_v2 publish` is now verified against the real GitHub release path, and the live rover diagnostic correctly fails when autoswap has not converged to the newest manifest yet
-- `repl src_v3 test` is verified through the WSL bootstrap path, and its test runner now prints explicit start/pass lines while still writing `TEST.md` and `TEST_RAW.md`
-- a visible WSL tmux sweep revalidated `logs`, `test`, `ssh`, `repl`, `cloudflare`, `robot`, and `cad`; `cloudflare` needed the public `cloudflare src_v1 install` step first so the UI lint/build toolchain was present
+Windows host lifecycle and terminal bootstrap:
 
-Current Windows/WSL REPL verification status from the latest visible `wsl-tmux.cmd` sweep:
-
-- `chrome src_v3 test-actions -host legion -role test` now passes end-to-end through the REPL/NATS service path, including `set-html`, `type-aria`, `click-aria`, `wait-log`, and screenshot capture
-- the Windows `chrome src_v3` daemon was rebuilt and redeployed from this repo branch, and the matching `src/plugins/chrome/src_v3/*.go` sources were synced into the WSL checkout while testing
-- `cloudflare src_v1 test` now passes end-to-end through the REPL/NATS/Windows-browser path from visible `wsl-tmux.cmd` runs; latest passing task: `task-20260331-152533-000`
-- shared-browser Cloudflare steps were standardized to rely on durable DOM/state assertions (`data-selected-cube`, `data-ready`, `data-active`, proof-of-life script execution) instead of cached browser-console messages
-- cached browser-console log propagation in shared browser sessions is still weaker than the dedicated `chrome src_v3 test-actions` control-plane/browser-service proof, so console-capture remains covered there rather than as a hard gate inside the Cloudflare suite
-- failed `cloudflare src_v1 test` workers are currently leaving stale `running` task entries / defunct worker processes in the REPL task registry, so task cleanup/reaping is part of the remaining control-plane work
-
-## What To Do Next
-
-### 1. Finish Shared Config And Install-State Work
-
-The next foundation layer should be fully shared instead of plugin-local:
-
-- finalize a dependency ledger shape in `env/dialtone.json`
-- write install receipts under the shared cache root for the remaining core plugins
-- keep tool/runtime paths resolved through `config src_v1`
-- remove plugin-local install side effects where the shared receipt/cache model can replace them
-
-### 2. Remove Remaining Legacy Compatibility Knobs
-
-Some compatibility code still exists to avoid breaking older paths.
-
-Work through these next:
-
-- remove leftover env-only dev/browser compatibility from non-core callers
-- migrate any remaining direct config-bearing `os.Getenv(...)` reads in active or near-active plugins to `config src_v1`
-- keep OS/runtime detection env reads only when they are truly process/host facts rather than repo config
-
-### 3. Keep Thinning Scaffolds
-
-The repo should keep moving toward thin `scaffold/main.go` files and version-owned logic.
-
-Recently completed in this lane:
-
-- `logs` top-level CLI glue
-- `ui` top-level CLI glue
-- `ssh` remaining dispatch glue
-- `robot` scaffold
-
-Next cleanup targets:
-
-- split the remaining `robot src_v2` publish/build family and the diagnostic helpers out of `src/plugins/robot/src_v2/plugin.go`
-- use the stricter `robot src_v2 diagnostic` after publish/rollout work and treat stale-manifest failures as rollout convergence bugs, not as a reason to weaken the diagnostic
-- keep new scaffolds version-first and keep tests routing through `src_vN/test/cmd/main.go`
-- rerun public `./dialtone.sh <plugin> <src_vN> build` and focused `test --filter ...` flows after each split
-
-The target is simple:
-
-- scaffold parses version and high-level command
-- `src_vN` owns the real behavior
-- tests route through `src_vN/test/cmd/main.go`
-
-### 4. Prove The REPL Control Plane More Deeply
-
-The REPL still needs a stronger proof story than "browser flows happen to work".
-
-Priority order:
-
-1. prove queue-vs-foreground dispatch and leader reuse/autostart
-2. build and use `testdaemon` as the generic service fixture
-3. prove task state through NATS KV
-4. prove service desired/observed state through NATS KV
-5. prove heartbeat-driven unhealthy detection and reconcile/restart
-6. prove the same model on remote hosts, especially `legion`
-
-This matters because Chrome, Cloudflare, and robot success should sit on top of a proven control plane, not replace that proof.
-
-Immediate debug follow-up inside this lane:
-
-- keep using `chrome src_v3 test-actions -host legion -role test` as the fast control-plane/browser-service proof while Cloudflare step 04 is being stabilized
-- finish the service-managed console/log handoff between `test src_v1` and the `chrome src_v3` daemon so shared-browser suites can optionally promote cached browser-console messages back into hard assertions without flaking
-- fix REPL task reaping so failed foreground workers do not remain `running` after the worker process is already defunct
-
-### 5. Keep Sweeping Docs And Tests Together
-
-As code changes land:
-
-- remove stale task-worker / room language
-- keep plugin READMEs aligned with actual command flags and defaults
-- keep examples versioned and current
-- rerun focused tmux-visible tests after each substantial change
-- periodically rerun broader suites once focused slices are stable
-
-## Definition Of The Next Milestone
-
-The next milestone is complete when all of these are true:
-
-- core plugin config comes from `env/dialtone.json` by default
-- one-off overrides are documented as prefixed command env vars
-- optional behavior is exposed by flags in the active core plugin flows
-- shared install receipts exist for the core plugin/toolchain paths that still need them
-- the REPL task/service proof surface is moving through `testdaemon` and KV-backed tests rather than ad hoc integration-only checks
-
-## LLM Agent Workflow
-
-### 1. Start From The Repo Contract
-
-Read the root docs first, then work through versioned plugin commands.
-
-```bash
-cd /path/to/dialtone
-sed -n '1,180p' README.md
-sed -n '1,220p' src/plugins/README.md
-./dialtone.sh repl src_v3 help
-./dialtone.sh <plugin> <src_vN> help
+```powershell
+.\dialtone.ps1 wsl src_v3 status
+.\dialtone.ps1 wsl src_v3 stop --name Ubuntu-24.04
+.\dialtone.ps1 wsl src_v3 start --name Ubuntu-24.04
+.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04
 ```
 
-### 2. Use The Standard Plugin Loop
-
-Use the versioned command surface unless there is a documented exception.
+WSL-side Chrome and REPL checks:
 
 ```bash
-./dialtone.sh <plugin> <src_vN> install
-./dialtone.sh <plugin> <src_vN> format
-./dialtone.sh <plugin> <src_vN> lint
-./dialtone.sh <plugin> <src_vN> build
-./dialtone.sh <plugin> <src_vN> test
-./dialtone.sh <plugin> <src_vN> test --filter <expr>
+cd /home/user/dialtone
+./dialtone.sh chrome src_v3 status --host legion --role dev
+./dialtone.sh chrome src_v3 deploy --host legion --role dev --service
+./dialtone.sh
 ```
 
-If you truly need lower-level tool access, route it through Dialtone first:
+## End-To-End Scenarios
+
+### 1. Windows Host Control Works Locally
+
+Run:
+
+```powershell
+.\dialtone.ps1 wsl src_v3 status
+.\dialtone.ps1 wsl src_v3 stop --name Ubuntu-24.04
+.\dialtone.ps1 wsl src_v3 status
+.\dialtone.ps1 wsl src_v3 start --name Ubuntu-24.04
+.\dialtone.ps1 wsl src_v3 status
+```
+
+Expect:
+
+- `status` talks directly to `wsl.exe` from Windows
+- `stop` moves the distro to `Stopped`
+- `start` moves the distro back to `Running`
+- the command path does not depend on first entering the target distro shell
+
+### 2. Terminal Bootstrap Opens A Real Desktop Shell
+
+Run:
+
+```powershell
+.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04
+```
+
+Expect in the new desktop terminal window:
+
+- the window opens even if the distro had been stopped
+- the shell starts inside `/home/user/dialtone`
+- the banner explains:
+  `Run ./dialtone.sh to enter the dialtone> repl.`
+- the shell is interactive and ready for normal Linux commands immediately
+
+### 3. Chrome Warmup Is Triggered Automatically
+
+From the terminal window opened above, or from another WSL shell, run:
 
 ```bash
-./dialtone.sh go src_v1 exec gofmt -w ./plugins/<plugin>/...
-./dialtone.sh bun src_v1 exec --cwd ./plugins/<plugin>/<src_vN>/ui run build
-./dialtone.sh pixi src_v1 version
+cd /home/user/dialtone
+./dialtone.sh chrome src_v3 status --host legion --role dev
 ```
 
-### 3. Keep Normal Config In `env/dialtone.json`
-
-Use `env/dialtone.json` for stable config, and use per-command prefixes only for intentional one-off overrides.
+Also inspect the warmup log when needed:
 
 ```bash
-./dialtone.sh ui src_v1 test --attach legion
-DIALTONE_TEST_BROWSER_NODE=legion ./dialtone.sh test src_v1 test --filter browser-stepcontext-aria-and-console
-CLOUDFLARE_API_TOKEN=... ./dialtone.sh cloudflare src_v1 provision rover --domain dialtone.earth
+tail -n 120 ~/.dialtone/logs/wsl-terminal-chrome-legion-dev.log
 ```
 
-### 4. On Windows, Use `wsl-tmux.cmd`
+Expect:
 
-Do not hide WSL-side test work behind direct `wsl.exe bash -lc ...` commands when [wsl-tmux.cmd](wsl-tmux.cmd) is available.
+- the terminal banner says warmup was queued
+- the warmup path uses the README-supported service command:
+  `./dialtone.sh chrome src_v3 deploy --host legion --role dev --service`
+- after warmup settles, `status` reports a healthy daemon/browser role on `legion`
 
-Use this visible workflow:
+### 4. The WSL REPL Can Reuse The Warmed Chrome Role
+
+Inside the WSL terminal:
+
+```bash
+cd /home/user/dialtone
+./dialtone.sh
+```
+
+Then in the REPL:
+
+```text
+/chrome src_v3 status --host legion --role dev
+/chrome src_v3 goto --host legion --role dev --url about:blank
+/chrome src_v3 get-url --host legion --role dev
+```
+
+Expect:
+
+- `dialtone>` comes up normally
+- the Chrome role is already running or is reused without manual daemon bootstrapping
+- the managed tab commands succeed through the normal REPL + service path
+
+### 5. Visible WSL Test Sweep
+
+Run from Windows with the visible tmux helper:
 
 ```powershell
 .\wsl-tmux.cmd clean-state
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
-.\wsl-tmux.cmd "./dialtone.sh <plugin> <src_vN> format"
-.\wsl-tmux.cmd "./dialtone.sh <plugin> <src_vN> build"
-.\wsl-tmux.cmd "./dialtone.sh <plugin> <src_vN> test --filter <expr>"
+.\wsl-tmux.cmd "./dialtone.sh chrome src_v3 status --host legion --role dev"
+.\wsl-tmux.cmd "./dialtone.sh chrome src_v3 test-actions --host legion --role dev"
 .\wsl-tmux.cmd read
 ```
 
-### 5. When A Command Queues A Task, Follow It Through The REPL
+Expect:
 
-Use the visible tmux session to inspect the task rather than guessing.
+- the visible tmux session shows the same `legion/dev` service state the terminal bootstrap prepared
+- `test-actions` can reuse the warmed browser service instead of creating a disconnected ad hoc session
 
-```powershell
-.\wsl-tmux.cmd "./dialtone.sh <plugin> <src_vN> test --filter <expr>"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 task show --task-id <task-id>"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 120"
-.\wsl-tmux.cmd "./dialtone.sh logs src_v1 stream --topic logs.test.<suite>.>"
-```
+## Failure Checks
 
-### 6. Use A Short, Repeatable Debug Loop
-
-Keep the loop tight and visible.
+If a scenario fails, capture these first:
 
 ```powershell
-.\wsl-tmux.cmd clean-state
-.\wsl-tmux.cmd "./dialtone.sh <plugin> <src_vN> test --filter <focused-step>"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 task show --task-id <task-id>"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 task log --task-id <task-id> --lines 200"
-.\wsl-tmux.cmd "./dialtone.sh <plugin> <src_vN> test --filter <focused-step>"
+.\dialtone.ps1 wsl src_v3 status
 ```
 
-## Short Reminder
+```bash
+cd /home/user/dialtone
+./dialtone.sh chrome src_v3 status --host legion --role dev
+./dialtone.sh chrome src_v3 logs --host legion
+./dialtone.sh chrome src_v3 doctor --host legion
+tail -n 120 ~/.dialtone/logs/wsl-terminal-chrome-legion-dev.log
+```
 
-When in doubt:
+## Acceptance Criteria
 
-- use versioned commands
-- use flags for optional behavior
-- keep stable config in `env/dialtone.json`
-- keep WSL-side work visible with `wsl-tmux.cmd`
-- verify changes with focused tests before expanding scope
+This feature set is done when all of these are true in the same branch:
+
+- `.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04` starts the distro if needed
+- that command opens a real desktop terminal into the WSL repo root
+- the banner tells the user how to enter the REPL
+- Chrome warmup for `legion/dev` is queued automatically from the terminal bootstrap
+- the WSL REPL can immediately drive `chrome src_v3` against that warmed role
+- the focused Go tests for the WSL plugin keep passing
+
+## Focused Verification Commands
+
+Go package verification:
+
+```powershell
+cd C:\Users\timca\dialtone\src
+& 'C:\Program Files\Go\bin\go.exe' test ./plugins/wsl/src_v3/go ./plugins/wsl/scaffold
+```
+
+Manual host verification:
+
+```powershell
+cd C:\Users\timca\dialtone
+.\dialtone.ps1 wsl src_v3 stop --name Ubuntu-24.04
+.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04
+.\dialtone.ps1 wsl src_v3 status
+```

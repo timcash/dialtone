@@ -238,10 +238,36 @@ func (p *WslPlugin) Start() error {
 		w.WriteHeader(http.StatusAccepted)
 	})
 
+	mux.HandleFunc("/api/start", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		go func() {
+			if err := StartInstance(name); err != nil {
+				log.Printf("[WSL] start failed for %s: %v", name, err)
+			}
+		}()
+		w.WriteHeader(http.StatusAccepted)
+	})
+
 	mux.HandleFunc("/api/delete", func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		go p.deleteInstance(name)
 		w.WriteHeader(http.StatusAccepted)
+	})
+
+	mux.HandleFunc("/api/open-terminal", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		if err := OpenTerminal(name); err != nil {
+			log.Printf("[WSL] open terminal failed for %s: %v", name, err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "launched",
+			"message": "Desktop terminal opened for " + strings.TrimSpace(name),
+		})
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

@@ -292,6 +292,25 @@ func killPID(pid int) error {
 	return exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
 }
 
+func waitForPIDExit(pid int, timeout time.Duration) error {
+	if pid <= 0 {
+		return nil
+	}
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if !processAlive(pid) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("process %d still running after %v", pid, timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func normalizeURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
