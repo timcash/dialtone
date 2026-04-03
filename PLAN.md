@@ -130,10 +130,10 @@ Expect:
 Run from Windows with the visible tmux helper:
 
 ```powershell
-.\wsl-tmux.cmd clean-state
-.\wsl-tmux.cmd "./dialtone.sh chrome src_v3 status --host legion --role dev"
-.\wsl-tmux.cmd "./dialtone.sh chrome src_v3 test-actions --host legion --role dev"
-.\wsl-tmux.cmd read
+.\dialtone.ps1 tmux clean-state
+.\dialtone.ps1 tmux "./dialtone.sh chrome src_v3 status --host legion --role dev"
+.\dialtone.ps1 tmux "./dialtone.sh chrome src_v3 test-actions --host legion --role dev"
+.\dialtone.ps1 tmux read
 ```
 
 Expect:

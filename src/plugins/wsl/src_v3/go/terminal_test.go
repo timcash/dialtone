@@ -14,21 +14,34 @@ func TestTerminalWindowTitle(t *testing.T) {
 
 func TestTerminalBootstrapScript(t *testing.T) {
 	got := terminalBootstrapScriptWithConfig("Ubuntu-24.04", terminalBootstrapConfig{
-		RepoRoot:   "/home/user/dialtone",
-		ChromeHost: "legion",
-		ChromeRole: "dev",
+		RepoRoot:      "/home/user/dialtone",
+		ChromeHost:    "legion",
+		ChromeRole:    "dev",
+		ChromeEnabled: true,
+		TerminalTMUX:  "dialtone",
+		CADEnabled:    true,
+		CADTMUX:       "dialtone-cad",
+		CADPort:       8081,
 	})
 	wantParts := []string{
 		"Dialtone WSL terminal",
 		"Repo: %s",
+		"Distro: %s",
+		"CAD session: %s (http://127.0.0.1:%s)",
 		"Run ./dialtone.sh to enter the dialtone> repl.",
 		"Type exit to close this terminal.",
+		"CAD stays alive in a dedicated tmux session",
+		"curl -fsS http://127.0.0.1:8081/health",
+		"tmux attach -t %s",
+		"cad_session='dialtone-cad'",
+		"cad_port=8081",
 		"chrome_host='legion'",
 		"chrome_role='dev'",
-		"./dialtone.sh chrome src_v3 deploy --host",
-		"--service",
-		"Chrome warmup queued on",
-		"exec bash -li",
+		"Chrome warmup target: %s role=%s",
+		"Chrome warmup log: %s",
+		"CAD warmup started in tmux session",
+		"Terminal is ready in the repo root.",
+		"dialtone.ps1 tmux status -Session %s -Distro %s -Cwd %s",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(got, part) {
@@ -48,5 +61,39 @@ func TestTerminalChromeWarmupLogName(t *testing.T) {
 	got := terminalChromeWarmupLogName("Legion Host", "dev/role")
 	if got != "wsl-terminal-chrome-legion-host-dev-role.log" {
 		t.Fatalf("unexpected warmup log name: %q", got)
+	}
+}
+
+func TestTerminalChromeWarmupStampName(t *testing.T) {
+	got := terminalChromeWarmupStampName("Legion Host", "dev/role")
+	if got != "wsl-terminal-chrome-legion-host-dev-role.stamp" {
+		t.Fatalf("unexpected warmup stamp name: %q", got)
+	}
+}
+
+func TestTerminalChromeWarmupScript(t *testing.T) {
+	got := terminalChromeWarmupScript(terminalBootstrapConfig{
+		RepoRoot:   "/home/user/dialtone",
+		ChromeHost: "legion",
+		ChromeRole: "dev",
+	})
+	wantParts := []string{
+		"wsl-terminal-chrome-legion-dev.log",
+		"wsl-terminal-chrome-legion-dev.stamp",
+		"./dialtone.sh chrome src_v3 deploy --host",
+		"--service",
+		"cd '/home/user/dialtone'",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(got, part) {
+			t.Fatalf("warmup script missing %q: %s", part, got)
+		}
+	}
+}
+
+func TestWindowsPathToWSLPath(t *testing.T) {
+	got := windowsPathToWSLPath(`C:\Users\timca\dialtone`)
+	if got != "/mnt/c/Users/timca/dialtone" {
+		t.Fatalf("unexpected WSL path: %q", got)
 	}
 }

@@ -250,9 +250,9 @@ Recommended pattern:
 Example:
 
 ```powershell
-wsl-tmux clean-state
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev"
-wsl-tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 test --host legion --role dev"
+.\dialtone.ps1 tmux clean-state
+.\dialtone.ps1 tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 status --host legion --role dev"
+.\dialtone.ps1 tmux "cd /home/user/dialtone && ./dialtone.sh chrome src_v3 test --host legion --role dev"
 ```
 
 If you explicitly need the manual Windows helper path:

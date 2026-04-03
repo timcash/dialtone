@@ -58,6 +58,324 @@ function Convert-EnvPathToWsl {
     return ($Path -replace '\\', '/')
 }
 
+function Get-ArrayTail {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Values,
+        [Parameter(Mandatory = $true)][int]$StartIndex
+    )
+
+    if ($StartIndex -ge $Values.Count) {
+        return ,@()
+    }
+    $tail = @($Values[$StartIndex..($Values.Count - 1)])
+    return ,$tail
+}
+
+function Get-DialtoneTmuxInvocationArgs {
+    if ($ScriptArgs.Length -eq 0) {
+        return $null
+    }
+
+    $first = $ScriptArgs[0].Trim().ToLowerInvariant()
+    if ($first -eq "tmux") {
+        return ,(Get-ArrayTail -Values $ScriptArgs -StartIndex 1)
+    }
+
+    if ($first -ne "wsl" -or $ScriptArgs.Length -lt 2) {
+        return $null
+    }
+
+    $second = $ScriptArgs[1].Trim().ToLowerInvariant()
+    if ($second -match '^src_v\d+$') {
+        if ($ScriptArgs.Length -ge 3 -and $ScriptArgs[2].Trim().ToLowerInvariant() -eq "tmux") {
+            return ,(Get-ArrayTail -Values $ScriptArgs -StartIndex 3)
+        }
+        return $null
+    }
+
+    if ($second -eq "tmux") {
+        return ,(Get-ArrayTail -Values $ScriptArgs -StartIndex 2)
+    }
+
+    return $null
+}
+
+function ConvertTo-BashSingleQuoted {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    return $Value.Replace("'", "'""'""'")
+}
+
+function Get-DefaultWslTmuxCwd {
+    if (Test-Path -LiteralPath $EnvFile) {
+        try {
+            $config = Get-Content -LiteralPath $EnvFile -Raw | ConvertFrom-Json
+            $repoRoot = [string]$config.DIALTONE_REPO_ROOT
+            if (-not [string]::IsNullOrWhiteSpace($repoRoot)) {
+                return (Convert-ToWslPath -Path $repoRoot)
+            }
+        }
+        catch {
+        }
+    }
+    return "/home/user/dialtone"
+}
+
+function Invoke-DialtoneTmuxBash {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Script,
+        [string]$Distro = ""
+    )
+
+    $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("dialtone-tmux-" + [guid]::NewGuid().ToString("N") + ".sh")
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tempFile, $Script, $utf8NoBom)
+
+    $root = [System.IO.Path]::GetPathRoot($tempFile).TrimEnd('\').TrimEnd(':').ToLowerInvariant()
+    $relative = $tempFile.Substring(3).Replace('\', '/')
+    $linuxPath = "/mnt/$root/$relative"
+
+    $wslArgs = @()
+    if (-not [string]::IsNullOrWhiteSpace($Distro)) {
+        $wslArgs += "-d"
+        $wslArgs += $Distro
+    }
+    $wslArgs += "bash"
+    $wslArgs += $linuxPath
+
+    try {
+        & wsl.exe @wslArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "wsl command failed with exit code $LASTEXITCODE"
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-DialtoneTmux {
+    $tmuxArgs = Get-DialtoneTmuxInvocationArgs
+    if ($null -eq $tmuxArgs) {
+        return
+    }
+
+    $script:DialtoneTmuxHandled = $true
+
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+        throw "WSL is required for dialtone.ps1 tmux ..."
+    }
+
+    $Action = ""
+    $Session = "windows"
+    $Distro = ""
+    $Cwd = ""
+    $Lines = 120
+    $Width = 120
+    $Height = 40
+    $WaitMs = 500
+    $CommandArgs = New-Object System.Collections.Generic.List[string]
+
+    for ($i = 0; $i -lt $tmuxArgs.Count; $i++) {
+        $arg = [string]$tmuxArgs[$i]
+        switch ($arg) {
+            "-Session" {
+                $i++
+                if ($i -ge $tmuxArgs.Count) { throw "-Session requires a value" }
+                $Session = [string]$tmuxArgs[$i]
+                continue
+            }
+            "-Distro" {
+                $i++
+                if ($i -ge $tmuxArgs.Count) { throw "-Distro requires a value" }
+                $Distro = [string]$tmuxArgs[$i]
+                continue
+            }
+            "-Cwd" {
+                $i++
+                if ($i -ge $tmuxArgs.Count) { throw "-Cwd requires a value" }
+                $Cwd = [string]$tmuxArgs[$i]
+                continue
+            }
+            "-Lines" {
+                $i++
+                if ($i -ge $tmuxArgs.Count) { throw "-Lines requires a value" }
+                $Lines = [int]$tmuxArgs[$i]
+                continue
+            }
+            "-Width" {
+                $i++
+                if ($i -ge $tmuxArgs.Count) { throw "-Width requires a value" }
+                $Width = [int]$tmuxArgs[$i]
+                continue
+            }
+            "-Height" {
+                $i++
+                if ($i -ge $tmuxArgs.Count) { throw "-Height requires a value" }
+                $Height = [int]$tmuxArgs[$i]
+                continue
+            }
+            "-WaitMs" {
+                $i++
+                if ($i -ge $tmuxArgs.Count) { throw "-WaitMs requires a value" }
+                $WaitMs = [int]$tmuxArgs[$i]
+                continue
+            }
+            "--" {
+                $remaining = Get-ArrayTail -Values $tmuxArgs -StartIndex ($i + 1)
+                foreach ($remainingArg in $remaining) {
+                    $CommandArgs.Add([string]$remainingArg)
+                }
+                $i = $tmuxArgs.Count
+                continue
+            }
+            default {
+                if ([string]::IsNullOrWhiteSpace($Action)) {
+                    $Action = $arg
+                } else {
+                    $CommandArgs.Add($arg)
+                }
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Cwd)) {
+        $Cwd = Get-DefaultWslTmuxCwd
+    }
+
+    $knownActions = @("help", "ensure", "send", "read", "clear", "interrupt", "list", "status", "clean-state")
+    if ([string]::IsNullOrWhiteSpace($Action)) {
+        if ($CommandArgs.Count -gt 0) {
+            $Action = "send"
+        } else {
+            $Action = "read"
+        }
+    } elseif ($knownActions -notcontains $Action) {
+        $CommandArgs.Insert(0, $Action)
+        $Action = "send"
+    }
+
+    function Ensure-DialtoneTmuxSession {
+        $safeSession = ConvertTo-BashSingleQuoted $Session
+        $safeCwd = ConvertTo-BashSingleQuoted $Cwd
+        Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+if ! tmux has-session -t '$safeSession' 2>/dev/null; then
+  tmux new-session -d -s '$safeSession' -c '$safeCwd' -x $Width -y $Height
+fi
+"@
+    }
+
+    switch ($Action) {
+        "help" {
+            @"
+Usage:
+  .\dialtone.ps1 tmux [command...]
+  .\dialtone.ps1 tmux help
+  .\dialtone.ps1 tmux read
+  .\dialtone.ps1 tmux clear
+  .\dialtone.ps1 tmux clean-state
+  .\dialtone.ps1 tmux interrupt
+  .\dialtone.ps1 tmux ensure
+  .\dialtone.ps1 tmux list
+  .\dialtone.ps1 tmux status
+
+Aliases:
+  .\dialtone.ps1 wsl tmux ...
+  .\dialtone.ps1 wsl src_v3 tmux ...
+
+Defaults:
+  Session: $Session
+  Cwd:     $Cwd
+
+Behavior:
+  - No arguments reads the current pane.
+  - An unknown first argument is treated as a command to send.
+  - send clears the current shell input line before typing the command.
+  - interrupt sends Ctrl-C without killing the tmux session.
+"@ | Write-Output
+        }
+        "ensure" {
+            Ensure-DialtoneTmuxSession
+        }
+        "list" {
+            Invoke-DialtoneTmuxBash -Distro $Distro -Script "tmux list-sessions"
+        }
+        "status" {
+            Ensure-DialtoneTmuxSession
+            $safeSession = ConvertTo-BashSingleQuoted $Session
+            Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+tmux has-session -t '$safeSession' 2>/dev/null
+tmux display-message -p -t '$safeSession' 'session=#{session_name} window=#{window_index}:#{window_name} pane=#{pane_index} cwd=#{pane_current_path} pid=#{pane_pid}'
+tmux capture-pane -pt '$safeSession' -S -20
+"@
+        }
+        "read" {
+            Ensure-DialtoneTmuxSession
+            $safeSession = ConvertTo-BashSingleQuoted $Session
+            Invoke-DialtoneTmuxBash -Distro $Distro -Script "tmux capture-pane -pt '$safeSession' -S -$Lines"
+        }
+        "clear" {
+            Ensure-DialtoneTmuxSession
+            $safeSession = ConvertTo-BashSingleQuoted $Session
+            Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+tmux send-keys -t '$safeSession' C-l
+sleep $(('{0:N3}' -f ($WaitMs / 1000)).Replace(',', ''))
+tmux capture-pane -pt '$safeSession' -S -$Lines
+"@
+        }
+        "clean-state" {
+            Ensure-DialtoneTmuxSession
+            $safeSession = ConvertTo-BashSingleQuoted $Session
+            Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+tmux send-keys -t '$safeSession' C-c
+tmux send-keys -t '$safeSession' C-u
+tmux send-keys -t '$safeSession' C-l
+tmux clear-history -t '$safeSession'
+sleep $(('{0:N3}' -f ($WaitMs / 1000)).Replace(',', ''))
+tmux capture-pane -pt '$safeSession' -S -$Lines
+"@
+        }
+        "interrupt" {
+            Ensure-DialtoneTmuxSession
+            $safeSession = ConvertTo-BashSingleQuoted $Session
+            Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+tmux send-keys -t '$safeSession' C-c
+sleep $(('{0:N3}' -f ($WaitMs / 1000)).Replace(',', ''))
+tmux capture-pane -pt '$safeSession' -S -$Lines
+"@
+        }
+        "send" {
+            if ($CommandArgs.Count -eq 0) {
+                throw "send requires a command string"
+            }
+
+            Ensure-DialtoneTmuxSession
+            $safeSession = ConvertTo-BashSingleQuoted $Session
+            $commandText = ($CommandArgs -join " ").Trim()
+            $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($commandText))
+            Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+cmd_b64='$encodedCommand'
+cmd_text=`$(printf '%s' "`$cmd_b64" | base64 -d)
+tmux send-keys -t '$safeSession' C-u
+tmux send-keys -l -t '$safeSession' "`$cmd_text"
+tmux send-keys -t '$safeSession' Enter
+sleep $(('{0:N3}' -f ($WaitMs / 1000)).Replace(',', ''))
+tmux capture-pane -pt '$safeSession' -S -$Lines
+"@
+        }
+    }
+
+}
+
+Invoke-DialtoneTmux
+if ($script:DialtoneTmuxHandled) {
+    exit $LASTEXITCODE
+}
+
 function Get-WslPluginSubcommand {
     param([string[]]$Args)
     if ($Args.Length -lt 2) { return "" }

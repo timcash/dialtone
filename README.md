@@ -449,16 +449,16 @@ Use the WSL repo for:
 - Linux runtime validation
 - tmux-visible command execution
 
-If you are on Windows, you must use [wsl-tmux.cmd](wsl-tmux.cmd) so WSL REPL and test commands run inside the visible tmux session:
+If you are on Windows, use [`dialtone.ps1`](dialtone.ps1) `tmux` so WSL REPL and test commands run inside the visible tmux session:
 
 ```powershell
-.\wsl-tmux.cmd help
-.\wsl-tmux.cmd status
-.\wsl-tmux.cmd clean-state
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter shell-routed-command-autostarts-leader-when-missing"
-.\wsl-tmux.cmd read
-.\wsl-tmux.cmd interrupt
+.\dialtone.ps1 tmux help
+.\dialtone.ps1 tmux status
+.\dialtone.ps1 tmux clean-state
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 process-clean"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 test --filter shell-routed-command-autostarts-leader-when-missing"
+.\dialtone.ps1 tmux read
+.\dialtone.ps1 tmux interrupt
 ```
 
 For Windows-side distro lifecycle control, keep those commands local to the host:
@@ -478,16 +478,16 @@ The `terminal` command is now the quickest "ready to work" path on Windows:
 
 Preferred tmux rhythm:
 
-1. send one command with `.\wsl-tmux.cmd "..."`
-2. call `.\wsl-tmux.cmd read` until you see the prompt again
+1. send one command with `.\dialtone.ps1 tmux "..."`
+2. call `.\dialtone.ps1 tmux read` until you see the prompt again
 3. only then send the next command
 
 Important behavior:
 
-- `wsl-tmux.cmd` can queue input if you send a second command before the first one finishes
+- `dialtone.ps1 tmux` can queue input if you send a second command before the first one finishes
 - `clean-state` is the safest way to reset the pane before a new visible sequence
 - `interrupt` is better than piling on another command when the pane is wedged
-- do not run WSL REPL or plugin test commands directly from a Windows shell when `.\wsl-tmux.cmd` is available
+- do not run WSL REPL or plugin test commands directly from a Windows shell when `.\dialtone.ps1 tmux` is available
 
 If the pane gets wedged, recreating the tmux session is fine:
 
@@ -527,18 +527,18 @@ Config rules:
 - use the launch folder's `env/dialtone.json` as the default config source, or pass `--env` to target another env root/file
 - do not create accidental config copies under `src/env/`
 
-If you changed REPL or bootstrap code, restart the long-lived helpers with `.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"` before rerunning focused tests.
+If you changed REPL or bootstrap code, restart the long-lived helpers with `.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 process-clean"` before rerunning focused tests.
 
 Typical WSL test commands:
 
 ```powershell
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 format"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 build"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter task-list-reads-from-kv,task-show-reads-from-kv"
-.\wsl-tmux.cmd "./dialtone.sh testdaemon src_v1 test"
-.\wsl-tmux.cmd read
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 process-clean"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 format"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 build"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 test --filter task-list-reads-from-kv,task-show-reads-from-kv"
+.\dialtone.ps1 tmux "./dialtone.sh testdaemon src_v1 test"
+.\dialtone.ps1 tmux read
 ```
 
 For generic service-control-plane tests, prefer `testdaemon` instead of Chrome:

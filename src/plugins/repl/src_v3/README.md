@@ -468,14 +468,14 @@ If you are editing from Windows but running the real runtime in WSL, keep this s
 - run REPL and plugin tests in `/home/user/dialtone`
 - keep the WSL tmux session `windows` alive and reuse it
 
-If you are on Windows, you must use [wsl-tmux.cmd](/C:/Users/timca/dialtone/wsl-tmux.cmd) so REPL and plugin commands stay visible in the persistent WSL tmux pane:
+If you are on Windows, use [dialtone.ps1](/C:/Users/timca/dialtone/dialtone.ps1) `tmux` so REPL and plugin commands stay visible in the persistent WSL tmux pane:
 
 ```powershell
-.\wsl-tmux.cmd clean-state
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test"
-.\wsl-tmux.cmd read
-.\wsl-tmux.cmd interrupt
+.\dialtone.ps1 tmux clean-state
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 process-clean"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 test"
+.\dialtone.ps1 tmux read
+.\dialtone.ps1 tmux interrupt
 ```
 
 For this repo, trust:
@@ -535,19 +535,19 @@ When working from Windows, prefer this testing pattern:
 
 ```powershell
 # 1. Keep the persistent WSL tmux session alive.
-.\wsl-tmux.cmd clean-state
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 process-clean"
+.\dialtone.ps1 tmux clean-state
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 process-clean"
 
 # 2. Run the full REPL suite visibly in WSL.
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 test"
 
 # 3. If needed, rerun a focused step.
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract"
-.\wsl-tmux.cmd "./dialtone.sh repl src_v3 test --filter task-list-reads-from-kv,task-show-reads-from-kv"
-.\wsl-tmux.cmd "./dialtone.sh testdaemon src_v1 test"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 test --filter interactive-command-index-lifecycle-contract"
+.\dialtone.ps1 tmux "./dialtone.sh repl src_v3 test --filter task-list-reads-from-kv,task-show-reads-from-kv"
+.\dialtone.ps1 tmux "./dialtone.sh testdaemon src_v1 test"
 
 # 4. Inspect the generated report files in the WSL repo.
-.\wsl-tmux.cmd "sed -n '1,80p' src/plugins/repl/src_v3/TEST.md"
+.\dialtone.ps1 tmux "sed -n '1,80p' src/plugins/repl/src_v3/TEST.md"
 ```
 
 For Chrome/CAD/UI debugging, use this pattern:
