@@ -1,0 +1,51 @@
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Dialtone logo</title>
+  <desc id="desc">A dark terminal-style banner with a dial, waveform, and Dialtone wordmark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="48" y1="36" x2="1152" y2="284" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101926"/>
+      <stop offset="1" stop-color="#16273B"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="140" y1="110" x2="438" y2="214" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5EEAD4"/>
+      <stop offset="0.55" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#5EEAD4"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="18" y="18" width="1164" height="284" rx="34" fill="url(#bg)"/>
+  <rect x="18" y="18" width="1164" height="284" rx="34" stroke="#31445F" stroke-width="2"/>
+
+  <g opacity="0.28">
+    <path d="M72 92H1128" stroke="#31445F" stroke-width="1"/>
+    <path d="M72 160H1128" stroke="#31445F" stroke-width="1"/>
+    <path d="M72 228H1128" stroke="#31445F" stroke-width="1"/>
+    <path d="M258 60V260" stroke="#31445F" stroke-width="1"/>
+    <path d="M398 60V260" stroke="#31445F" stroke-width="1"/>
+  </g>
+
+  <g transform="translate(78 56)">
+    <circle cx="112" cy="104" r="92" fill="#0B1220" stroke="#38516E" stroke-width="2"/>
+    <circle cx="112" cy="104" r="68" fill="none" stroke="#223247" stroke-width="18"/>
+    <circle cx="112" cy="104" r="68" fill="none" stroke="url(#accent)" stroke-width="10" stroke-linecap="round" stroke-dasharray="248 180"/>
+    <circle cx="112" cy="104" r="12" fill="#F8FAFC"/>
+    <path d="M112 104L155 65" stroke="#F8FAFC" stroke-width="8" stroke-linecap="round"/>
+    <path d="M26 144H70L90 116L112 192L140 82L162 144H226" stroke="url(#signal)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M42 46L75 70L42 94" stroke="#F8FAFC" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(420 82)">
+    <rect x="0" y="0" width="110" height="34" rx="17" fill="#0D1725" stroke="#38516E"/>
+    <circle cx="22" cy="17" r="4.5" fill="#F87171"/>
+    <circle cx="40" cy="17" r="4.5" fill="#FBBF24"/>
+    <circle cx="58" cy="17" r="4.5" fill="#34D399"/>
+    <text x="92" y="22" text-anchor="end" fill="#94A3B8" font-family="'IBM Plex Mono', 'Cascadia Code', monospace" font-size="14">dialtone&gt;</text>
+
+    <text x="0" y="102" fill="#F8FAFC" font-family="'Avenir Next', 'Segoe UI', sans-serif" font-size="78" font-weight="700" letter-spacing="8">DIALTONE</text>
+    <text x="0" y="148" fill="#9FB2C8" font-family="'IBM Plex Sans', 'Segoe UI', sans-serif" font-size="26" letter-spacing="1.6">task-first CLI control plane for plugins, services, and remote ops</text>
+  </g>
+</svg>

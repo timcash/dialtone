@@ -82,6 +82,20 @@ src/plugins/**/metadata.json
 src/plugins/swarm/app/node_modules
 src/plugins/swarm/test/node_modules
 
+# Generated test reports and test artifacts
+**/TEST.md
+**/TEST_RAW.md
+**/ERROR.md
+**/ERRORS.md
+**/test/screenshots/
+**/screenshots/auto_*.png
+**/screenshots/manual_debug*.png
+**/screenshots/test*.png
+**/screenshots/timeout_*.png
+**/screenshots/*smoke*.png
+**/smoke_step_*.png
+**/diagnostic_screenshots/*.png
+
 #ai
 .claude
 .vercel

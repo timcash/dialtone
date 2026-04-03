@@ -1,3 +1,5 @@
+![Dialtone logo](docs/dialtone-logo.svg)
+
 # Dialtone
 
 Dialtone is a task-first CLI and REPL runtime for plugin work, remote process control, and long-lived services.
