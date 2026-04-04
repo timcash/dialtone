@@ -274,14 +274,13 @@ func EnsureAttachableBrowser(opts DevOptions, logf func(string, ...any), url str
 	if host == "" {
 		return fmt.Errorf("browser service host is required; set --attach and start chrome src_v3 on that host")
 	}
-	resp, err := chrome.SendCommandByHost(host, chrome.CommandRequest{
-		Command: "status",
-		Role:    strings.TrimSpace(opts.Role),
-	})
-	if err == nil && resp != nil && resp.BrowserPID > 0 && !resp.Unhealthy {
+	if _, err := chrome.EnsureManagedPageByTarget(host, strings.TrimSpace(opts.Role)); err != nil {
+		return err
+	}
+	if strings.TrimSpace(url) == "" {
 		return nil
 	}
-	_, err = chrome.SendCommandByHost(host, chrome.CommandRequest{
+	_, err := chrome.SendManagedCommandByTarget(host, chrome.CommandRequest{
 		Command: "open",
 		Role:    strings.TrimSpace(opts.Role),
 		URL:     strings.TrimSpace(url),

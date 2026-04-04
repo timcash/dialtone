@@ -1,122 +1,207 @@
 # Plugin Guide
 
-This file is the short, LLM-first contract for working in `src/plugins`.
+This directory contains Dialtone plugins.
 
-The canonical user-facing workflow now lives in the root [README.md](/C:/Users/timca/dialtone/README.md), especially the `Working With Plugins` and REPL sections. This file should stay short and mirror that command shape.
+The goal is not just "a command that works." A good plugin should match the same shape as the core plugins, compose the shared infrastructure, and feel natural from both `dialtone.sh` and the REPL.
 
-## Generic Shell Workflow
-```bash
-./dialtone.sh <plugin-name> <src_vN> <command> [args] [--flags]
-./dialtone.sh <plugin-name> <src_vN> install
-./dialtone.sh <plugin-name> <src_vN> format
-./dialtone.sh <plugin-name> <src_vN> lint
-./dialtone.sh <plugin-name> <src_vN> build
-./dialtone.sh <plugin-name> <src_vN> test --filter <expr>
-```
+## The Core Reference Set
 
-```bash
-/plugin-name src_vN install
-/plugin-name src_vN format
-/plugin-name src_vN lint
-/plugin-name src_vN build
-/plugin-name src_vN test --filter <expr>
-```
+These plugins define the patterns new plugins should copy:
 
-Important behavior learned from active plugin work:
-- Scaffold `test` commands must forward extra CLI args to the real `src_vN/test/cmd/main.go` runner. If they do not, `--filter` and attach flags silently do nothing.
-- Headed remote-browser plugins should prefer `chrome src_v3`, not `chrome src_v1`.
-- For WSL-driven headed UI work, the stable pattern is usually: local server on WSL, remote Chrome on `legion`, backend/service on a third host if needed.
-- Remote browser tests should prefer one long-lived managed tab and reuse it across steps. Create a new tab only for recovery.
-- Shared config belongs in `env/dialtone.json`; if a temporary env override is unavoidable, prefix the one `./dialtone.sh ...` command instead of relying on exported shell state.
-- Optional behavior should be controlled by `--flags`, not optional env vars.
+| Plugin | What it teaches |
+| --- | --- |
+| [`repl src_v3`](repl/src_v3/README.md) | Task-first control plane, services, task logs, NATS-backed state |
+| [`logs src_v1`](logs/src_v1/README.md) | Structured logging over NATS |
+| [`test src_v1`](test/src_v1/README.md) | Shared suite runner, StepContext, `TEST.md` generation |
+| [`chrome src_v3`](chrome/src_v3/README.md) | Service-backed browser automation and remote Windows browser control |
+| [`ui src_v1`](ui/src_v1/README.md) | Shared UI shell, templates, and fixture browser tests |
+| [`ssh src_v1`](ssh/src_v1/README.md) | Mesh host resolution, remote execution, and code sync |
+| [`cad src_v1`](cad/src_v1/README.md) | Small full-stack reference plugin |
+| [`robot src_v2`](robot/src_v2/README.md) | Large integrated reference plugin |
 
-## Core Plugins
-- `logs`: [src/plugins/logs/src_v1/README.md](/home/user/dialtone/src/plugins/logs/src_v1/README.md)
-- `test`: [src/plugins/test/src_v1/README.md](/home/user/dialtone/src/plugins/test/src_v1/README.md)
-- `chrome`: [src/plugins/chrome/src_v3/README.md](/home/user/dialtone/src/plugins/chrome/src_v3/README.md)
-- `ssh`: [src/plugins/ssh/src_v1/README.md](/home/user/dialtone/src/plugins/ssh/src_v1/README.md)
-- `ui`: [src/plugins/ui/src_v1/README.md](/home/user/dialtone/src/plugins/ui/src_v1/README.md)
+Use `cad src_v1` when you want the smallest realistic end-to-end example.
 
-## Core Rules
-1. Use versioned commands: `./dialtone.sh <plugin> src_vN <command> [args]`.
-2. Keep `scaffold/main.go` thin; put real logic in `src_vN`.
-3. Use `config` for runtime/env/path resolution; avoid hardcoded `src/plugins/...` joins.
-4. Use `env/dialtone.json` for runtime configuration.
-5. Use `--flags` for optional behavior; reserve env values for shared config and explicit one-command overrides.
-6. Use `logs` for operational output.
-7. Use `test` for plugin verification with a single `src_vN/test/cmd/main.go` orchestrator.
-8. Use managed toolchains from Dialtone (`go src_v1 ...`, `bun src_v1 ...`), not random system tools.
-9. Define one path resolver per plugin/version (for example `src_vN/go/paths.go`) and reuse it everywhere.
-10. Keep each plugin README aligned with actual CLI/env/test behavior.
-11. Treat each `src_vN` as the source of truth for that version.
-12. If a plugin exposes `test --filter`, verify the scaffold forwards user args into the test runner.
-13. If a plugin uses headed browser tests, document the expected remote browser role and host.
+Use `robot src_v2` when you want the biggest example of how the same patterns scale into a full system.
 
-## Standard Plugin Layout
+## What An Effective Plugin Looks Like
+
+An effective Dialtone plugin has these traits:
+
+1. One public command surface: `./dialtone.sh <plugin> <src_vN> <command>`.
+2. The same command can also be used inside the REPL as `/plugin src_vN <command>`.
+3. `scaffold/main.go` stays thin and delegates to real code in `src_vN`.
+4. Runtime, paths, and env come from `config src_v1` and `env/dialtone.json`.
+5. Logs go through `logs src_v1`, not ad hoc `fmt.Print*`.
+6. Tests go through `test src_v1`, not custom report generators and custom mini frameworks.
+7. Long-lived processes are treated as services through `repl src_v3`.
+8. Browser work reuses `chrome src_v3`.
+9. Remote host work reuses `ssh src_v1`.
+10. UI work starts with `ui src_v1`.
+11. Docs stay aligned with the actual command surface.
+
+## Standard Layout
+
 ```text
 src/plugins/<plugin>/
   README.md
-  scaffold/main.go
+  scaffold/
+    main.go
   src_v1/
+    README.md
     go/
     cmd/
+    ui/
     test/
-      cmd/main.go
-      01_.../suite.go
-      02_.../suite.go
+      cmd/
+        main.go
+      01_.../
+      02_.../
 ```
 
-## Foundation Libraries
-- `logs`: `dialtone/dev/plugins/logs/src_v1/go`
-- `test`: `dialtone/dev/plugins/test/src_v1/go`
-- `config`: `dialtone/dev/plugins/config/src_v1/go`
+Guidelines:
 
-Use `config` presets:
-```go
-rt, _ := configv1.ResolveRuntime("")
-preset := configv1.NewPluginPreset(rt, "robot", "src_v1")
-_ = preset.PluginVersionRoot
-_ = preset.UI
-_ = preset.Test
-```
+- Keep `scaffold/main.go` as a router, not a second implementation.
+- Put the real implementation in `src_vN`.
+- If a plugin has a UI, keep it under `src_vN/ui`.
+- If a plugin has tests, keep one `src_vN/test/cmd/main.go` orchestrator and suite steps under `src_vN/test/<step>/`.
+- Version new behavior with `src_vN`; do not silently mutate old versions into something incompatible.
 
-For detailed runtime/path usage, read:
-- `src/plugins/config/README.md`
+## Command Contract
 
-## NATS Topic Usage
-Default URL: `nats://127.0.0.1:4222`
+The normal public shape is:
 
-### Logging subjects
-- `logs.>`: global log stream
-- `logs.test.<suite>.<step>`: per-step test logs
-- `logs.test.<suite>.browser`: browser console/error logs during tests
-- `logs.test.<suite>.error`: error stream for suite
-- `logs.test.<suite>.status.pass`
-- `logs.test.<suite>.status.fail`
-
-### REPL subjects
-- `repl.<topic>`: shared REPL topic subject
-- Frame types on that subject: `input`, `line`, `probe`, `server`, `heartbeat`, `join`, `left`
-
-### Robot/telemetry subjects
-- `mavlink.>`: MAVLink telemetry
-- `mavlink.stats`: MAVLink health/stats
-- `mavlink.attitude`: orientation data
-- `rover.command`: robot control frames
-- `robot.>`: robot service/runtime state
-- `robot.autoswap.supervisor`: autoswap supervisor snapshot
-- `robot.autoswap.runtime`: autoswap runtime/process snapshot
-
-### Misc coordination subjects
-- `test.subject`: connectivity/smoke checks
-- `ui.>`: mock UI state/telemetry topics
-
-### UI/browser debug subjects
-- `logs.ui.robot`: browser UI logs published back into NATS
-
-## Minimal New Plugin Workflow
 ```bash
-mkdir -p src/plugins/my-plugin/{scaffold,src_v1/go,src_v1/test/cmd,src_v1/test/01_setup}
-./dialtone.sh my-plugin src_v1 help
-./dialtone.sh my-plugin src_v1 test
+./dialtone.sh <plugin> <src_vN> <command> [args] [--flags]
 ```
+
+Most effective plugins expose these commands when they make sense:
+
+```bash
+./dialtone.sh <plugin> <src_vN> help
+./dialtone.sh <plugin> <src_vN> install
+./dialtone.sh <plugin> <src_vN> format
+./dialtone.sh <plugin> <src_vN> lint
+./dialtone.sh <plugin> <src_vN> build
+./dialtone.sh <plugin> <src_vN> test
+./dialtone.sh <plugin> <src_vN> test --filter <expr>
+```
+
+Command rules:
+
+- Use one command per invocation.
+- Use `--flags` for optional behavior.
+- Do not hide core behavior behind ambient shell variables.
+- If the plugin exposes `test --filter`, make sure the scaffold forwards extra CLI args to the real `src_vN/test/cmd/main.go` runner.
+
+## Runtime And Config Contract
+
+Use the config plugin instead of hardcoding paths or relying on the current working directory.
+
+Standard Go pattern:
+
+```go
+rt, err := configv1.ResolveRuntime("")
+if err != nil {
+    return err
+}
+if err := configv1.LoadEnvFile(rt); err != nil {
+    return err
+}
+if err := configv1.ApplyRuntimeEnv(rt); err != nil {
+    return err
+}
+
+preset := configv1.NewPluginPreset(rt, "my-plugin", "src_v1")
+```
+
+Rules:
+
+- `env/dialtone.json` is the shared runtime config source.
+- Do not hardcode `src/plugins/...` path joins everywhere.
+- Do not add plugin-specific `.env` files for normal runtime config.
+- Resolve runtime once, then derive paths from a preset or local path helper.
+
+## Logging, Tasks, And Services
+
+Match the core control-plane model:
+
+- Normal commands are submitted through `dialtone.sh` and become REPL-managed tasks.
+- Long-lived processes should be modeled as services.
+- `dialtone>` output stays short and lifecycle-oriented.
+- Detailed logs belong in task logs, daemon logs, and NATS log streams.
+
+Rules:
+
+- Use `logs src_v1` for operational output.
+- Use `repl src_v3` task and service semantics for long-lived work.
+- Use foreground output only for explicit query or operator commands.
+- If the plugin owns a service, it should expose a clear `service start|stop|status` style lifecycle.
+
+## Browser, UI, And Remote Host Composition
+
+Do not rebuild the same infrastructure in every plugin.
+
+If your plugin needs:
+
+- a browser session: use `chrome src_v3`
+- a UI shell or shared frontend patterns: use `ui src_v1`
+- remote mesh execution or sync: use `ssh src_v1`
+- path and env resolution: use `config src_v1`
+
+Good examples:
+
+- `cad src_v1` uses a small Go service, a UI, and a browser smoke through the shared stack.
+- `robot src_v2` composes browser, UI, remote host execution, artifacts, and REPL tasks at larger scale.
+
+## Test Contract
+
+Use `test src_v1` as the shared harness.
+
+That means:
+
+- one suite orchestrator in `src_vN/test/cmd/main.go`
+- `testv1.NewRegistry()` plus registered steps
+- `StepContext` for logging, waits, browser actions, screenshots, and reports
+- `TEST.md` and `TEST_RAW.md` generated by the shared test layer
+
+Prefer this pattern:
+
+```go
+reg := testv1.NewRegistry()
+mysetup.Register(reg)
+mybrowser.Register(reg)
+return reg.Run(testv1.SuiteOptions{
+    Version:       "my-plugin-src-v1",
+    ReportPath:    "plugins/my-plugin/src_v1/TEST.md",
+    RawReportPath: "plugins/my-plugin/src_v1/TEST_RAW.md",
+    ReportFormat:  "template",
+    ReportRunner:  "test/src_v1",
+    NATSURL:       "nats://127.0.0.1:4222",
+    NATSSubject:   "logs.test.my-plugin-src-v1",
+    AutoStartNATS: true,
+})
+```
+
+## Anti-Patterns
+
+Avoid these:
+
+- using raw `go`, `bun`, `vite`, `ssh`, or browser launch commands as the public plugin workflow
+- launching independent browsers directly from every plugin instead of reusing `chrome src_v3`
+- reimplementing SSH or mesh logic instead of using `ssh src_v1`
+- custom path walkers and `os.Getwd()` repo discovery in many files
+- direct `fmt.Print*` logging for operational output
+- plugin-specific hidden env variables for normal options that should be flags
+- test scaffolds that swallow extra args and break `--filter`
+- giant scaffolds that duplicate the real implementation
+
+## Minimal Checklist For A New Plugin
+
+- Add `scaffold/main.go`.
+- Add `src_vN`.
+- Implement `help`, `install`, `format`, `lint`, `build`, and `test` where meaningful.
+- Resolve runtime through `config src_v1`.
+- Log through `logs src_v1`.
+- Use `test src_v1` for the suite.
+- Reuse `chrome src_v3`, `ui src_v1`, and `ssh src_v1` instead of cloning their jobs.
+- Write a version-specific README that matches the real commands and behavior.

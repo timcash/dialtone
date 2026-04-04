@@ -17,6 +17,8 @@ import (
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
 
+const chromeHostFlagUsage = "Mesh host (optional; defaults to Windows host in WSL, local elsewhere)"
+
 func replIndexInfof(format string, args ...any) {
 	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
 	if msg == "" {
@@ -30,6 +32,7 @@ func replIndexInfof(format string, args ...any) {
 }
 
 func defaultHostLabel(host string) string {
+	host = effectiveChromeTargetHost(host)
 	host = strings.TrimSpace(host)
 	if host == "" {
 		return "local"
@@ -333,16 +336,7 @@ func buildLocalBinary() error {
 }
 
 func defaultChromeTestHost() string {
-	if v := strings.TrimSpace(configv1.LookupEnvString("DIALTONE_CHROME_TEST_HOST")); v != "" {
-		return v
-	}
-	if strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME")) == "" {
-		return ""
-	}
-	if _, err := sshv1.ResolveMeshNode("legion"); err == nil {
-		return "legion"
-	}
-	return ""
+	return defaultChromeTargetHost()
 }
 
 func hasFlag(args []string, name string) bool {
@@ -362,22 +356,23 @@ func hasFlag(args []string, name string) bool {
 
 func handleDeploy(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 deploy", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	service := fs.Bool("service", false, "Start service after deploy")
 	_ = fs.Parse(args)
-	targetHost := defaultHostLabel(*host)
+	target := effectiveChromeTargetHost(strings.TrimSpace(*host))
+	targetHost := defaultHostLabel(target)
 	if *service {
 		replIndexInfof("chrome deploy: syncing binary to %s role=%s and starting service", targetHost, strings.TrimSpace(*role))
 	} else {
 		replIndexInfof("chrome deploy: syncing binary to %s role=%s", targetHost, strings.TrimSpace(*role))
 	}
-	return deployTarget(strings.TrimSpace(*host), strings.TrimSpace(*role), *service)
+	return deployTarget(target, strings.TrimSpace(*role), *service)
 }
 
 func handleService(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 service", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	mode := fs.String("mode", "status", "start|stop|status")
 	role := fs.String("role", defaultRole, "Chrome role")
 	_ = fs.Parse(args)
@@ -390,7 +385,20 @@ func handleService(args []string) error {
 	default:
 		replIndexInfof("chrome service: checking on %s role=%s", targetHost, strings.TrimSpace(*role))
 	}
-	resp, err := serviceTarget(strings.TrimSpace(*host), strings.TrimSpace(*mode), strings.TrimSpace(*role))
+	var (
+		resp *CommandResponse
+		err  error
+	)
+	switch strings.ToLower(strings.TrimSpace(*mode)) {
+	case "start":
+		resp, err = StartServiceByTarget(strings.TrimSpace(*host), strings.TrimSpace(*role))
+	case "stop":
+		err = StopServiceByTarget(strings.TrimSpace(*host), strings.TrimSpace(*role))
+	case "status":
+		resp, err = ServiceStatusByTarget(strings.TrimSpace(*host), strings.TrimSpace(*role))
+	default:
+		err = fmt.Errorf("unsupported service mode: %s", strings.TrimSpace(*mode))
+	}
 	if err != nil {
 		return err
 	}
@@ -402,7 +410,7 @@ func handleService(args []string) error {
 
 func handleInstances(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 instances", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", "", "Chrome role filter")
 	_ = fs.Parse(args)
 	targetHost := defaultHostLabel(*host)
@@ -439,7 +447,7 @@ func handleInstances(args []string) error {
 
 func handleRequestCommand(command string, args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 "+command, flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	rawURL := fs.String("url", "", "URL")
 	index := fs.Int("index", -1, "Tab index")
@@ -456,7 +464,7 @@ func handleRequestCommand(command string, args []string) error {
 	if autoStart {
 		replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
 	}
-	resp, err := sendCommandByTarget(strings.TrimSpace(*host), req, autoStart)
+	resp, err := SendManagedCommandByTarget(strings.TrimSpace(*host), req)
 	if err != nil {
 		return err
 	}
@@ -467,7 +475,7 @@ func handleRequestCommand(command string, args []string) error {
 
 func handleCloseAll(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 close-all", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", "", "Chrome role filter")
 	_ = fs.Parse(args)
 	targetHost := defaultHostLabel(*host)
@@ -540,7 +548,7 @@ func handleSmokeTest(args []string) error {
 
 func handleAriaCommand(command string, args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 "+command, flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	label := fs.String("label", "", "ARIA label")
 	value := fs.String("value", "", "Text to type")
@@ -556,12 +564,12 @@ func handleAriaCommand(command string, args []string) error {
 		replIndexInfof("chrome type: typing into aria-label %q on %s role=%s", strings.TrimSpace(*label), targetHost, strings.TrimSpace(*role))
 	}
 	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
-	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
+	resp, err := SendManagedCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   command,
 		Role:      strings.TrimSpace(*role),
 		AriaLabel: strings.TrimSpace(*label),
 		Value:     *value,
-	}, true)
+	})
 	if err != nil {
 		return err
 	}
@@ -576,7 +584,7 @@ func handleAriaCommand(command string, args []string) error {
 
 func handleAriaWaitCommand(command string, args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 "+command, flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	label := fs.String("label", "", "ARIA label")
 	attr := fs.String("attr", "", "Attribute name")
@@ -603,7 +611,7 @@ func handleAriaWaitCommand(command string, args []string) error {
 		req.Attr = strings.TrimSpace(*attr)
 		req.Expected = *expected
 	}
-	resp, err := sendCommandByTarget(strings.TrimSpace(*host), req, true)
+	resp, err := SendManagedCommandByTarget(strings.TrimSpace(*host), req)
 	if err != nil {
 		return err
 	}
@@ -614,7 +622,7 @@ func handleAriaWaitCommand(command string, args []string) error {
 
 func handleAriaGetAttrCommand(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 get-aria-attr", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	label := fs.String("label", "", "ARIA label")
 	attr := fs.String("attr", "", "Attribute name")
@@ -628,12 +636,12 @@ func handleAriaGetAttrCommand(args []string) error {
 	targetHost := defaultHostLabel(*host)
 	replIndexInfof("chrome inspect: reading aria-label %q attr %q on %s role=%s", strings.TrimSpace(*label), strings.TrimSpace(*attr), targetHost, strings.TrimSpace(*role))
 	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
-	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
+	resp, err := SendManagedCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   "get-aria-attr",
 		Role:      strings.TrimSpace(*role),
 		AriaLabel: strings.TrimSpace(*label),
 		Attr:      strings.TrimSpace(*attr),
-	}, true)
+	})
 	if err != nil {
 		return err
 	}
@@ -647,7 +655,7 @@ func handleAriaGetAttrCommand(args []string) error {
 
 func handleWaitLogCommand(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 wait-log", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	contains := fs.String("contains", "", "Substring to wait for")
 	timeoutMS := fs.Int("timeout-ms", 5000, "Timeout in milliseconds")
@@ -658,12 +666,12 @@ func handleWaitLogCommand(args []string) error {
 	targetHost := defaultHostLabel(*host)
 	replIndexInfof("chrome wait-log: waiting for %q on %s role=%s", strings.TrimSpace(*contains), targetHost, strings.TrimSpace(*role))
 	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
-	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
+	resp, err := SendManagedCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   "wait-log",
 		Role:      strings.TrimSpace(*role),
 		Contains:  strings.TrimSpace(*contains),
 		TimeoutMS: *timeoutMS,
-	}, true)
+	})
 	if err != nil {
 		return err
 	}
@@ -674,18 +682,18 @@ func handleWaitLogCommand(args []string) error {
 
 func handleSetHTMLCommand(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 set-html", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	value := fs.String("value", "", "HTML markup")
 	_ = fs.Parse(args)
 	targetHost := defaultHostLabel(*host)
 	replIndexInfof("chrome html: replacing managed tab DOM on %s role=%s", targetHost, strings.TrimSpace(*role))
 	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
-	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
+	resp, err := SendManagedCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command: "set-html",
 		Role:    strings.TrimSpace(*role),
 		Value:   *value,
-	}, true)
+	})
 	if err != nil {
 		return err
 	}
@@ -696,7 +704,7 @@ func handleSetHTMLCommand(args []string) error {
 
 func handleScreenshotCommand(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 screenshot", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	outPath := fs.String("out", "", "Local PNG output path")
 	_ = fs.Parse(args)
@@ -706,11 +714,11 @@ func handleScreenshotCommand(args []string) error {
 	targetHost := defaultHostLabel(*host)
 	replIndexInfof("chrome screenshot: capturing managed tab on %s role=%s", targetHost, strings.TrimSpace(*role))
 	replIndexInfof("chrome service: ensuring daemon on %s role=%s", targetHost, strings.TrimSpace(*role))
-	resp, err := sendCommandByTarget(strings.TrimSpace(*host), commandRequest{
+	resp, err := SendManagedCommandByTarget(strings.TrimSpace(*host), commandRequest{
 		Command:   "screenshot",
 		Role:      strings.TrimSpace(*role),
 		TimeoutMS: 60000,
-	}, true)
+	})
 	if err != nil {
 		return err
 	}
@@ -729,7 +737,7 @@ func handleScreenshotCommand(args []string) error {
 
 func handleActionSmokeTest(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 test-actions", flag.ExitOnError)
-	host := fs.String("host", defaultChromeTestHost(), "Mesh host (optional; default local)")
+	host := fs.String("host", defaultChromeTestHost(), chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	outPath := fs.String("out", filepath.Join(os.TempDir(), "chrome-src-v3-actions.png"), "Local PNG output path")
 	_ = fs.Parse(args)
@@ -746,7 +754,7 @@ func handleActionSmokeTest(args []string) error {
 		{Command: "screenshot", Role: *role, TimeoutMS: 60000},
 	}
 	for _, step := range steps {
-		resp, err := sendCommandByTarget(strings.TrimSpace(*host), step, true)
+		resp, err := SendManagedCommandByTarget(strings.TrimSpace(*host), step)
 		if err != nil {
 			return fmt.Errorf("%s failed: %w", step.Command, err)
 		}
@@ -791,6 +799,7 @@ func WriteScreenshotByTarget(host string, resp *CommandResponse, outPath string)
 }
 
 func screenshotBytesForTarget(host string, resp *commandResponse) ([]byte, error) {
+	host = effectiveChromeTargetHost(host)
 	if resp == nil {
 		return nil, fmt.Errorf("missing screenshot response")
 	}
@@ -808,7 +817,7 @@ func screenshotBytesForTarget(host string, resp *commandResponse) ([]byte, error
 	if isLocalHost(host) {
 		return os.ReadFile(path)
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return nil, err
 	}

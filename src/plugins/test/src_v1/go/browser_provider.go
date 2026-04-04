@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	chrome "dialtone/dev/plugins/chrome/src_v3"
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
@@ -29,38 +28,17 @@ func StartBrowser(opts BrowserOptions) (*BrowserSession, error) {
 			}
 		}
 	}
-	resp, err := chrome.EnsureServiceByTarget(remoteNode, role, false)
+	resp, err := chrome.EnsureManagedPageByTarget(remoteNode, role)
 	if err != nil {
 		return nil, err
 	}
 	freshService := resp != nil && resp.IsNew
-	if resp != nil && resp.Unhealthy {
-		if _, err := chrome.SendCommandByHost(remoteNode, chrome.CommandRequest{
-			Command: "close",
-			Role:    role,
-		}); err != nil {
-			return nil, err
-		}
-		resp = nil
-		freshService = false
-	}
 	if !opts.ReuseExisting && !freshService {
-		resp = nil
-	}
-	if resp == nil || resp.BrowserPID == 0 {
-		resp, err = chrome.SendCommandByHost(remoteNode, chrome.CommandRequest{
+		resp, err = chrome.SendManagedCommandByTarget(remoteNode, chrome.CommandRequest{
 			Command: "open",
 			Role:    role,
 			URL:     "about:blank",
 		})
-		if err != nil {
-			if isRecoverableBrowserRunError(err) {
-				if recovered, rerr := waitForServiceHealthy(remoteNode, role, 5*time.Second); rerr == nil {
-					resp = recovered
-					err = nil
-				}
-			}
-		}
 		if err != nil {
 			return nil, err
 		}

@@ -8,7 +8,7 @@ import (
 
 func handleDoctor(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 doctor", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	_ = fs.Parse(args)
 	return doctorTarget(strings.TrimSpace(*host), strings.TrimSpace(*role))
@@ -16,7 +16,7 @@ func handleDoctor(args []string) error {
 
 func handleLogs(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 logs", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	lines := fs.Int("lines", 80, "Lines to tail")
 	_ = fs.Parse(args)
@@ -37,7 +37,7 @@ func handleLogs(args []string) error {
 
 func handleReset(args []string) error {
 	fs := flag.NewFlagSet("chrome src_v3 reset", flag.ExitOnError)
-	host := fs.String("host", "", "Mesh host (optional; default local)")
+	host := fs.String("host", "", chromeHostFlagUsage)
 	role := fs.String("role", defaultRole, "Chrome role")
 	_ = fs.Parse(args)
 	return resetTarget(strings.TrimSpace(*host), strings.TrimSpace(*role))

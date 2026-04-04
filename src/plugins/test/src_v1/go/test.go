@@ -146,10 +146,7 @@ func (s *BrowserSession) refreshServiceStatus() (*chrome.CommandResponse, error)
 	if !s.isServiceManaged() {
 		return nil, fmt.Errorf("browser session is not service-managed")
 	}
-	resp, err := chrome.SendCommandByHost(s.Session.Host, chrome.CommandRequest{
-		Command: "status",
-		Role:    strings.TrimSpace(s.Session.Role),
-	})
+	resp, err := chrome.ServiceStatusByTarget(s.Session.Host, strings.TrimSpace(s.Session.Role))
 	if err != nil {
 		return nil, err
 	}
@@ -194,56 +191,13 @@ func (s *BrowserSession) serviceCommand(req chrome.CommandRequest) (*chrome.Comm
 		return nil, fmt.Errorf("browser session is not service-managed")
 	}
 	req.Role = strings.TrimSpace(s.Session.Role)
-	resp, err := chrome.SendCommandByHost(s.Session.Host, req)
+	resp, err := chrome.SendManagedCommandByTarget(s.Session.Host, req)
 	if err != nil {
-		resp, err = s.retryServiceCommand(req, err)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	s.applyServiceResponse(resp)
 	if len(resp.ConsoleLines) > 0 {
 		s.ingestServiceConsoleLines(resp.ConsoleLines)
-	}
-	return resp, nil
-}
-
-func (s *BrowserSession) retryServiceCommand(req chrome.CommandRequest, prior error) (*chrome.CommandResponse, error) {
-	if s == nil || !s.isServiceManaged() {
-		return nil, prior
-	}
-	if !isRecoverableBrowserRunError(prior) {
-		return nil, prior
-	}
-	switch strings.ToLower(strings.TrimSpace(req.Command)) {
-	case "", "status", "open", "close", "reset", "shutdown":
-		return nil, prior
-	}
-	host := strings.TrimSpace(s.Session.Host)
-	role := strings.TrimSpace(s.Session.Role)
-	timeoutMS := req.TimeoutMS
-	if timeoutMS < 5000 {
-		timeoutMS = 5000
-	}
-	logs.Warn("   [BROWSER] recoverable service command error (%s); resetting managed tab: %v", strings.TrimSpace(req.Command), prior)
-	resetResp, resetErr := chrome.SendCommandByHost(host, chrome.CommandRequest{
-		Command:   "reset",
-		Role:      role,
-		TimeoutMS: timeoutMS,
-	})
-	if resetErr == nil {
-		s.applyServiceResponse(resetResp)
-	} else {
-		logs.Warn("   [BROWSER] service reset failed after %s error: %v", strings.TrimSpace(req.Command), resetErr)
-		if recovered, rerr := waitForServiceHealthy(host, role, 5*time.Second); rerr == nil {
-			s.applyServiceResponse(recovered)
-		} else {
-			return nil, prior
-		}
-	}
-	resp, err := chrome.SendCommandByHost(host, req)
-	if err != nil {
-		return nil, err
 	}
 	return resp, nil
 }
@@ -702,22 +656,8 @@ func isNoTargetIDError(err error) bool {
 
 func (s *BrowserSession) EnsureOpenPage() error {
 	if s.isServiceManaged() {
-		resp, err := s.refreshServiceStatus()
-		if err == nil && resp != nil && resp.BrowserPID > 0 && !resp.Unhealthy {
-			return nil
-		}
-		resp, err = chrome.SendCommandByHost(s.Session.Host, chrome.CommandRequest{
-			Command: "open",
-			Role:    strings.TrimSpace(s.Session.Role),
-			URL:     "about:blank",
-		})
+		resp, err := chrome.EnsureManagedPageByTarget(s.Session.Host, strings.TrimSpace(s.Session.Role))
 		if err != nil {
-			if isRecoverableBrowserRunError(err) {
-				if recovered, rerr := waitForServiceHealthy(strings.TrimSpace(s.Session.Host), strings.TrimSpace(s.Session.Role), 5*time.Second); rerr == nil {
-					s.applyServiceResponse(recovered)
-					return nil
-				}
-			}
 			return err
 		}
 		s.applyServiceResponse(resp)
@@ -757,36 +697,6 @@ func (s *BrowserSession) EnsureOpenPage() error {
 		lastErr = fmt.Errorf("no usable debug port")
 	}
 	return lastErr
-}
-
-func waitForServiceHealthy(host, role string, timeout time.Duration) (*chrome.CommandResponse, error) {
-	host = strings.TrimSpace(host)
-	role = strings.TrimSpace(role)
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		resp, err := chrome.SendCommandByHost(host, chrome.CommandRequest{
-			Command:   "status",
-			Role:      role,
-			TimeoutMS: 1200,
-		})
-		if err == nil && resp != nil && resp.BrowserPID > 0 && !resp.Unhealthy {
-			return resp, nil
-		}
-		if err != nil {
-			lastErr = err
-		} else {
-			lastErr = fmt.Errorf("browser service unhealthy or not running")
-		}
-		time.Sleep(180 * time.Millisecond)
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("browser service did not recover in time")
-	}
-	return nil, lastErr
 }
 
 func (s *BrowserSession) ensureFirstPageTargetIDViaCDP(allowCreate bool) (string, error) {

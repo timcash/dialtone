@@ -2,7 +2,6 @@ package src_v3
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -201,115 +199,12 @@ func localAdvertiseIP() string {
 	return ""
 }
 
-func remoteDialtoneCommand(node sshv1.MeshNode, args []string) string {
-	if strings.EqualFold(node.OS, "windows") {
-		return remoteDialtoneCommandWindows(node, args)
-	}
-	return remoteDialtoneCommandPOSIX(node, args)
-}
-
-func remoteDialtoneCommandPOSIX(node sshv1.MeshNode, args []string) string {
-	run := make([]string, 0, len(args)+2)
-	run = append(run, "./dialtone.sh", "repl")
-	run = append(run, args...)
-	joined := shellJoinChrome(run)
-	if len(node.RepoCandidates) > 0 && strings.TrimSpace(node.RepoCandidates[0]) != "" {
-		repo := strings.TrimSpace(node.RepoCandidates[0])
-		return fmt.Sprintf(
-			"if [ -x %s/dialtone.sh ]; then cd %s && %s; elif [ -x ./dialtone.sh ]; then %s; elif [ -x \"$HOME/dialtone/dialtone.sh\" ]; then cd \"$HOME/dialtone\" && %s; else echo \"dialtone.sh not found in %s, $PWD, or $HOME/dialtone\" >&2; exit 127; fi",
-			shellQuote(repo), shellQuote(repo), joined, joined, joined, shellQuote(repo),
-		)
-	}
-	return fmt.Sprintf(
-		"if [ -x ./dialtone.sh ]; then %s; elif [ -x \"$HOME/dialtone/dialtone.sh\" ]; then cd \"$HOME/dialtone\" && %s; else echo \"dialtone.sh not found in $PWD or $HOME/dialtone\" >&2; exit 127; fi",
-		joined, joined,
-	)
-}
-
-func shellJoinChrome(args []string) string {
-	parts := make([]string, 0, len(args))
-	for _, arg := range args {
-		parts = append(parts, shellQuote(arg))
-	}
-	return strings.Join(parts, " ")
-}
-
 func quotePSArgs(args []string) []string {
 	parts := make([]string, 0, len(args))
 	for _, arg := range args {
 		parts = append(parts, psQuote(arg))
 	}
 	return parts
-}
-
-func encodePowerShellCommand(script string) string {
-	u16 := utf16.Encode([]rune(script))
-	buf := make([]byte, len(u16)*2)
-	for i, v := range u16 {
-		buf[i*2] = byte(v)
-		buf[i*2+1] = byte(v >> 8)
-	}
-	return base64.StdEncoding.EncodeToString(buf)
-}
-
-func remoteDialtoneCommandWindows(node sshv1.MeshNode, args []string) string {
-	items := make([]string, 0, len(args)+1)
-	for _, arg := range append([]string{"repl"}, args...) {
-		items = append(items, psQuote(arg))
-	}
-	repo := ""
-	if len(node.RepoCandidates) > 0 {
-		repo = strings.TrimSpace(node.RepoCandidates[0])
-	}
-	var b strings.Builder
-	if repo != "" {
-		b.WriteString(fmt.Sprintf("$repo=%s; ", psQuote(windowsPath(repo))))
-		b.WriteString("$script=$null; ")
-		b.WriteString("if($repo -and (Test-Path (Join-Path $repo 'dialtone.ps1'))){ Set-Location $repo; $script = Join-Path $repo 'dialtone.ps1' } ")
-	} else {
-		b.WriteString("$script=$null; ")
-	}
-	b.WriteString("$cwdScript = Join-Path (Get-Location) 'dialtone.ps1'; if(-not $script -and (Test-Path $cwdScript)){ $script = (Resolve-Path $cwdScript).Path } ")
-	b.WriteString("if(-not $script){ $homeRepo = Join-Path $HOME 'dialtone'; if(Test-Path (Join-Path $homeRepo 'dialtone.ps1')){ Set-Location $homeRepo; $script = Join-Path $homeRepo 'dialtone.ps1' } } ")
-	b.WriteString("if(-not $script){ throw 'dialtone.ps1 not found in repo candidates, $PWD, or $HOME\\dialtone' } ")
-	b.WriteString(fmt.Sprintf("$argv=@(%s); & $script @argv", strings.Join(items, ", ")))
-	return b.String()
-}
-
-func startRemoteReplService(node sshv1.MeshNode, serviceName string, commandArgs []string) error {
-	args := []string{
-		"src_v3", "inject",
-		"--user", "chrome-service",
-		"service-start",
-		"--name", strings.TrimSpace(serviceName),
-		"--",
-	}
-	args = append(args, commandArgs...)
-	out, err := sshv1.RunNodeCommand(node.Name, remoteDialtoneCommand(node, args), sshv1.CommandOptions{})
-	if err != nil {
-		if strings.TrimSpace(out) != "" {
-			return fmt.Errorf("powershell command failed: %w (%s)", err, strings.TrimSpace(out))
-		}
-		return fmt.Errorf("powershell command failed: %w", err)
-	}
-	return nil
-}
-
-func stopRemoteReplService(node sshv1.MeshNode, serviceName string) error {
-	args := []string{
-		"src_v3", "inject",
-		"--user", "chrome-service",
-		"service-stop",
-		"--name", strings.TrimSpace(serviceName),
-	}
-	out, err := sshv1.RunNodeCommand(node.Name, remoteDialtoneCommand(node, args), sshv1.CommandOptions{})
-	if err != nil {
-		if strings.TrimSpace(out) != "" {
-			return fmt.Errorf("powershell command failed: %w (%s)", err, strings.TrimSpace(out))
-		}
-		return fmt.Errorf("powershell command failed: %w", err)
-	}
-	return nil
 }
 
 func buildBinaryFor(outPath, goos, goarch string) error {
@@ -462,6 +357,10 @@ func stopRemoteService(node sshv1.MeshNode, role string) error {
 	if role == "" {
 		role = defaultRole
 	}
+	var browserPID int
+	if resp, err := sendRemoteCommand(node, commandRequest{Command: "status", Role: role, TimeoutMS: 2500}); err == nil {
+		browserPID = resp.BrowserPID
+	}
 	_, shutdownErr := sendRemoteCommand(node, commandRequest{Command: "shutdown", Role: role, TimeoutMS: 7000})
 	remoteBin, err := remoteBinaryPath(node)
 	if err != nil {
@@ -488,6 +387,15 @@ func stopRemoteService(node sshv1.MeshNode, role string) error {
 			}
 			return err
 		}
+		if browserPID > 0 {
+			_, _ = sshv1.RunNodeCommand(node.Name, fmt.Sprintf(`cmd /c "taskkill /PID %d /T /F >NUL 2>NUL & exit /b 0"`, browserPID), sshv1.CommandOptions{})
+		}
+		chromeCmd := fmt.Sprintf(`$role=%s; Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -eq 'chrome.exe' -and $_.CommandLine -like ('*--dialtone-role=' + $role + '*')
+} | ForEach-Object {
+  cmd /c ('taskkill /PID ' + $_.ProcessId + ' /T /F >NUL 2>NUL & exit /b 0') | Out-Null
+}`, psQuote(role))
+		_, _ = sshv1.RunNodeCommand(node.Name, chromeCmd, sshv1.CommandOptions{})
 		return nil
 	}
 	cmd := fmt.Sprintf("ps -eo pid,args | grep '[d]ialtone_chrome_v3' | grep -- %s | grep -E -- '(^| )--role %s($| )|(^| )--chrome-port %d($| )' | awk '{print $1}' | xargs -r kill -9", shellQuote(remoteBin), shellQuote(role), chromePort)

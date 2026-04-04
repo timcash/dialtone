@@ -52,10 +52,11 @@ func listResourcesLocal(includeChrome bool) ([]Resource, error) {
 }
 
 func listResourcesByTarget(host string, includeChrome bool) ([]Resource, error) {
+	host = effectiveChromeTargetHost(host)
 	if isLocalHost(host) {
 		return listResourcesLocal(includeChrome)
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return nil, err
 	}
@@ -89,10 +90,11 @@ func killResourceLocal(pid int, isWindows bool) error {
 }
 
 func killResourceByTarget(host string, pid int, isWindows bool) error {
+	host = effectiveChromeTargetHost(host)
 	if isLocalHost(host) {
 		return killResourceLocal(pid, isWindows)
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return err
 	}
@@ -268,6 +270,7 @@ func parseTabBool(raw string) bool {
 }
 
 func closeManagedBrowsersByTarget(host, role string) ([]managedRoleSummary, []managedRoleSummary, error) {
+	host = effectiveChromeTargetHost(host)
 	beforeResources, err := listResourcesByTarget(host, true)
 	if err != nil {
 		return nil, nil, err

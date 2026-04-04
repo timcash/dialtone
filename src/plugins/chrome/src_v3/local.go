@@ -16,12 +16,11 @@ import (
 
 	configv1 "dialtone/dev/plugins/config/src_v1/go"
 	logs "dialtone/dev/plugins/logs/src_v1/go"
-	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 	"github.com/nats-io/nats.go"
 )
 
 func isLocalHost(host string) bool {
-	host = strings.TrimSpace(strings.ToLower(host))
+	host = strings.TrimSpace(strings.ToLower(effectiveChromeTargetHost(host)))
 	return host == "" || host == "local" || host == "localhost" || host == "127.0.0.1"
 }
 
@@ -226,6 +225,7 @@ func commandRequestTimeout(req commandRequest) time.Duration {
 }
 
 func sendCommandByTarget(host string, req commandRequest, autoStart bool) (*commandResponse, error) {
+	host = effectiveChromeTargetHost(host)
 	if isLocalHost(host) {
 		if autoStart {
 			if err := ensureLocalService(req.Role); err != nil {
@@ -239,7 +239,7 @@ func sendCommandByTarget(host string, req commandRequest, autoStart bool) (*comm
 			return nil, err
 		}
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +247,7 @@ func sendCommandByTarget(host string, req commandRequest, autoStart bool) (*comm
 }
 
 func deployTarget(host, role string, startService bool) error {
+	host = effectiveChromeTargetHost(host)
 	if isLocalHost(host) {
 		if _, err := ensureLocalBinary(); err != nil {
 			return err
@@ -256,43 +257,11 @@ func deployTarget(host, role string, startService bool) error {
 		}
 		return nil
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return err
 	}
 	return deployRemoteBinary(node, strings.TrimSpace(role), startService)
-}
-
-func serviceTarget(host, mode, role string) (*commandResponse, error) {
-	if isLocalHost(host) {
-		switch strings.ToLower(strings.TrimSpace(mode)) {
-		case "start":
-			if err := startLocalService(role); err != nil {
-				return nil, err
-			}
-			return sendLocalCommand(commandRequest{Command: "status", Role: role})
-		case "stop":
-			return nil, stopLocalService(role)
-		case "status":
-			return sendLocalCommand(commandRequest{Command: "status", Role: role})
-		default:
-			return nil, fmt.Errorf("unsupported service mode: %s", mode)
-		}
-	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
-	if err != nil {
-		return nil, err
-	}
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "start":
-		return nil, startRemoteService(node, strings.TrimSpace(role))
-	case "stop":
-		return nil, stopRemoteService(node, strings.TrimSpace(role))
-	case "status":
-		return sendRemoteCommand(node, commandRequest{Command: "status", Role: strings.TrimSpace(role)})
-	default:
-		return nil, fmt.Errorf("unsupported service mode: %s", mode)
-	}
 }
 
 func tailText(path string, lines int) string {
@@ -311,6 +280,7 @@ func tailText(path string, lines int) string {
 }
 
 func readTargetLogs(host, role string, lines int) (string, string, error) {
+	host = effectiveChromeTargetHost(host)
 	if isLocalHost(host) {
 		role = strings.TrimSpace(role)
 		if role == "" {
@@ -318,7 +288,7 @@ func readTargetLogs(host, role string, lines int) (string, string, error) {
 		}
 		return tailText(localServiceStdoutPath(role), lines), tailText(localServiceStderrPath(role), lines), nil
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return "", "", err
 	}
@@ -326,13 +296,14 @@ func readTargetLogs(host, role string, lines int) (string, string, error) {
 }
 
 func doctorTarget(host, role string) error {
+	host = effectiveChromeTargetHost(host)
 	if isLocalHost(host) {
 		resp, err := sendLocalCommand(commandRequest{Command: "status", Role: role})
 		if err != nil {
 			return err
 		}
 		printResponse(resp)
-		stdout, stderr, _ := readTargetLogs("", role, 80)
+		stdout, stderr, _ := readTargetLogs(host, role, 80)
 		if strings.TrimSpace(stdout) != "" {
 			fmt.Println("STDOUT LOG")
 			fmt.Println(stdout)
@@ -343,7 +314,7 @@ func doctorTarget(host, role string) error {
 		}
 		return nil
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return err
 	}
@@ -351,11 +322,12 @@ func doctorTarget(host, role string) error {
 }
 
 func resetTarget(host, role string) error {
+	host = effectiveChromeTargetHost(host)
 	if isLocalHost(host) {
 		_, err := sendLocalCommand(commandRequest{Command: "reset", Role: role})
 		return err
 	}
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return err
 	}

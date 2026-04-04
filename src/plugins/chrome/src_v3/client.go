@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	sshv1 "dialtone/dev/plugins/ssh/src_v1/go"
 )
@@ -23,7 +24,7 @@ func SendCommand(node sshv1.MeshNode, req CommandRequest) (*CommandResponse, err
 }
 
 func SendCommandByHost(host string, req CommandRequest) (*CommandResponse, error) {
-	node, err := sshv1.ResolveMeshNode(strings.TrimSpace(host))
+	node, err := resolveMeshNode(host)
 	if err != nil {
 		return nil, err
 	}
@@ -32,6 +33,38 @@ func SendCommandByHost(host string, req CommandRequest) (*CommandResponse, error
 
 func SendCommandByTarget(host string, req CommandRequest) (*CommandResponse, error) {
 	return sendCommandByTarget(host, req, false)
+}
+
+func SendManagedCommandByHost(host string, req CommandRequest) (*CommandResponse, error) {
+	return defaultCommandController.SendManaged(host, req)
+}
+
+func SendManagedCommandByTarget(host string, req CommandRequest) (*CommandResponse, error) {
+	return defaultCommandController.SendManaged(host, req)
+}
+
+func EnsureManagedPageByHost(host, role string) (*CommandResponse, error) {
+	return defaultCommandController.EnsureManagedPage(host, role)
+}
+
+func EnsureManagedPageByTarget(host, role string) (*CommandResponse, error) {
+	return defaultCommandController.EnsureManagedPage(host, role)
+}
+
+func WaitForServiceHealthy(host, role string, timeout time.Duration) (*CommandResponse, error) {
+	return defaultCommandController.WaitHealthy(host, role, timeout)
+}
+
+func StartServiceByTarget(host, role string) (*CommandResponse, error) {
+	return defaultCommandController.StartService(host, role)
+}
+
+func StopServiceByTarget(host, role string) error {
+	return defaultCommandController.StopService(host, role)
+}
+
+func ServiceStatusByTarget(host, role string) (*CommandResponse, error) {
+	return defaultCommandController.Status(host, role)
 }
 
 func NewSessionFromResponse(host string, resp *CommandResponse) *Session {
