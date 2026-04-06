@@ -27,12 +27,15 @@ func TestTerminalBootstrapScript(t *testing.T) {
 		"Dialtone WSL terminal",
 		"Repo: %s",
 		"Distro: %s",
+		"tmux session: %s",
 		"CAD session: %s (http://127.0.0.1:%s)",
 		"Run ./dialtone.sh to enter the dialtone> repl.",
+		"Commands sent with .\\dialtone.ps1 tmux send land in this exact tmux session.",
 		"Type exit to close this terminal.",
 		"CAD stays alive in a dedicated tmux session",
 		"curl -fsS http://127.0.0.1:8081/health",
 		"tmux attach -t %s",
+		"terminal_session='dialtone'",
 		"cad_session='dialtone-cad'",
 		"cad_port=8081",
 		"chrome_host='legion'",
@@ -40,12 +43,36 @@ func TestTerminalBootstrapScript(t *testing.T) {
 		"Chrome warmup target: %s role=%s",
 		"Chrome warmup log: %s",
 		"CAD warmup started in tmux session",
-		"Terminal is ready in the repo root.",
+		"Terminal is ready in the repo root and attached to the shared tmux session.",
+		"tmux new-session -d -s \"$terminal_session\"",
+		"wsl-terminal-ubuntu-24-04-dialtone-init.sh",
 		"dialtone.ps1 tmux status -Session %s -Distro %s -Cwd %s",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(got, part) {
 			t.Fatalf("bootstrap script missing %q: %s", part, got)
+		}
+	}
+}
+
+func TestTerminalAttachArgs(t *testing.T) {
+	got := strings.Join(terminalAttachArgs("Ubuntu-24.04", terminalBootstrapConfig{
+		RepoRoot:     "/home/user/dialtone",
+		TerminalTMUX: "dialtone",
+	}), "\n")
+	wantParts := []string{
+		"-d",
+		"Ubuntu-24.04",
+		"--cd",
+		"/home/user/dialtone",
+		"tmux",
+		"attach-session",
+		"-t",
+		"dialtone",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(got, part) {
+			t.Fatalf("attach args missing %q: %s", part, got)
 		}
 	}
 }

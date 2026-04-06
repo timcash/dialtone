@@ -124,6 +124,24 @@ function Get-DefaultWslTmuxCwd {
     return "/home/user/dialtone"
 }
 
+function Get-DefaultWslTmuxSession {
+    if (-not [string]::IsNullOrWhiteSpace($env:DIALTONE_WSL_TERMINAL_TMUX_SESSION)) {
+        return $env:DIALTONE_WSL_TERMINAL_TMUX_SESSION.Trim()
+    }
+    if (Test-Path -LiteralPath $EnvFile) {
+        try {
+            $config = Get-Content -LiteralPath $EnvFile -Raw | ConvertFrom-Json
+            $session = [string]$config.DIALTONE_WSL_TERMINAL_TMUX_SESSION
+            if (-not [string]::IsNullOrWhiteSpace($session)) {
+                return $session.Trim()
+            }
+        }
+        catch {
+        }
+    }
+    return "dialtone"
+}
+
 function Invoke-DialtoneTmuxBash {
     param(
         [Parameter(Mandatory = $true)]
@@ -171,7 +189,7 @@ function Invoke-DialtoneTmux {
     }
 
     $Action = ""
-    $Session = "windows"
+    $Session = Get-DefaultWslTmuxSession
     $Distro = ""
     $Cwd = ""
     $Lines = 120
@@ -296,6 +314,7 @@ Behavior:
   - An unknown first argument is treated as a command to send.
   - send clears the current shell input line before typing the command.
   - interrupt sends Ctrl-C without killing the tmux session.
+  - The visible `wsl src_v3 terminal` window attaches to this same default session.
 "@ | Write-Output
         }
         "ensure" {
@@ -309,7 +328,7 @@ Behavior:
             $safeSession = ConvertTo-BashSingleQuoted $Session
             Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
 tmux has-session -t '$safeSession' 2>/dev/null
-tmux display-message -p -t '$safeSession' 'session=#{session_name} window=#{window_index}:#{window_name} pane=#{pane_index} cwd=#{pane_current_path} pid=#{pane_pid}'
+tmux display-message -p -t '$safeSession' 'session=#{session_name} clients=#{session_attached} window=#{window_index}:#{window_name} pane=#{pane_index} cwd=#{pane_current_path} pid=#{pane_pid}'
 tmux capture-pane -pt '$safeSession' -S -20
 "@
         }
@@ -322,6 +341,7 @@ tmux capture-pane -pt '$safeSession' -S -20
             Ensure-DialtoneTmuxSession
             $safeSession = ConvertTo-BashSingleQuoted $Session
             Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+tmux copy-mode -q -t '$safeSession' >/dev/null 2>&1 || true
 tmux send-keys -t '$safeSession' C-l
 sleep $(('{0:N3}' -f ($WaitMs / 1000)).Replace(',', ''))
 tmux capture-pane -pt '$safeSession' -S -$Lines
@@ -331,6 +351,7 @@ tmux capture-pane -pt '$safeSession' -S -$Lines
             Ensure-DialtoneTmuxSession
             $safeSession = ConvertTo-BashSingleQuoted $Session
             Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+tmux copy-mode -q -t '$safeSession' >/dev/null 2>&1 || true
 tmux send-keys -t '$safeSession' C-c
 tmux send-keys -t '$safeSession' C-u
 tmux send-keys -t '$safeSession' C-l
@@ -343,6 +364,7 @@ tmux capture-pane -pt '$safeSession' -S -$Lines
             Ensure-DialtoneTmuxSession
             $safeSession = ConvertTo-BashSingleQuoted $Session
             Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
+tmux copy-mode -q -t '$safeSession' >/dev/null 2>&1 || true
 tmux send-keys -t '$safeSession' C-c
 sleep $(('{0:N3}' -f ($WaitMs / 1000)).Replace(',', ''))
 tmux capture-pane -pt '$safeSession' -S -$Lines
@@ -360,9 +382,10 @@ tmux capture-pane -pt '$safeSession' -S -$Lines
             Invoke-DialtoneTmuxBash -Distro $Distro -Script @"
 cmd_b64='$encodedCommand'
 cmd_text=`$(printf '%s' "`$cmd_b64" | base64 -d)
+tmux copy-mode -q -t '$safeSession' >/dev/null 2>&1 || true
 tmux send-keys -t '$safeSession' C-u
 tmux send-keys -l -t '$safeSession' "`$cmd_text"
-tmux send-keys -t '$safeSession' Enter
+tmux send-keys -t '$safeSession' C-m
 sleep $(('{0:N3}' -f ($WaitMs / 1000)).Replace(',', ''))
 tmux capture-pane -pt '$safeSession' -S -$Lines
 "@

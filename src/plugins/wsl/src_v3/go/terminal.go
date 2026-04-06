@@ -63,26 +63,20 @@ func OpenTerminal(name string) error {
 	if err := startTerminalChromeWarmup(name, wslExe, cfg); err != nil {
 		return err
 	}
-	script := terminalBootstrapScriptWithConfig(name, cfg)
-	launcherPath, err := writeTerminalLauncherScript(name, wslProgram, script)
-	if err != nil {
+	if err := ensureTerminalSession(name, cfg); err != nil {
 		return err
 	}
-	cmdExe, err := resolveCmdExecutable()
-	if err != nil {
-		return err
-	}
-	cmdProgram := toWindowsPath(cmdExe)
 	powershellExe, err := resolveWindowsExecutable("powershell.exe")
 	if err != nil {
 		return err
 	}
+	quotedArgs := make([]string, 0, 8)
+	for _, arg := range terminalAttachArgs(name, cfg) {
+		quotedArgs = append(quotedArgs, psSingleQuote(arg))
+	}
 	launcherScript := fmt.Sprintf("Start-Process -FilePath %s -WindowStyle Normal -ArgumentList @(%s)",
-		psSingleQuote(cmdProgram),
-		strings.Join([]string{
-			psSingleQuote("/k"),
-			psSingleQuote(launcherPath),
-		}, ", "),
+		psSingleQuote(wslProgram),
+		strings.Join(quotedArgs, ", "),
 	)
 	cmd := exec.Command(powershellExe, "-NoProfile", "-Command", launcherScript)
 	return cmd.Run()
@@ -204,6 +198,10 @@ func terminalBootstrapScriptWithConfig(name string, cfg terminalBootstrapConfig)
 	if chromeRole == "" {
 		chromeRole = "dev"
 	}
+	terminalSession := strings.TrimSpace(cfg.TerminalTMUX)
+	if terminalSession == "" {
+		terminalSession = "dialtone"
+	}
 	cadSession := strings.TrimSpace(cfg.CADTMUX)
 	if cadSession == "" {
 		cadSession = "dialtone-cad"
@@ -213,12 +211,18 @@ func terminalBootstrapScriptWithConfig(name string, cfg terminalBootstrapConfig)
 		cadPort = 8081
 	}
 
-	lines := []string{
+	interactiveShellLines := []string{
+		"if command -v bash >/dev/null 2>&1; then exec bash -li; fi",
+		"if command -v zsh >/dev/null 2>&1; then exec zsh -li; fi",
+		"exec sh -li",
+	}
+
+	initLines := []string{
 		"export TERM=${TERM:-xterm-256color}",
-		"mkdir -p \"$HOME/.dialtone/logs\"",
 		fmt.Sprintf("repo_root=%s", shellSingleQuote(repoRoot)),
 		fmt.Sprintf("chrome_host=%s", shellSingleQuote(chromeHost)),
 		fmt.Sprintf("chrome_role=%s", shellSingleQuote(chromeRole)),
+		fmt.Sprintf("terminal_session=%s", shellSingleQuote(terminalSession)),
 		fmt.Sprintf("cad_session=%s", shellSingleQuote(cadSession)),
 		fmt.Sprintf("cad_port=%d", cadPort),
 		"if [ -d \"$repo_root\" ]; then cd \"$repo_root\"; fi",
@@ -226,42 +230,77 @@ func terminalBootstrapScriptWithConfig(name string, cfg terminalBootstrapConfig)
 		fmt.Sprintf("printf '\\033[1;32mDialtone WSL terminal\\033[0m for %%s\\n' %s", shellSingleQuote(name)),
 		"printf 'Repo: %s\\n' \"$PWD\"",
 		fmt.Sprintf("printf 'Distro: %%s\\n' %s", shellSingleQuote(name)),
+		"printf 'tmux session: %s\\n' \"$terminal_session\"",
+	}
+	if cfg.CADEnabled {
+		initLines = append(initLines, "printf 'CAD session: %s (http://127.0.0.1:%s)\\n' \"$cad_session\" \"$cad_port\"")
+	}
+	initLines = append(initLines,
+		fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote("Run ./dialtone.sh to enter the dialtone> repl.")),
+		fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote("Commands sent with .\\dialtone.ps1 tmux send land in this exact tmux session.")),
+		fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote("Type Linux commands directly at the prompt below. Type exit to close this terminal.")),
+	)
+	if cfg.CADEnabled {
+		initLines = append(initLines,
+			"cad_ready=0",
+			fmt.Sprintf("if command -v curl >/dev/null 2>&1; then if curl -fsS http://127.0.0.1:%d/health >/dev/null 2>&1; then cad_ready=1; fi; elif command -v wget >/dev/null 2>&1; then if wget -qO- http://127.0.0.1:%d/health >/dev/null 2>&1; then cad_ready=1; fi; fi", cadPort, cadPort),
+			fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote("CAD stays alive in a dedicated tmux session so repeated terminal opens can reuse the same server.")),
+			fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote(fmt.Sprintf("Health check: curl -fsS http://127.0.0.1:%d/health", cadPort))),
+			"printf 'Inspect CAD session with: tmux attach -t %s\\n' \"$cad_session\"",
+			fmt.Sprintf("printf 'From Windows: .\\\\dialtone.ps1 tmux status -Session %%s -Distro %%s -Cwd %%s\\n' \"$cad_session\" %s \"$repo_root\"", shellSingleQuote(name)),
+		)
+	}
+	if cfg.ChromeEnabled {
+		initLines = append(initLines,
+			fmt.Sprintf("printf 'Chrome warmup target: %%s role=%%s\\n' \"$chrome_host\" \"$chrome_role\""),
+			fmt.Sprintf("printf 'Chrome warmup log: %%s\\n\\n' %s", shellSingleQuote(terminalChromeWarmupLogPath(chromeHost, chromeRole))),
+		)
+	}
+	initLines = append(initLines,
+		fmt.Sprintf("printf '%%s\\n\\n' %s", shellSingleQuote(fmt.Sprintf("Recommended next step: run ./dialtone.sh and then use /chrome src_v3 status --host %s --role %s inside the REPL.", chromeHost, chromeRole))),
+		"printf '%s\\n\\n' 'Terminal is ready in the repo root and attached to the shared tmux session.'",
+	)
+	initLines = append(initLines, interactiveShellLines...)
+
+	lines := []string{
+		"set -e",
+		"export TERM=${TERM:-xterm-256color}",
+		"mkdir -p \"$HOME/.dialtone/logs\"",
+		fmt.Sprintf("repo_root=%s", shellSingleQuote(repoRoot)),
+		fmt.Sprintf("chrome_host=%s", shellSingleQuote(chromeHost)),
+		fmt.Sprintf("chrome_role=%s", shellSingleQuote(chromeRole)),
+		fmt.Sprintf("terminal_session=%s", shellSingleQuote(terminalSession)),
+		fmt.Sprintf("cad_session=%s", shellSingleQuote(cadSession)),
+		fmt.Sprintf("cad_port=%d", cadPort),
+		"if [ -d \"$repo_root\" ]; then cd \"$repo_root\"; fi",
 	}
 	if cfg.CADEnabled {
 		lines = append(lines,
 			fmt.Sprintf("cad_cmd=%s", shellSingleQuote(fmt.Sprintf("exec ./dialtone.sh cad src_v1 serve --port %d", cadPort))),
 			"cad_ready=0",
 			fmt.Sprintf("if command -v curl >/dev/null 2>&1; then if curl -fsS http://127.0.0.1:%d/health >/dev/null 2>&1; then cad_ready=1; fi; elif command -v wget >/dev/null 2>&1; then if wget -qO- http://127.0.0.1:%d/health >/dev/null 2>&1; then cad_ready=1; fi; fi", cadPort, cadPort),
-		)
-		lines = append(lines, "printf 'CAD session: %s (http://127.0.0.1:%s)\\n' \"$cad_session\" \"$cad_port\"")
-	}
-	lines = append(lines,
-		fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote("Run ./dialtone.sh to enter the dialtone> repl.")),
-		fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote("Type Linux commands directly at the prompt below. Type exit to close this terminal.")),
-	)
-	if cfg.CADEnabled {
-		lines = append(lines,
-			fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote("CAD stays alive in a dedicated tmux session so repeated terminal opens can reuse the same server.")),
-			fmt.Sprintf("printf '%%s\\n' %s", shellSingleQuote(fmt.Sprintf("Health check: curl -fsS http://127.0.0.1:%d/health", cadPort))),
-			"printf 'Inspect CAD session with: tmux attach -t %s\\n' \"$cad_session\"",
-			fmt.Sprintf("printf 'From Windows: .\\\\dialtone.ps1 tmux status -Session %%s -Distro %%s -Cwd %%s\\n' \"$cad_session\" %s \"$repo_root\"", shellSingleQuote(name)),
 			"if [ \"$cad_ready\" -eq 1 ]; then printf 'CAD already ready on http://127.0.0.1:%s.\\n' \"$cad_port\"; elif command -v tmux >/dev/null 2>&1; then tmux kill-session -t \"$cad_session\" >/dev/null 2>&1 || true; tmux new-session -d -s \"$cad_session\" -c \"$repo_root\" \"$cad_cmd\" >/dev/null 2>&1 && printf 'CAD warmup started in tmux session %s.\\n' \"$cad_session\" || printf 'Failed to start CAD tmux session %s.\\n' \"$cad_session\"; else printf 'tmux not available; skipping CAD warmup.\\n'; fi",
 		)
 	}
-	if cfg.ChromeEnabled {
-		lines = append(lines,
-			fmt.Sprintf("printf 'Chrome warmup target: %%s role=%%s\\n' \"$chrome_host\" \"$chrome_role\""),
-			fmt.Sprintf("printf 'Chrome warmup log: %%s\\n\\n' %s", shellSingleQuote(terminalChromeWarmupLogPath(chromeHost, chromeRole))),
-		)
-	}
 	lines = append(lines,
-		fmt.Sprintf("printf '%%s\\n\\n' %s", shellSingleQuote(fmt.Sprintf("Recommended next step: run ./dialtone.sh and then use /chrome src_v3 status --host %s --role %s inside the REPL.", chromeHost, chromeRole))),
-		"printf '%s\\n\\n' 'Terminal is ready in the repo root. Type commands directly at the prompt below.'",
-		"if command -v bash >/dev/null 2>&1; then exec bash -li; fi",
-		"if command -v zsh >/dev/null 2>&1; then exec zsh -li; fi",
-		"exec sh -li",
+		"if command -v tmux >/dev/null 2>&1; then",
+		fmt.Sprintf("  init_script=\"$HOME/.dialtone/logs/%s\"", terminalInitScriptName(name, terminalSession)),
+		"  if ! tmux has-session -t \"$terminal_session\" 2>/dev/null; then",
+		"    cat > \"$init_script\" <<'EOF'",
 	)
-	return strings.Join(lines, "; ")
+	lines = append(lines, initLines...)
+	lines = append(lines,
+		"EOF",
+		"    chmod +x \"$init_script\"",
+		"    if ! tmux new-session -d -s \"$terminal_session\" -c \"$repo_root\" \"sh \\\"$init_script\\\"\" >/dev/null 2>&1; then printf 'Failed to start tmux session %s.\\n' \"$terminal_session\"; fi",
+		"  fi",
+		"fi",
+	)
+	return strings.Join(lines, "\n")
+}
+
+func terminalInitScriptName(name, session string) string {
+	return "wsl-terminal-" + terminalPathToken(name) + "-" + terminalPathToken(session) + "-init.sh"
 }
 
 func terminalChromeWarmupLogName(host, role string) string {
@@ -364,47 +403,58 @@ func cmdDoubleQuote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
-func writeTerminalLauncherScript(name, wslProgram, bootstrapScript string) (string, error) {
-	tempDir := os.TempDir()
+func ensureTerminalSession(name string, cfg terminalBootstrapConfig) error {
+	script := terminalBootstrapScriptWithConfig(name, cfg)
+	scriptPath, err := writeTemporaryWSLShellScript("dialtone-wsl-terminal-ensure-*.sh", script)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(scriptPath)
+	_, err = wslExecWithTimeout(20*time.Second,
+		"-d", name,
+		"--cd", cfg.RepoRoot,
+		"--",
+		"sh", windowsPathToWSLPath(scriptPath),
+	)
+	return err
+}
 
-	shFile, err := os.CreateTemp(tempDir, "dialtone-wsl-terminal-*.sh")
+func terminalAttachArgs(name string, cfg terminalBootstrapConfig) []string {
+	repoRoot := strings.TrimSpace(cfg.RepoRoot)
+	if repoRoot == "" {
+		repoRoot = "/home/user/dialtone"
+	}
+	terminalSession := strings.TrimSpace(cfg.TerminalTMUX)
+	if terminalSession == "" {
+		terminalSession = "dialtone"
+	}
+	return []string{
+		"-d",
+		name,
+		"--cd",
+		repoRoot,
+		"--",
+		"tmux",
+		"attach-session",
+		"-t",
+		terminalSession,
+	}
+}
+
+func writeTemporaryWSLShellScript(pattern, content string) (string, error) {
+	file, err := os.CreateTemp(os.TempDir(), pattern)
 	if err != nil {
 		return "", err
 	}
-	shPath := shFile.Name()
-	shContent := "#!/bin/sh\n" + bootstrapScript + "\n"
-	if _, err := shFile.WriteString(shContent); err != nil {
-		_ = shFile.Close()
+	path := file.Name()
+	if _, err := file.WriteString("#!/bin/sh\n" + content + "\n"); err != nil {
+		_ = file.Close()
 		return "", err
 	}
-	if err := shFile.Close(); err != nil {
+	if err := file.Close(); err != nil {
 		return "", err
 	}
-
-	linuxShellPath := windowsPathToWSLPath(shPath)
-	cmdFile, err := os.CreateTemp(tempDir, "dialtone-wsl-terminal-*.cmd")
-	if err != nil {
-		return "", err
-	}
-	cmdPath := cmdFile.Name()
-	lines := []string{
-		"@echo off",
-		"title " + terminalWindowTitle(name),
-		fmt.Sprintf("%s -d %s --cd %s -- sh %s",
-			cmdDoubleQuote(wslProgram),
-			cmdDoubleQuote(name),
-			cmdDoubleQuote("~"),
-			cmdDoubleQuote(linuxShellPath),
-		),
-	}
-	if _, err := cmdFile.WriteString(strings.Join(lines, "\r\n") + "\r\n"); err != nil {
-		_ = cmdFile.Close()
-		return "", err
-	}
-	if err := cmdFile.Close(); err != nil {
-		return "", err
-	}
-	return cmdPath, nil
+	return path, nil
 }
 
 func resolveWindowsRepoRoot() string {

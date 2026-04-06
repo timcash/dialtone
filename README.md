@@ -28,14 +28,15 @@ Common Windows commands:
 .\dialtone.ps1 wsl src_v3 start --name Ubuntu-24.04
 .\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04
 
-.\dialtone.ps1 tmux clean-state -Session windows -Distro Ubuntu-24.04 -Cwd /home/user/dialtone
-.\dialtone.ps1 tmux send -Session windows -Distro Ubuntu-24.04 -Cwd /home/user/dialtone -- ./dialtone.sh cad src_v1 test
-.\dialtone.ps1 tmux read -Session windows -Distro Ubuntu-24.04
+.\dialtone.ps1 tmux clean-state -Session dialtone -Distro Ubuntu-24.04 -Cwd /home/user/dialtone
+.\dialtone.ps1 tmux send -Session dialtone -Distro Ubuntu-24.04 -Cwd /home/user/dialtone -- ./dialtone.sh cad src_v1 test
+.\dialtone.ps1 tmux read -Session dialtone -Distro Ubuntu-24.04
 ```
 
 Important rule:
 
 - If the real runtime belongs in WSL, prefer `dialtone.ps1 tmux ... -- ./dialtone.sh ...`.
+- The default `dialtone` tmux session is the same session opened by `.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04`.
 - Do not build a parallel workflow around raw `wsl.exe`, ad hoc PowerShell, or direct toolchain commands.
 
 ### `dialtone.sh` in WSL or Linux

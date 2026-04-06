@@ -38,6 +38,23 @@ type SyncCodeOptions struct {
 	SkipSelf bool
 }
 
+func syncCodeSummary(node, src, dest string, del bool) string {
+	parts := make([]string, 0, 4)
+	if node = strings.TrimSpace(node); node != "" {
+		parts = append(parts, fmt.Sprintf("host=%s", node))
+	}
+	if src = strings.TrimSpace(src); src != "" {
+		parts = append(parts, fmt.Sprintf("src=%s", src))
+	}
+	if dest = strings.TrimSpace(dest); dest != "" {
+		parts = append(parts, fmt.Sprintf("dest=%s", dest))
+	}
+	if del {
+		parts = append(parts, "delete=true")
+	}
+	return strings.Join(parts, " ")
+}
+
 func SyncCode(opts SyncCodeOptions) error {
 	src := strings.TrimSpace(opts.Source)
 	if src == "" {
@@ -57,7 +74,15 @@ func SyncCode(opts SyncCodeOptions) error {
 		return fmt.Errorf("host is required")
 	}
 	if node == "all" {
-		return syncCodeAll(opts, src)
+		summary := syncCodeSummary("all", src, strings.TrimSpace(opts.Dest), opts.Delete)
+		replIndexInfof("ssh sync-code: syncing %s", summary)
+		err := syncCodeAll(opts, src)
+		if err != nil {
+			replIndexInfof("ssh sync-code: failed %s: %v", summary, err)
+			return err
+		}
+		replIndexInfof("ssh sync-code: completed %s", summary)
+		return nil
 	}
 
 	target, err := ResolveMeshNode(node)
@@ -68,7 +93,14 @@ func SyncCode(opts SyncCodeOptions) error {
 	if dest == "" {
 		dest = defaultSyncDestForNode(target)
 	}
-	return runRsyncToNode(src, target, dest, opts.Delete, normalizeExcludes(opts.Excludes))
+	summary := syncCodeSummary(target.Name, src, dest, opts.Delete)
+	replIndexInfof("ssh sync-code: syncing %s", summary)
+	if err := runRsyncToNode(src, target, dest, opts.Delete, normalizeExcludes(opts.Excludes)); err != nil {
+		replIndexInfof("ssh sync-code: failed %s: %v", summary, err)
+		return err
+	}
+	replIndexInfof("ssh sync-code: completed %s", summary)
+	return nil
 }
 
 func syncCodeAll(opts SyncCodeOptions, src string) error {
@@ -93,9 +125,11 @@ func syncCodeAll(opts SyncCodeOptions, src string) error {
 		}
 	}
 	if failed > 0 {
+		replIndexInfof("ssh sync-code: all-nodes sync finished with %d failure(s) and %d self skip(s)", failed, skipped)
 		return fmt.Errorf("sync-code finished with %d failures", failed)
 	}
 	if skipped > 0 {
+		replIndexInfof("ssh sync-code: all-nodes sync skipped %d self node(s)", skipped)
 		logs.Raw("sync-code skipped %d self node(s)", skipped)
 	}
 	return nil

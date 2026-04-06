@@ -39,8 +39,12 @@ Use the `./dialtone.ps1` (Windows) or `./dialtone.sh` (Linux/WSL) wrapper:
 # ⏹ Stop: Terminate a distro from the Windows host side
 .\dialtone.ps1 wsl src_v3 stop --name Ubuntu-24.04
 
-# 🖥️ Terminal: Start the distro if needed, open a desktop terminal in the WSL repo, and queue Chrome warmup
+# 🖥️ Terminal: Start the distro if needed, open a desktop terminal attached to the shared tmux session in the WSL repo, and queue Chrome warmup
 .\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04
+
+# 🧭 Shared tmux session: commands sent here show up in that same visible terminal
+.\dialtone.ps1 tmux status -Session dialtone -Distro Ubuntu-24.04 -Cwd /home/user/dialtone
+.\dialtone.ps1 tmux send -Session dialtone -Distro Ubuntu-24.04 -Cwd /home/user/dialtone -- ./dialtone.sh cad src_v1 test
 
 # 💨 Test: Modernized verification suite
 .\dialtone wsl src_v3 test

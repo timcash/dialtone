@@ -32,6 +32,7 @@ func InstallSyncCodeService(opts SyncCodeOptions, interval time.Duration) error 
 	if _, err := os.Stat(source); err != nil {
 		return fmt.Errorf("source path missing: %s", source)
 	}
+	replIndexInfof("ssh sync-code service: installing %s interval=%s", syncCodeSummary(opts.Node, source, opts.Dest, opts.Delete), strings.TrimSpace(interval.String()))
 
 	unitDir, err := systemdUserDir()
 	if err != nil {
@@ -76,20 +77,26 @@ func InstallSyncCodeService(opts SyncCodeOptions, interval time.Duration) error 
 		return err
 	}
 	logs.Info("Installed/started user service: %s", unitPath)
+	replIndexInfof("ssh sync-code service: installed %s interval=%s", syncCodeSummary(opts.Node, source, opts.Dest, opts.Delete), strings.TrimSpace(interval.String()))
 	return StatusSyncCodeService()
 }
 
 func StopSyncCodeService() error {
+	replIndexInfof("ssh sync-code service: stopping %s", syncCodeServiceName)
 	_ = runSystemctlUser("stop", syncCodeServiceName)
 	_ = runSystemctlUser("disable", syncCodeServiceName)
 	if err := runSystemctlUser("reset-failed", syncCodeServiceName); err != nil {
 		logs.Warn("reset-failed warning: %v", err)
 	}
 	logs.Info("Stopped/disabled user service: %s", syncCodeServiceName)
+	replIndexInfof("ssh sync-code service: stopped %s", syncCodeServiceName)
 	return nil
 }
 
 func StatusSyncCodeService() error {
+	activeText, activeErr := runSystemctlUserOutput("is-active", syncCodeServiceName)
+	enabledText, enabledErr := runSystemctlUserOutput("is-enabled", syncCodeServiceName)
+	replIndexInfof("ssh sync-code service: %s", summarizeSyncCodeServiceState(activeText, enabledText, activeErr, enabledErr))
 	out, err := runSystemctlUserOutput("status", "--no-pager", syncCodeServiceName)
 	if strings.TrimSpace(out) != "" {
 		logs.Raw("%s", strings.TrimSpace(out))
@@ -120,6 +127,8 @@ func buildSyncCodeLoopExec(repoRoot string, opts SyncCodeOptions, interval time.
 		args = append(args, "--exclude", ex)
 	}
 
+	// Intentionally use the public Dialtone entrypoint so each sync loop is
+	// injected through REPL and produces shared task/index output on NATS.
 	quoted := make([]string, 0, len(args))
 	for _, a := range args {
 		quoted = append(quoted, shellQuoteSyncService(a))
@@ -183,4 +192,36 @@ func runSystemctlUserOutput(args ...string) (string, error) {
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+func summarizeSyncCodeServiceState(activeText, enabledText string, activeErr, enabledErr error) string {
+	active := normalizeSystemctlState(activeText)
+	enabled := normalizeSystemctlState(enabledText)
+	if active == "" && enabled == "" && (activeErr != nil || enabledErr != nil) {
+		return "not installed"
+	}
+	parts := make([]string, 0, 2)
+	if active != "" {
+		parts = append(parts, "active="+active)
+	}
+	if enabled != "" {
+		parts = append(parts, "enabled="+enabled)
+	}
+	if len(parts) == 0 {
+		return "status unavailable"
+	}
+	return strings.Join(parts, " ")
+}
+
+func normalizeSystemctlState(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	line := strings.SplitN(raw, "\n", 2)[0]
+	line = strings.TrimSpace(line)
+	if strings.EqualFold(line, "Unit "+syncCodeServiceName+" could not be found.") {
+		return ""
+	}
+	return line
 }
