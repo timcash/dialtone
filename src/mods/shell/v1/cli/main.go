@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -849,6 +850,7 @@ func runDemoProtocol(argv []string) error {
 }
 
 type shellBusIntentBody struct {
+	RunID          int64    `json:"run_id,omitempty"`
 	Text           string   `json:"text,omitempty"`
 	Command        string   `json:"command,omitempty"`
 	Expect         string   `json:"expect,omitempty"`
@@ -1244,6 +1246,7 @@ func syncShellBusRow(db *sql.DB, repoRoot string, row modstate.ShellBusRecord, w
 		body.Error = err.Error()
 		updated, _ := json.Marshal(body)
 		_ = modstate.UpdateShellBusStatus(db, row.ID, "failed", 0, string(updated))
+		_ = finishCommandRun(db, body, "failed")
 		return err
 	}
 	body.Target = target
@@ -1268,10 +1271,14 @@ func syncShellBusRow(db *sql.DB, repoRoot string, row modstate.ShellBusRecord, w
 		if err := markShellBusRowRunning(db, row.ID, string(updated)); err != nil {
 			return err
 		}
+		if err := markCommandRunRunning(db, body); err != nil {
+			return err
+		}
 		if _, err := runDialtoneModQuiet(repoRoot, "tmux", "v1", "write", "--pane", target, "--enter", body.Command); err != nil {
 			body.Error = err.Error()
 			updated, _ := json.Marshal(body)
 			_ = modstate.UpdateShellBusStatus(db, row.ID, "failed", 0, string(updated))
+			_ = finishCommandRun(db, body, "failed")
 			return err
 		}
 	default:
@@ -1287,6 +1294,7 @@ func syncShellBusRow(db *sql.DB, repoRoot string, row modstate.ShellBusRecord, w
 			body.Summary = summarizeSnapshot(out)
 			updated, _ := json.Marshal(body)
 			_ = modstate.UpdateShellBusStatus(db, row.ID, "failed", 0, string(updated))
+			_ = finishCommandRun(db, body, "failed")
 			return err
 		}
 	} else {
@@ -1322,6 +1330,9 @@ func syncShellBusRow(db *sql.DB, repoRoot string, row modstate.ShellBusRecord, w
 	if err := modstate.UpdateShellBusStatus(db, row.ID, status, observedID, string(updated)); err != nil {
 		return err
 	}
+	if err := finishCommandRun(db, body, status); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1337,6 +1348,7 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 		body.Error = err.Error()
 		updated, _ := json.Marshal(body)
 		_ = modstate.UpdateShellBusStatus(db, row.ID, "failed", 0, string(updated))
+		_ = finishCommandRun(db, body, "failed")
 		return err
 	}
 	body.Target = target
@@ -1355,6 +1367,11 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 	updated, _ := json.Marshal(body)
 	if err := markShellBusRowRunning(db, row.ID, string(updated)); err != nil {
 		return err
+	}
+	if row.Subject == "command" && row.Action == "run" {
+		if err := markCommandRunRunning(db, body); err != nil {
+			return err
+		}
 	}
 
 	switch {
@@ -1411,7 +1428,10 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 		output, exitCode, pid, runtime, execErr := runVisibleCommand(repoRoot, workerPane, body.Command, func(pid int) error {
 			body.PID = pid
 			updated, _ := json.Marshal(body)
-			return modstate.UpdateShellBusStatus(db, row.ID, "running", 0, string(updated))
+			if err := modstate.UpdateShellBusStatus(db, row.ID, "running", 0, string(updated)); err != nil {
+				return err
+			}
+			return heartbeatCommandRun(db, body)
 		})
 		body.Output = output
 		body.PID = pid
@@ -1447,9 +1467,10 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 		if err := modstate.UpdateShellBusStatus(db, row.ID, status, observedID, string(updated)); err != nil {
 			return err
 		}
-		if err := captureCurrentShellState(db, repoRoot, row.ID); err != nil {
+		if err := finishCommandRun(db, body, status); err != nil {
 			return err
 		}
+		_ = captureCurrentShellState(db, repoRoot, row.ID)
 		return setShellWorkerState(db, map[string]string{
 			sqlitestate.ShellWorkerStatusKey:         "running",
 			sqlitestate.ShellWorkerPaneKey:           workerPane,
@@ -1468,6 +1489,59 @@ func syncShellBusRowInWorker(db *sql.DB, repoRoot string, row modstate.ShellBusR
 
 func buildVisibleCommandEnv(baseEnv []string, paneTarget string) []string {
 	env := append([]string{}, baseEnv...)
+	pathValue := ""
+	pathIndex := -1
+	for i, entry := range env {
+		if strings.HasPrefix(entry, "PATH=") {
+			pathIndex = i
+			pathValue = strings.TrimPrefix(entry, "PATH=")
+			break
+		}
+	}
+	requiredParts := []string{}
+	if runtime.GOOS != "windows" {
+		requiredParts = append(requiredParts,
+			"/usr/local/sbin",
+			"/usr/local/bin",
+			"/usr/sbin",
+			"/usr/bin",
+			"/sbin",
+			"/bin",
+		)
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
+		shimDir := filepath.Join(homeDir, "bin")
+		if info, statErr := os.Stat(shimDir); statErr == nil && info.IsDir() {
+			requiredParts = append([]string{shimDir}, requiredParts...)
+		}
+	}
+	mergedPath := []string{}
+	seenPath := map[string]struct{}{}
+	addPathPart := func(part string) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return
+		}
+		if _, ok := seenPath[part]; ok {
+			return
+		}
+		seenPath[part] = struct{}{}
+		mergedPath = append(mergedPath, part)
+	}
+	for _, part := range requiredParts {
+		addPathPart(part)
+	}
+	for _, part := range strings.Split(pathValue, string(os.PathListSeparator)) {
+		addPathPart(part)
+	}
+	if len(mergedPath) > 0 {
+		joinedPath := strings.Join(mergedPath, string(os.PathListSeparator))
+		if pathIndex >= 0 {
+			env[pathIndex] = "PATH=" + joinedPath
+		} else {
+			env = append(env, "PATH="+joinedPath)
+		}
+	}
 	env = append(env, "TERM=xterm-256color")
 	if target := strings.TrimSpace(paneTarget); target != "" {
 		env = append(env,
@@ -1479,9 +1553,11 @@ func buildVisibleCommandEnv(baseEnv []string, paneTarget string) []string {
 }
 
 func runVisibleCommand(repoRoot, paneTarget, command string, onStart func(pid int) error) (string, int, int, time.Duration, error) {
-	cmd := exec.Command("zsh", "-lc", command)
+	env := buildVisibleCommandEnv(os.Environ(), paneTarget)
+	shellPath := resolveVisibleShellPath(env)
+	cmd := exec.Command(shellPath, "-lc", command)
 	cmd.Dir = strings.TrimSpace(repoRoot)
-	cmd.Env = buildVisibleCommandEnv(os.Environ(), paneTarget)
+	cmd.Env = env
 	var output bytes.Buffer
 	stdout := io.MultiWriter(os.Stdout, &output)
 	stderr := io.MultiWriter(os.Stderr, &output)
@@ -1518,8 +1594,83 @@ func runVisibleCommand(repoRoot, paneTarget, command string, onStart func(pid in
 	return output.String(), exitCode, pid, runtime, nil
 }
 
+func resolveVisibleShellPath(env []string) string {
+	candidates := []string{}
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, "SHELL=") {
+			continue
+		}
+		shellPath := strings.TrimSpace(strings.TrimPrefix(entry, "SHELL="))
+		if shellPath != "" {
+			candidates = append(candidates, shellPath)
+		}
+		break
+	}
+	candidates = append(candidates,
+		"zsh",
+		"bash",
+		"sh",
+		"/usr/bin/zsh",
+		"/usr/bin/bash",
+		"/bin/bash",
+		"/usr/bin/sh",
+		"/bin/sh",
+	)
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		if filepath.IsAbs(candidate) {
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate
+			}
+			continue
+		}
+		if resolved, err := exec.LookPath(candidate); err == nil && strings.TrimSpace(resolved) != "" {
+			return resolved
+		}
+	}
+	return "sh"
+}
+
 func markShellBusRowRunning(db *sql.DB, rowID int64, bodyJSON string) error {
 	return modstate.UpdateShellBusStatus(db, rowID, "running", 0, bodyJSON)
+}
+
+func markCommandRunRunning(db *sql.DB, body shellBusIntentBody) error {
+	if db == nil || body.RunID <= 0 {
+		return nil
+	}
+	return modstate.MarkCommandRunRunning(db, body.RunID, body.PID, body.Target, body.LogPath)
+}
+
+func heartbeatCommandRun(db *sql.DB, body shellBusIntentBody) error {
+	if db == nil || body.RunID <= 0 {
+		return nil
+	}
+	return modstate.HeartbeatCommandRun(db, body.RunID, body.PID, body.LogPath)
+}
+
+func finishCommandRun(db *sql.DB, body shellBusIntentBody, status string) error {
+	if db == nil || body.RunID <= 0 {
+		return nil
+	}
+	resultText := strings.TrimSpace(body.Summary)
+	if resultText == "" && strings.TrimSpace(body.Output) != "" {
+		resultText = summarizeSnapshot(body.Output)
+	}
+	return modstate.FinishCommandRun(
+		db,
+		body.RunID,
+		status,
+		body.PID,
+		body.ExitCode,
+		body.RuntimeMS,
+		body.Target,
+		body.LogPath,
+		resultText,
+		body.Error,
+	)
 }
 
 func resolveShellBusTarget(repoRoot string, row modstate.ShellBusRecord) (string, error) {
@@ -1897,6 +2048,9 @@ func decodeShellBusIntentBody(row modstate.ShellBusRecord) (shellBusIntentBody, 
 	if strings.TrimSpace(body.Target) == "" {
 		body.Target = strings.TrimSpace(row.Pane)
 	}
+	if body.RunID == 0 && row.CommandRunID > 0 {
+		body.RunID = row.CommandRunID
+	}
 	return body, true
 }
 
@@ -1920,6 +2074,9 @@ func printShellBusCommandStatus(prefix string, row modstate.ShellBusRecord, body
 		label = "command"
 	}
 	fmt.Printf("%s_row_id\t%d\n", label, row.ID)
+	if body.RunID > 0 {
+		fmt.Printf("%s_run_id\t%d\n", label, body.RunID)
+	}
 	fmt.Printf("%s_status\t%s\n", label, strings.TrimSpace(row.Status))
 	if strings.TrimSpace(body.DisplayCommand) != "" {
 		fmt.Printf("%s\t%s\n", label, strings.TrimSpace(body.DisplayCommand))
@@ -2318,7 +2475,7 @@ func runDialtoneModWithEnvQuiet(repoRoot string, extraEnv map[string]string, arg
 	if len(args) >= 2 && shouldUseBackendCLI(args[0], args[1]) && backendCLIAvailable(repoRoot, args[0], args[1]) {
 		return runBackendCLIQuiet(repoRoot, extraEnv, args[0], args[1], args[2:]...)
 	}
-	cmd := exec.Command(filepath.Join(repoRoot, "dialtone_mod"), args...)
+	cmd := buildDialtoneModCommand(repoRoot, args...)
 	cmd.Dir = repoRoot
 	if len(extraEnv) > 0 {
 		env := os.Environ()
@@ -2343,6 +2500,29 @@ func runDialtoneModWithEnvQuiet(repoRoot string, extraEnv map[string]string, arg
 		return stdout.String(), fmt.Errorf("./dialtone_mod %s failed: %s", strings.Join(args, " "), errText)
 	}
 	return stdout.String(), nil
+}
+
+func buildDialtoneModCommand(repoRoot string, args ...string) *exec.Cmd {
+	repoRoot = strings.TrimSpace(repoRoot)
+	basePath := filepath.Join(repoRoot, "dialtone_mod")
+	if runtime.GOOS == "windows" {
+		for _, suffix := range []string{".cmd", ".bat", ".ps1", ".exe"} {
+			candidate := basePath + suffix
+			info, err := os.Stat(candidate)
+			if err != nil || info.IsDir() {
+				continue
+			}
+			switch suffix {
+			case ".cmd", ".bat":
+				return exec.Command("cmd.exe", append([]string{"/c", candidate}, args...)...)
+			case ".ps1":
+				return exec.Command("powershell.exe", append([]string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", candidate}, args...)...)
+			default:
+				return exec.Command(candidate, args...)
+			}
+		}
+	}
+	return exec.Command(basePath, args...)
 }
 
 func shouldUseBackendCLI(modName, version string) bool {

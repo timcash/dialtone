@@ -57,7 +57,7 @@ func TestQueueCommandViaShellCreatesTrackedShellBusRow(t *testing.T) {
 		t.Fatalf("set tmux target: %v", err)
 	}
 
-	rowID, err := QueueCommandViaShell(db, "/Users/user/dialtone", []string{"ssh", "v1", "help"})
+	rowID, runID, err := QueueCommandViaShell(db, "/Users/user/dialtone", []string{"ssh", "v1", "help"})
 	if err != nil {
 		t.Fatalf("QueueCommandViaShell returned error: %v", err)
 	}
@@ -68,9 +68,15 @@ func TestQueueCommandViaShellCreatesTrackedShellBusRow(t *testing.T) {
 	if !ok || record.Status != "queued" || record.Pane != "codex-view:0:1" {
 		t.Fatalf("unexpected queued record: ok=%v record=%+v", ok, record)
 	}
+	if record.CommandRunID != runID {
+		t.Fatalf("expected shell bus row to link command run %d, got %+v", runID, record)
+	}
 	body, err := dispatch.DecodeIntentBody(record.BodyJSON)
 	if err != nil {
 		t.Fatalf("DecodeIntentBody returned error: %v", err)
+	}
+	if body.RunID != runID {
+		t.Fatalf("expected body run id %d, got %+v", runID, body)
 	}
 	if body.InnerCommand != "./dialtone_mod ssh v1 help" {
 		t.Fatalf("unexpected inner command: %+v", body)
@@ -80,6 +86,19 @@ func TestQueueCommandViaShellCreatesTrackedShellBusRow(t *testing.T) {
 	}
 	if len(body.Args) != 3 || body.Args[0] != "ssh" || body.Args[2] != "help" {
 		t.Fatalf("expected raw args to be stored in sqlite, got %+v", body.Args)
+	}
+	run, ok, err := modstate.LoadCommandRun(db, runID)
+	if err != nil {
+		t.Fatalf("LoadCommandRun returned error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected queued command run %d", runID)
+	}
+	if run.Status != "queued" || run.ShellBusID != rowID || run.Transport != "shell_bus" {
+		t.Fatalf("unexpected command run: %+v", run)
+	}
+	if run.LogPath == "" || !strings.Contains(run.CommandText, "./dialtone_mod ssh v1 help") {
+		t.Fatalf("unexpected command run log/command: %+v", run)
 	}
 }
 

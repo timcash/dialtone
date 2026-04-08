@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -427,18 +428,25 @@ func executeTestPlanStep(db *sql.DB, repoRoot string, runID int64, modByKey map[
 }
 
 func runTestCommand(repoRoot, commandText string, requiresNix bool, flakeShell string) (string, int, error) {
-	script := fmt.Sprintf("cd %s && %s", shellQuote(filepath.Join(repoRoot, "src")), commandText)
 	var cmd *exec.Cmd
 	if requiresNix {
+		script := buildShellScript(filepath.Join(repoRoot, "src"), commandText)
+		shellName, shellArgs := shellProgramAndArgs(script)
 		shellRef := ".#" + strings.TrimSpace(flakeShell)
 		if strings.TrimSpace(flakeShell) == "" {
 			shellRef = ".#default"
 		}
-		cmd = exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "develop", shellRef, "--command", "zsh", "-lc", script)
+		args := []string{"--extra-experimental-features", "nix-command flakes", "develop", shellRef, "--command", shellName}
+		args = append(args, shellArgs...)
+		cmd = exec.Command("nix", args...)
 		cmd.Dir = repoRoot
 	} else {
-		cmd = exec.Command("zsh", "-lc", script)
-		cmd.Dir = repoRoot
+		commandArgs := strings.Fields(strings.TrimSpace(commandText))
+		if len(commandArgs) == 0 {
+			return "", -1, fmt.Errorf("test command is empty")
+		}
+		cmd = exec.Command(commandArgs[0], commandArgs[1:]...)
+		cmd.Dir = filepath.Join(repoRoot, "src")
 	}
 	var output bytes.Buffer
 	cmd.Stdout = &output
@@ -454,6 +462,24 @@ func runTestCommand(repoRoot, commandText string, requiresNix bool, flakeShell s
 		return output.String(), exitCode, err
 	}
 	return output.String(), exitCode, nil
+}
+
+func buildShellScript(dir, commandText string) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("cd /d %s && %s", cmdQuote(dir), commandText)
+	}
+	return fmt.Sprintf("cd %s && %s", shellQuote(dir), commandText)
+}
+
+func shellProgramAndArgs(script string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd.exe", []string{"/d", "/s", "/c", script}
+	}
+	return "sh", []string{"-lc", script}
+}
+
+func cmdQuote(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func resolveGoTestCommand(mod modstate.ModRecord) (string, bool) {

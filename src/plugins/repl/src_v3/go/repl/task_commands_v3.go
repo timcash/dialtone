@@ -13,6 +13,7 @@ import (
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
+	"github.com/nats-io/nats.go"
 )
 
 func RunTask(args []string) error {
@@ -222,6 +223,14 @@ func RunTaskKill(args []string) error {
 	logs.Raw("Stopping task %s (pid %d)", targetTaskID, item.PID)
 	if err := killManagedProcessFn(item.PID); err != nil {
 		return err
+	}
+	if nc, err := nats.Connect(strings.TrimSpace(*natsURL), nats.Timeout(1200*time.Millisecond)); err == nil {
+		func() {
+			defer nc.Close()
+			if store, err := newTaskKVStore(nc); err == nil {
+				_ = store.MarkExited(targetTaskID, item.PID, -1)
+			}
+		}()
 	}
 	logs.Raw("Stop signal sent to task %s.", targetTaskID)
 	return nil

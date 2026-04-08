@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -249,8 +250,13 @@ func TestBuildVisibleCommandEnvSkipsBlankWorkerPaneOverride(t *testing.T) {
 }
 
 func TestBuildTmuxStartCommandUsesRepoRootConfig(t *testing.T) {
-	got := buildTmuxStartCommand("/Users/user/dialtone", "codex-view")
-	if !strings.Contains(got, "/Users/user/dialtone/.tmux.conf") {
+	repoRoot := t.TempDir()
+	configPath := filepath.Join(repoRoot, ".tmux.conf")
+	if err := os.WriteFile(configPath, []byte("set -g status off\n"), 0o644); err != nil {
+		t.Fatalf("write tmux config: %v", err)
+	}
+	got := buildTmuxStartCommand(repoRoot, "codex-view")
+	if !strings.Contains(got, filepath.ToSlash(configPath)) && !strings.Contains(got, configPath) {
 		t.Fatalf("expected repo tmux config in command, got %q", got)
 	}
 	if !strings.Contains(got, "codex-view") {
@@ -681,9 +687,7 @@ func TestResolveReadPaneUsesRoleTargets(t *testing.T) {
 
 func TestWaitForPaneTimesOutWithContext(t *testing.T) {
 	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, "dialtone_mod"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatalf("write dialtone_mod stub: %v", err)
-	}
+	writeDialtoneModStub(t, tmp, "", "", 1)
 	err := waitForPane(tmp, "codex-view:0:0", 10*time.Millisecond)
 	if err == nil {
 		t.Fatalf("expected waitForPane to time out")
@@ -695,10 +699,7 @@ func TestWaitForPaneTimesOutWithContext(t *testing.T) {
 
 func TestRunDialtoneModQuietCapturesOutput(t *testing.T) {
 	tmp := t.TempDir()
-	script := "#!/bin/sh\nprintf 'ok from stub\\n'\n"
-	if err := os.WriteFile(filepath.Join(tmp, "dialtone_mod"), []byte(script), 0o755); err != nil {
-		t.Fatalf("write dialtone_mod stub: %v", err)
-	}
+	writeDialtoneModStub(t, tmp, "ok from stub", "", 0)
 	out, err := runDialtoneModQuiet(tmp, "ghostty", "v1", "list")
 	if err != nil {
 		t.Fatalf("runDialtoneModQuiet returned error: %v", err)
@@ -710,10 +711,7 @@ func TestRunDialtoneModQuietCapturesOutput(t *testing.T) {
 
 func TestRunDialtoneModQuietIncludesStdoutInError(t *testing.T) {
 	tmp := t.TempDir()
-	script := "#!/bin/sh\nprintf 'stdout text\\n'\nprintf 'stderr text\\n' >&2\nexit 1\n"
-	if err := os.WriteFile(filepath.Join(tmp, "dialtone_mod"), []byte(script), 0o755); err != nil {
-		t.Fatalf("write dialtone_mod stub: %v", err)
-	}
+	writeDialtoneModStub(t, tmp, "stdout text", "stderr text", 1)
 	_, err := runDialtoneModQuiet(tmp, "tmux", "v1", "list")
 	if err == nil {
 		t.Fatalf("expected runDialtoneModQuiet to fail")
@@ -726,19 +724,50 @@ func TestRunDialtoneModQuietIncludesStdoutInError(t *testing.T) {
 
 func TestPaneExistsReflectsDialtoneModResult(t *testing.T) {
 	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, "dialtone_mod"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write dialtone_mod stub: %v", err)
-	}
+	writeDialtoneModStub(t, tmp, "", "", 0)
 	if !paneExists(tmp, "codex-view:0:1") {
 		t.Fatalf("expected paneExists to return true")
 	}
 
-	if err := os.WriteFile(filepath.Join(tmp, "dialtone_mod"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatalf("rewrite dialtone_mod stub: %v", err)
-	}
+	writeDialtoneModStub(t, tmp, "", "", 1)
 	if paneExists(tmp, "codex-view:0:1") {
 		t.Fatalf("expected paneExists to return false")
 	}
+}
+
+func writeDialtoneModStub(t *testing.T, dir, stdoutText, stderrText string, exitCode int) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		var lines []string
+		lines = append(lines, "@echo off")
+		if strings.TrimSpace(stdoutText) != "" {
+			lines = append(lines, "echo "+stdoutText)
+		}
+		if strings.TrimSpace(stderrText) != "" {
+			lines = append(lines, "echo "+stderrText+" 1>&2")
+		}
+		lines = append(lines, "exit /b "+strconv.Itoa(exitCode), "")
+		if err := os.WriteFile(filepath.Join(dir, "dialtone_mod.cmd"), []byte(strings.Join(lines, "\r\n")), 0o644); err != nil {
+			t.Fatalf("write dialtone_mod.cmd stub: %v", err)
+		}
+		return
+	}
+	var scriptLines []string
+	scriptLines = append(scriptLines, "#!/bin/sh")
+	if strings.TrimSpace(stdoutText) != "" {
+		scriptLines = append(scriptLines, "printf '%s\\n' "+shellSingleQuote(stdoutText))
+	}
+	if strings.TrimSpace(stderrText) != "" {
+		scriptLines = append(scriptLines, "printf '%s\\n' "+shellSingleQuote(stderrText)+" >&2")
+	}
+	scriptLines = append(scriptLines, "exit "+strconv.Itoa(exitCode), "")
+	if err := os.WriteFile(filepath.Join(dir, "dialtone_mod"), []byte(strings.Join(scriptLines, "\n")), 0o755); err != nil {
+		t.Fatalf("write dialtone_mod stub: %v", err)
+	}
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func TestSummarizeSnapshotUsesLastNonEmptyLine(t *testing.T) {

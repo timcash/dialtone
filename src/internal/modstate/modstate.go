@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const schemaVersion = "1"
+const schemaVersion = "2"
 
 type ModRef struct {
 	Name    string `json:"name"`
@@ -99,18 +99,19 @@ type StateRecord struct {
 }
 
 type QueueRecord struct {
-	ID          int64
-	QueueName   string
-	Status      string
-	Kind        string
-	Target      string
-	CommandText string
-	PayloadJSON string
-	ResultText  string
-	ErrorText   string
-	CreatedAt   string
-	StartedAt   string
-	FinishedAt  string
+	ID           int64
+	CommandRunID int64
+	QueueName    string
+	Status       string
+	Kind         string
+	Target       string
+	CommandText  string
+	PayloadJSON  string
+	ResultText   string
+	ErrorText    string
+	CreatedAt    string
+	StartedAt    string
+	FinishedAt   string
 }
 
 type TopologyRecord struct {
@@ -190,19 +191,45 @@ type ModTestRunStepRecord struct {
 }
 
 type ShellBusRecord struct {
-	ID        int64
-	System    string
-	Scope     string
-	Subject   string
-	Action    string
-	Status    string
-	Actor     string
-	Session   string
-	Pane      string
-	RefID     int64
-	BodyJSON  string
-	CreatedAt string
-	UpdatedAt string
+	ID           int64
+	System       string
+	Scope        string
+	Subject      string
+	Action       string
+	Status       string
+	Actor        string
+	Session      string
+	Pane         string
+	RefID        int64
+	CommandRunID int64
+	BodyJSON     string
+	CreatedAt    string
+	UpdatedAt    string
+}
+
+type CommandRunRecord struct {
+	ID              int64
+	ModName         string
+	ModVersion      string
+	Verb            string
+	CommandText     string
+	ArgsJSON        string
+	Transport       string
+	Status          string
+	Target          string
+	FlakeShell      string
+	PackageRefsJSON string
+	ShellBusID      int64
+	PID             int
+	ExitCode        int
+	RuntimeMS       int64
+	LogPath         string
+	ResultText      string
+	ErrorText       string
+	CreatedAt       string
+	StartedAt       string
+	HeartbeatAt     string
+	FinishedAt      string
 }
 
 type SyncSummary struct {
@@ -344,6 +371,7 @@ func EnsureSchema(db *sql.DB) error {
 		);`,
 		`create table if not exists command_queue (
 			id integer primary key autoincrement,
+			command_run_id integer not null default 0,
 			queue_name text not null,
 			status text not null,
 			kind text not null,
@@ -356,6 +384,32 @@ func EnsureSchema(db *sql.DB) error {
 			started_at text not null default '',
 			finished_at text not null default ''
 		);`,
+		`create table if not exists command_runs (
+			id integer primary key autoincrement,
+			mod_name text not null,
+			mod_version text not null,
+			verb text not null default '',
+			command_text text not null,
+			args_json text not null default '[]',
+			transport text not null default '',
+			status text not null,
+			target text not null default '',
+			flake_shell text not null default '',
+			package_refs_json text not null default '[]',
+			shell_bus_id integer not null default 0,
+			pid integer not null default 0,
+			exit_code integer not null default 0,
+			runtime_ms integer not null default 0,
+			log_path text not null default '',
+			result_text text not null default '',
+			error_text text not null default '',
+			created_at text not null,
+			started_at text not null default '',
+			heartbeat_at text not null default '',
+			finished_at text not null default ''
+		);`,
+		`create index if not exists idx_command_runs_status on command_runs(status, id desc);`,
+		`create index if not exists idx_command_runs_mod on command_runs(mod_name, mod_version, id desc);`,
 		`create table if not exists mod_topology (
 			mod_name text not null,
 			mod_version text not null,
@@ -443,6 +497,7 @@ func EnsureSchema(db *sql.DB) error {
 			session text not null default '',
 			pane text not null default '',
 			ref_id integer not null default 0,
+			command_run_id integer not null default 0,
 			body_json text not null default '',
 			created_at text not null,
 			updated_at text not null
@@ -453,9 +508,53 @@ func EnsureSchema(db *sql.DB) error {
 			return err
 		}
 	}
+	if err := ensureTableColumn(db, "shell_bus", "command_run_id", "integer not null default 0"); err != nil {
+		return err
+	}
+	if err := ensureTableColumn(db, "command_queue", "command_run_id", "integer not null default 0"); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`create index if not exists idx_shell_bus_command_run_id on shell_bus(command_run_id, id desc)`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`create index if not exists idx_command_queue_command_run_id on command_queue(command_run_id, id desc)`); err != nil {
+		return err
+	}
 	_, err := db.Exec(`insert into meta(key, value, updated_at) values('schema_version', ?, ?)
 		on conflict(key) do update set value=excluded.value, updated_at=excluded.updated_at`, schemaVersion, nowRFC3339())
 	return err
+}
+
+func ensureTableColumn(db *sql.DB, tableName, columnName, columnDef string) error {
+	rows, err := db.Query(fmt.Sprintf("pragma table_info(%s)", quoteSQLiteIdent(tableName)))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(columnName)) {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(fmt.Sprintf("alter table %s add column %s %s", quoteSQLiteIdent(tableName), quoteSQLiteIdent(columnName), strings.TrimSpace(columnDef)))
+	return err
+}
+
+func quoteSQLiteIdent(value string) string {
+	return `"` + strings.ReplaceAll(strings.TrimSpace(value), `"`, `""`) + `"`
 }
 
 func SyncRepo(db *sql.DB, repoRoot string, env map[string]string) (SyncSummary, error) {
@@ -780,8 +879,8 @@ func EnqueueCommand(db *sql.DB, queueName, kind, target, commandText, payloadJSO
 	if err := EnsureSchema(db); err != nil {
 		return 0, err
 	}
-	result, err := db.Exec(`insert into command_queue(queue_name, status, kind, target, command_text, payload_json, created_at)
-		values(?, 'queued', ?, ?, ?, ?, ?)`,
+	result, err := db.Exec(`insert into command_queue(command_run_id, queue_name, status, kind, target, command_text, payload_json, created_at)
+		values(0, ?, 'queued', ?, ?, ?, ?, ?)`,
 		strings.TrimSpace(queueName),
 		strings.TrimSpace(kind),
 		strings.TrimSpace(target),
@@ -793,6 +892,216 @@ func EnqueueCommand(db *sql.DB, queueName, kind, target, commandText, payloadJSO
 		return 0, err
 	}
 	return result.LastInsertId()
+}
+
+func StartCommandRun(db *sql.DB, record CommandRunRecord) (int64, error) {
+	if err := EnsureSchema(db); err != nil {
+		return 0, err
+	}
+	status := strings.TrimSpace(record.Status)
+	if status == "" {
+		status = "queued"
+	}
+	argsJSON := strings.TrimSpace(record.ArgsJSON)
+	if argsJSON == "" {
+		argsJSON = "[]"
+	}
+	packageRefsJSON := strings.TrimSpace(record.PackageRefsJSON)
+	if packageRefsJSON == "" {
+		packageRefsJSON = "[]"
+	}
+	result, err := db.Exec(`insert into command_runs(
+			mod_name, mod_version, verb, command_text, args_json, transport, status, target,
+			flake_shell, package_refs_json, shell_bus_id, pid, exit_code, runtime_ms, log_path,
+			result_text, error_text, created_at, started_at, heartbeat_at, finished_at
+		) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(record.ModName),
+		strings.TrimSpace(record.ModVersion),
+		strings.TrimSpace(record.Verb),
+		record.CommandText,
+		argsJSON,
+		strings.TrimSpace(record.Transport),
+		status,
+		strings.TrimSpace(record.Target),
+		strings.TrimSpace(record.FlakeShell),
+		packageRefsJSON,
+		record.ShellBusID,
+		record.PID,
+		record.ExitCode,
+		record.RuntimeMS,
+		strings.TrimSpace(record.LogPath),
+		record.ResultText,
+		record.ErrorText,
+		nowRFC3339(),
+		strings.TrimSpace(record.StartedAt),
+		strings.TrimSpace(record.HeartbeatAt),
+		strings.TrimSpace(record.FinishedAt),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func UpdateCommandRunQueued(db *sql.DB, id, shellBusID int64, target, logPath string) error {
+	if err := EnsureSchema(db); err != nil {
+		return err
+	}
+	_, err := db.Exec(`update command_runs
+		set status = 'queued',
+			target = ?,
+			shell_bus_id = ?,
+			log_path = ?,
+			heartbeat_at = ?
+		where id = ?`,
+		strings.TrimSpace(target),
+		shellBusID,
+		strings.TrimSpace(logPath),
+		nowRFC3339(),
+		id,
+	)
+	return err
+}
+
+func MarkCommandRunRunning(db *sql.DB, id int64, pid int, target, logPath string) error {
+	if err := EnsureSchema(db); err != nil {
+		return err
+	}
+	now := nowRFC3339()
+	_, err := db.Exec(`update command_runs
+		set status = 'running',
+			pid = ?,
+			target = case when ? <> '' then ? else target end,
+			log_path = case when ? <> '' then ? else log_path end,
+			started_at = case when started_at = '' then ? else started_at end,
+			heartbeat_at = ?
+		where id = ?`,
+		pid,
+		strings.TrimSpace(target), strings.TrimSpace(target),
+		strings.TrimSpace(logPath), strings.TrimSpace(logPath),
+		now,
+		now,
+		id,
+	)
+	return err
+}
+
+func HeartbeatCommandRun(db *sql.DB, id int64, pid int, logPath string) error {
+	if err := EnsureSchema(db); err != nil {
+		return err
+	}
+	_, err := db.Exec(`update command_runs
+		set pid = case when ? > 0 then ? else pid end,
+			log_path = case when ? <> '' then ? else log_path end,
+			heartbeat_at = ?
+		where id = ?`,
+		pid, pid,
+		strings.TrimSpace(logPath), strings.TrimSpace(logPath),
+		nowRFC3339(),
+		id,
+	)
+	return err
+}
+
+func FinishCommandRun(db *sql.DB, id int64, status string, pid, exitCode int, runtimeMS int64, target, logPath, resultText, errorText string) error {
+	if err := EnsureSchema(db); err != nil {
+		return err
+	}
+	now := nowRFC3339()
+	_, err := db.Exec(`update command_runs
+		set status = ?,
+			pid = case when ? > 0 then ? else pid end,
+			exit_code = ?,
+			runtime_ms = ?,
+			target = case when ? <> '' then ? else target end,
+			log_path = case when ? <> '' then ? else log_path end,
+			result_text = ?,
+			error_text = ?,
+			heartbeat_at = ?,
+			finished_at = ?
+		where id = ?`,
+		strings.TrimSpace(status),
+		pid, pid,
+		exitCode,
+		runtimeMS,
+		strings.TrimSpace(target), strings.TrimSpace(target),
+		strings.TrimSpace(logPath), strings.TrimSpace(logPath),
+		resultText,
+		errorText,
+		now,
+		now,
+		id,
+	)
+	return err
+}
+
+func LoadCommandRuns(db *sql.DB, limit int) ([]CommandRunRecord, error) {
+	if err := EnsureSchema(db); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := db.Query(`select id, mod_name, mod_version, verb, command_text, args_json, transport, status, target,
+		flake_shell, package_refs_json, shell_bus_id, pid, exit_code, runtime_ms, log_path, result_text, error_text,
+		created_at, started_at, heartbeat_at, finished_at
+		from command_runs
+		order by id desc
+		limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CommandRunRecord{}
+	for rows.Next() {
+		var record CommandRunRecord
+		if err := rows.Scan(
+			&record.ID, &record.ModName, &record.ModVersion, &record.Verb, &record.CommandText, &record.ArgsJSON,
+			&record.Transport, &record.Status, &record.Target, &record.FlakeShell, &record.PackageRefsJSON,
+			&record.ShellBusID, &record.PID, &record.ExitCode, &record.RuntimeMS, &record.LogPath, &record.ResultText,
+			&record.ErrorText, &record.CreatedAt, &record.StartedAt, &record.HeartbeatAt, &record.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func LoadCommandRun(db *sql.DB, id int64) (CommandRunRecord, bool, error) {
+	if err := EnsureSchema(db); err != nil {
+		return CommandRunRecord{}, false, err
+	}
+	var record CommandRunRecord
+	err := db.QueryRow(`select id, mod_name, mod_version, verb, command_text, args_json, transport, status, target,
+		flake_shell, package_refs_json, shell_bus_id, pid, exit_code, runtime_ms, log_path, result_text, error_text,
+		created_at, started_at, heartbeat_at, finished_at
+		from command_runs
+		where id = ?`, id).Scan(
+		&record.ID, &record.ModName, &record.ModVersion, &record.Verb, &record.CommandText, &record.ArgsJSON,
+		&record.Transport, &record.Status, &record.Target, &record.FlakeShell, &record.PackageRefsJSON,
+		&record.ShellBusID, &record.PID, &record.ExitCode, &record.RuntimeMS, &record.LogPath, &record.ResultText,
+		&record.ErrorText, &record.CreatedAt, &record.StartedAt, &record.HeartbeatAt, &record.FinishedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return CommandRunRecord{}, false, nil
+		}
+		return CommandRunRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func LinkShellBusCommandRun(db *sql.DB, shellBusID, commandRunID int64) error {
+	if err := EnsureSchema(db); err != nil {
+		return err
+	}
+	_, err := db.Exec(`update shell_bus set command_run_id = ?, updated_at = ? where id = ?`,
+		commandRunID,
+		nowRFC3339(),
+		shellBusID,
+	)
+	return err
 }
 
 func MarkCommandStarted(db *sql.DB, id int64) error {
@@ -818,7 +1127,7 @@ func LoadQueue(db *sql.DB, queueName string, limit int) ([]QueueRecord, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := db.Query(`select id, queue_name, status, kind, target, command_text, payload_json, result_text, error_text, created_at, started_at, finished_at
+	rows, err := db.Query(`select id, command_run_id, queue_name, status, kind, target, command_text, payload_json, result_text, error_text, created_at, started_at, finished_at
 		from command_queue
 		where queue_name = ?
 		order by id desc
@@ -831,7 +1140,7 @@ func LoadQueue(db *sql.DB, queueName string, limit int) ([]QueueRecord, error) {
 	for rows.Next() {
 		var record QueueRecord
 		if err := rows.Scan(
-			&record.ID, &record.QueueName, &record.Status, &record.Kind, &record.Target,
+			&record.ID, &record.CommandRunID, &record.QueueName, &record.Status, &record.Kind, &record.Target,
 			&record.CommandText, &record.PayloadJSON, &record.ResultText, &record.ErrorText,
 			&record.CreatedAt, &record.StartedAt, &record.FinishedAt,
 		); err != nil {
@@ -1029,8 +1338,8 @@ func EnqueueShellBus(db *sql.DB, system, scope, subject, action, actor, session,
 		return 0, err
 	}
 	now := nowRFC3339()
-	result, err := db.Exec(`insert into shell_bus(system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at)
-		values(?, ?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?, ?)`,
+	result, err := db.Exec(`insert into shell_bus(system, scope, subject, action, status, actor, session, pane, ref_id, command_run_id, body_json, created_at, updated_at)
+		values(?, ?, ?, ?, 'queued', ?, ?, ?, 0, 0, ?, ?, ?)`,
 		strings.TrimSpace(system),
 		strings.TrimSpace(scope),
 		strings.TrimSpace(subject),
@@ -1088,7 +1397,7 @@ func LoadShellBus(db *sql.DB, scope string, limit int) ([]ShellBusRecord, error)
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := db.Query(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at
+	rows, err := db.Query(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, command_run_id, body_json, created_at, updated_at
 		from shell_bus
 		where (? = '' or scope = ?)
 		order by id desc
@@ -1100,7 +1409,7 @@ func LoadShellBus(db *sql.DB, scope string, limit int) ([]ShellBusRecord, error)
 	out := []ShellBusRecord{}
 	for rows.Next() {
 		var record ShellBusRecord
-		if err := rows.Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt); err != nil {
+		if err := rows.Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.CommandRunID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, record)
@@ -1115,7 +1424,7 @@ func LoadQueuedShellBus(db *sql.DB, limit int) ([]ShellBusRecord, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := db.Query(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at
+	rows, err := db.Query(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, command_run_id, body_json, created_at, updated_at
 		from shell_bus
 		where scope = 'desired' and status = 'queued'
 		order by id asc
@@ -1127,7 +1436,7 @@ func LoadQueuedShellBus(db *sql.DB, limit int) ([]ShellBusRecord, error) {
 	out := []ShellBusRecord{}
 	for rows.Next() {
 		var record ShellBusRecord
-		if err := rows.Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt); err != nil {
+		if err := rows.Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.CommandRunID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, record)
@@ -1140,10 +1449,10 @@ func LoadShellBusRecord(db *sql.DB, id int64) (ShellBusRecord, bool, error) {
 		return ShellBusRecord{}, false, err
 	}
 	var record ShellBusRecord
-	err := db.QueryRow(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, body_json, created_at, updated_at
+	err := db.QueryRow(`select id, system, scope, subject, action, status, actor, session, pane, ref_id, command_run_id, body_json, created_at, updated_at
 		from shell_bus
 		where id = ?`, id).
-		Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt)
+		Scan(&record.ID, &record.System, &record.Scope, &record.Subject, &record.Action, &record.Status, &record.Actor, &record.Session, &record.Pane, &record.RefID, &record.CommandRunID, &record.BodyJSON, &record.CreatedAt, &record.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return ShellBusRecord{}, false, nil

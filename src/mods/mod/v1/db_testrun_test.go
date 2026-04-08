@@ -16,16 +16,9 @@ func TestRunDBTestRunPersistsRunStateAndReadmes(t *testing.T) {
 	writeDiscoverTestFile(t, filepath.Join(repoRoot, "dialtone_mod"), "#!/bin/sh\nexit 0\n")
 	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "go.mod"), "module example\n\ngo 1.25\n")
 	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "ghostty", "v1", "main.go"), "package main\n")
-	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "ghostty", "v1", "mod.json"), `{"name":"ghostty","version":"v1","testing":{"requires_nix":true,"serial_group":"desktop","visible_tmux":true},"nix":{"flake_shell":"default"}}`)
+	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "ghostty", "v1", "mod.json"), `{"name":"ghostty","version":"v1","testing":{"requires_nix":false,"serial_group":"desktop","visible_tmux":true},"nix":{"flake_shell":"default"}}`)
 	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "shell", "v1", "main.go"), "package main\n")
-	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "shell", "v1", "mod.json"), `{"name":"shell","version":"v1","depends_on":[{"name":"ghostty","version":"v1"}],"testing":{"requires_nix":true,"serial_group":"desktop","visible_tmux":true},"nix":{"flake_shell":"default"}}`)
-
-	binDir := t.TempDir()
-	writeDiscoverTestFile(t, filepath.Join(binDir, "nix"), fakeNixScript())
-	if err := os.Chmod(filepath.Join(binDir, "nix"), 0o755); err != nil {
-		t.Fatalf("chmod nix: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "shell", "v1", "mod.json"), `{"name":"shell","version":"v1","depends_on":[{"name":"ghostty","version":"v1"}],"testing":{"requires_nix":false,"serial_group":"desktop","visible_tmux":true},"nix":{"flake_shell":"default"}}`)
 
 	if err := runDBTestRun([]string{"--name", "default"}); err != nil {
 		t.Fatalf("runDBTestRun returned error: %v", err)
@@ -92,16 +85,9 @@ func TestRunDBTestRunStopsOnFirstFailure(t *testing.T) {
 	writeDiscoverTestFile(t, filepath.Join(repoRoot, "dialtone_mod"), "#!/bin/sh\nexit 0\n")
 	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "go.mod"), "module example\n\ngo 1.25\n")
 	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "ghostty", "v1", "main.go"), "package main\n\nfunc broken(\n")
-	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "ghostty", "v1", "mod.json"), `{"name":"ghostty","version":"v1","testing":{"requires_nix":true,"serial_group":"desktop","visible_tmux":true},"nix":{"flake_shell":"default"}}`)
+	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "ghostty", "v1", "mod.json"), `{"name":"ghostty","version":"v1","testing":{"requires_nix":false,"serial_group":"desktop","visible_tmux":true},"nix":{"flake_shell":"default"}}`)
 	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "shell", "v1", "main.go"), "package main\n")
-	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "shell", "v1", "mod.json"), `{"name":"shell","version":"v1","depends_on":[{"name":"ghostty","version":"v1"}],"testing":{"requires_nix":true,"serial_group":"desktop","visible_tmux":true},"nix":{"flake_shell":"default"}}`)
-
-	binDir := t.TempDir()
-	writeDiscoverTestFile(t, filepath.Join(binDir, "nix"), fakeNixScript())
-	if err := os.Chmod(filepath.Join(binDir, "nix"), 0o755); err != nil {
-		t.Fatalf("chmod nix: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "mods", "shell", "v1", "mod.json"), `{"name":"shell","version":"v1","depends_on":[{"name":"ghostty","version":"v1"}],"testing":{"requires_nix":false,"serial_group":"desktop","visible_tmux":true},"nix":{"flake_shell":"default"}}`)
 
 	if err := runDBTestRun([]string{"--name", "default", "--update-readmes=false"}); err != nil {
 		t.Fatalf("runDBTestRun returned error: %v", err)
@@ -127,28 +113,4 @@ func TestRunDBTestRunStopsOnFirstFailure(t *testing.T) {
 	if len(steps) != 1 || steps[0].Status != "failed" {
 		t.Fatalf("expected one failed step, got %+v", steps)
 	}
-}
-
-func fakeNixScript() string {
-	return `#!/bin/sh
-set -eu
-while [ "${1:-}" = "--extra-experimental-features" ]; do
-  shift
-  shift
-done
-if [ "${1:-}" != "develop" ]; then
-  echo "unexpected nix command: $*" >&2
-  exit 1
-fi
-shift
-if [ "${1:-}" != "" ] && [ "${1#.#}" != "${1}" ]; then
-  shift
-fi
-if [ "${1:-}" != "--command" ]; then
-  echo "missing --command: $*" >&2
-  exit 1
-fi
-shift
-exec "$@"
-`
 }

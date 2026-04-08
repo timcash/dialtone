@@ -33,6 +33,10 @@ func runDB(args []string) error {
 		return runDBState(args[1:])
 	case "queue":
 		return runDBQueue(args[1:])
+	case "runs":
+		return runDBRuns(args[1:])
+	case "run":
+		return runDBRun(args[1:])
 	case "topo":
 		return runDBTopo(args[1:])
 	case "test-plan":
@@ -314,6 +318,96 @@ func runDBQueue(args []string) error {
 	return nil
 }
 
+func runDBRuns(args []string) error {
+	fs := flag.NewFlagSet("mods db runs", flag.ContinueOnError)
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
+	limit := fs.Int("limit", 20, "Maximum command runs to print")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("db runs does not accept positional arguments")
+	}
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := modstate.Open(resolveStateDBPath(repoRoot, *dbPath))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	rows, err := modstate.LoadCommandRuns(db, *limit)
+	if err != nil {
+		return err
+	}
+	fmt.Println("id\tmod_name\tmod_version\tverb\ttransport\tstatus\tshell_bus_id\tpid\texit_code\truntime_ms\tflake_shell\ttarget\tlog_path\tcreated_at\tfinished_at\tcommand")
+	for _, row := range rows {
+		fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.ID, row.ModName, row.ModVersion, row.Verb, row.Transport, row.Status, row.ShellBusID, row.PID,
+			row.ExitCode, row.RuntimeMS, row.FlakeShell, row.Target, row.LogPath, row.CreatedAt, row.FinishedAt, row.CommandText)
+	}
+	return nil
+}
+
+func runDBRun(args []string) error {
+	fs := flag.NewFlagSet("mods db run", flag.ContinueOnError)
+	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
+	runID := fs.Int64("id", 0, "Command run id to inspect")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("db run does not accept positional arguments")
+	}
+	if *runID <= 0 {
+		return fmt.Errorf("db run requires --id <id>")
+	}
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	db, err := modstate.Open(resolveStateDBPath(repoRoot, *dbPath))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	row, ok, err := modstate.LoadCommandRun(db, *runID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("command run %d not found", *runID)
+	}
+	fmt.Printf("run_id\t%d\n", row.ID)
+	fmt.Printf("mod_name\t%s\n", row.ModName)
+	fmt.Printf("mod_version\t%s\n", row.ModVersion)
+	fmt.Printf("verb\t%s\n", row.Verb)
+	fmt.Printf("transport\t%s\n", row.Transport)
+	fmt.Printf("status\t%s\n", row.Status)
+	fmt.Printf("shell_bus_id\t%d\n", row.ShellBusID)
+	fmt.Printf("target\t%s\n", row.Target)
+	fmt.Printf("flake_shell\t%s\n", row.FlakeShell)
+	fmt.Printf("pid\t%d\n", row.PID)
+	fmt.Printf("exit_code\t%d\n", row.ExitCode)
+	fmt.Printf("runtime_ms\t%d\n", row.RuntimeMS)
+	fmt.Printf("log_path\t%s\n", row.LogPath)
+	fmt.Printf("created_at\t%s\n", row.CreatedAt)
+	fmt.Printf("started_at\t%s\n", row.StartedAt)
+	fmt.Printf("heartbeat_at\t%s\n", row.HeartbeatAt)
+	fmt.Printf("finished_at\t%s\n", row.FinishedAt)
+	fmt.Printf("command\t%s\n", row.CommandText)
+	fmt.Printf("args_json\t%s\n", row.ArgsJSON)
+	fmt.Printf("package_refs_json\t%s\n", row.PackageRefsJSON)
+	if strings.TrimSpace(row.ResultText) != "" {
+		fmt.Printf("result_text\t%s\n", row.ResultText)
+	}
+	if strings.TrimSpace(row.ErrorText) != "" {
+		fmt.Printf("error_text\t%s\n", row.ErrorText)
+	}
+	return nil
+}
+
 func runDBTopo(args []string) error {
 	fs := flag.NewFlagSet("mods db topo", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "SQLite database path (default: DIALTONE_STATE_DB or ~/.dialtone/state.sqlite)")
@@ -468,6 +562,10 @@ func printDBUsage() {
 	fmt.Println("       Delete a sqlite-backed system state entry")
 	fmt.Println("  queue [--db PATH] [--name tmux] [--limit 20]")
 	fmt.Println("       Print queue rows with timestamps from sqlite")
+	fmt.Println("  runs [--db PATH] [--limit 20]")
+	fmt.Println("       Print canonical SQLite command runs for routed mod execution")
+	fmt.Println("  run [--db PATH] --id ID")
+	fmt.Println("       Print one canonical SQLite command run in detail")
 	fmt.Println("  topo [--db PATH]")
 	fmt.Println("       Print the validated topological order for the mod DAG")
 	fmt.Println("  test-plan [--db PATH] [--name default]")
@@ -482,4 +580,13 @@ func printDBUsage() {
 	fmt.Println("       Print recorded protocol runs that tie codex-view, dialtone-view, and SQLite together")
 	fmt.Println("  protocol-events [--db PATH] --run ID")
 	fmt.Println("       Print the ordered SQLite protocol events for a specific protocol run")
+	fmt.Println("")
+	fmt.Println("Examples:")
+	fmt.Println("  ./dialtone_mod mods v1 db sync")
+	fmt.Println("  ./dialtone_mod mods v1 db runs --limit 10")
+	fmt.Println("  ./dialtone_mod mods v1 db run --id 42")
+	fmt.Println("  ./dialtone_mod mods v1 db graph --format outline")
+	fmt.Println("  ./dialtone_mod mods v1 db queue --limit 20")
+	fmt.Println("  ./dialtone_mod mods v1 db protocol-runs --limit 10")
+	fmt.Println("  ./dialtone_mod mods v1 db test-run --name default")
 }

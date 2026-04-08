@@ -474,21 +474,25 @@ func TestRenderRouteReportIncludesQueuedCommandAndInspectHint(t *testing.T) {
 		"/Users/user/dialtone",
 		db,
 		948,
+		72,
 		"./dialtone_mod mods v1 db graph --format outline",
 		"codex-view:0:1",
 		ensureResult{PID: 10, LogPath: "/tmp/dialtone.log", State: "started"},
 	)
+	commandLogPath := sqlitestate.ResolveCommandLogPath("/Users/user/dialtone", 948)
 	for _, want := range []string{
 		"route\tqueued",
 		"command_id\t948",
+		"run_id\t72",
 		"command\t./dialtone_mod mods v1 db graph --format outline",
 		"command_target\tcodex-view:0:1",
-		"command_log_path\t/Users/user/.dialtone/logs/commands/shell-bus-948.log",
+		"command_log_path\t" + commandLogPath,
 		"dialtone_pid\t10",
 		"dialtone_status\tstarted",
 		"worker_status\trunning",
 		"inspect\t./dialtone_mod dialtone v1 command --row-id 948 --full",
 		"inspect_log\t./dialtone_mod dialtone v1 log --kind command --row-id 948",
+		"inspect_run\t./dialtone_mod mods v1 db run --id 72",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("renderRouteReport missing %q in output:\n%s", want, text)
@@ -507,7 +511,7 @@ func TestResolveDialtoneLogPathFallsBackToDeterministicCommandPath(t *testing.T)
 	if err != nil {
 		t.Fatalf("resolveDialtoneLogPath returned error: %v", err)
 	}
-	want := "/Users/user/.dialtone/logs/commands/shell-bus-" + strconv.FormatInt(rowID, 10) + ".log"
+	want := sqlitestate.ResolveCommandLogPath("/Users/user/dialtone", rowID)
 	if path != want {
 		t.Fatalf("unexpected log path: got %q want %q", path, want)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"dialtone/dev/plugins/proc/src_v1/go/proc"
 	"github.com/nats-io/nats.go"
+	gopsprocess "github.com/shirou/gopsutil/v3/process"
 )
 
 const taskKVBucketName = "repl_task_v3"
@@ -285,6 +286,51 @@ func queryTaskRegistry(natsURL string, count int) ([]taskRegistryItem, error) {
 	return out, nil
 }
 
+func (s *taskKVStore) ReconcileLocalRuntime(host string, managed []proc.ManagedProcessSnapshot) error {
+	return s.reconcileLocalRuntime(host, managed, time.Now().UTC(), liveManagedProcessStartTime)
+}
+
+func (s *taskKVStore) reconcileLocalRuntime(host string, managed []proc.ManagedProcessSnapshot, now time.Time, inspect func(int) (time.Time, bool)) error {
+	if s == nil || s.kv == nil {
+		return fmt.Errorf("task kv store is not available")
+	}
+	host = taskKVHost(host)
+	keys, err := s.kv.Keys()
+	if err != nil {
+		if errors.Is(err, nats.ErrNoKeysFound) {
+			return nil
+		}
+		return err
+	}
+	managedByPID := map[int]proc.ManagedProcessSnapshot{}
+	for _, snap := range managed {
+		if snap.PID > 0 {
+			managedByPID[snap.PID] = snap
+		}
+	}
+	for _, key := range keys {
+		entry, getErr := s.kv.Get(strings.TrimSpace(key))
+		if getErr != nil {
+			if errors.Is(getErr, nats.ErrKeyNotFound) {
+				continue
+			}
+			return getErr
+		}
+		record := taskKVRecord{}
+		if err := json.Unmarshal(entry.Value(), &record); err != nil {
+			return err
+		}
+		next, changed := reconcileTaskKVRecord(record, host, managedByPID, now, inspect)
+		if !changed {
+			continue
+		}
+		if err := s.put(next); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func queryTaskByID(natsURL string, taskID string) (taskRegistryItem, bool) {
 	natsURL = strings.TrimSpace(natsURL)
 	if natsURL == "" {
@@ -382,4 +428,86 @@ func parseTaskKVTimestamp(raw string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func reconcileTaskKVRecord(record taskKVRecord, host string, managedByPID map[int]proc.ManagedProcessSnapshot, now time.Time, inspect func(int) (time.Time, bool)) (taskKVRecord, bool) {
+	if taskKVHost(record.Host) != taskKVHost(host) {
+		return record, false
+	}
+	state := taskRecordState(record.State)
+	switch state {
+	case "queued":
+		if record.PID > 0 && taskKVRecordMatchesLiveProcess(record, managedByPID, inspect) {
+			ts := now.Format(time.RFC3339Nano)
+			if record.State != "running" || record.UpdatedAt != ts || record.LastOKAt != ts {
+				record.State = "running"
+				record.UpdatedAt = ts
+				record.LastOKAt = ts
+				return record, true
+			}
+		}
+	case "running":
+		if taskKVRecordMatchesLiveProcess(record, managedByPID, inspect) {
+			ts := now.Format(time.RFC3339Nano)
+			if record.UpdatedAt != ts || record.LastOKAt != ts {
+				record.UpdatedAt = ts
+				record.LastOKAt = ts
+				return record, true
+			}
+			return record, false
+		}
+		ts := now.Format(time.RFC3339Nano)
+		record.State = "done"
+		record.UpdatedAt = ts
+		if record.ExitCode == nil {
+			code := -1
+			record.ExitCode = &code
+		}
+		return record, true
+	}
+	return record, false
+}
+
+func taskKVRecordMatchesLiveProcess(record taskKVRecord, managedByPID map[int]proc.ManagedProcessSnapshot, inspect func(int) (time.Time, bool)) bool {
+	if record.PID <= 0 {
+		return false
+	}
+	if _, ok := managedByPID[record.PID]; ok {
+		return true
+	}
+	startedAt := parseTaskKVTimestamp(record.StartedAt)
+	if startedAt.IsZero() {
+		startedAt = parseTaskKVTimestamp(record.CreatedAt)
+	}
+	liveStartedAt, ok := inspect(record.PID)
+	if !ok {
+		return false
+	}
+	if startedAt.IsZero() || liveStartedAt.IsZero() {
+		return true
+	}
+	delta := liveStartedAt.Sub(startedAt)
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta <= 30*time.Second
+}
+
+func liveManagedProcessStartTime(pid int) (time.Time, bool) {
+	if pid <= 0 {
+		return time.Time{}, false
+	}
+	procHandle, err := gopsprocess.NewProcess(int32(pid))
+	if err != nil {
+		return time.Time{}, false
+	}
+	running, err := procHandle.IsRunning()
+	if err != nil || !running {
+		return time.Time{}, false
+	}
+	createdMS, err := procHandle.CreateTime()
+	if err != nil || createdMS <= 0 {
+		return time.Time{}, true
+	}
+	return time.UnixMilli(createdMS).UTC(), true
 }

@@ -8,11 +8,13 @@ import (
 )
 
 func TestDefaultStateDirUsesUserHome(t *testing.T) {
-	t.Setenv("HOME", "/tmp/dialtone-home")
-	if got := DefaultStateDir("/tmp/repo"); got != "/tmp/dialtone-home/.dialtone" {
+	home := filepath.Join(t.TempDir(), "dialtone-home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if got := DefaultStateDir("/tmp/repo"); got != filepath.Join(home, ".dialtone") {
 		t.Fatalf("unexpected default state dir: %q", got)
 	}
-	if got := DefaultDBPath("/tmp/repo"); got != "/tmp/dialtone-home/.dialtone/state.sqlite" {
+	if got := DefaultDBPath("/tmp/repo"); got != filepath.Join(home, ".dialtone", "state.sqlite") {
 		t.Fatalf("unexpected default db path: %q", got)
 	}
 }
@@ -220,6 +222,74 @@ func TestCommandQueueLifecycle(t *testing.T) {
 	}
 	if queue[0].ID != id || queue[0].Status != "done" || queue[0].Target != "codex-view:0:0" {
 		t.Fatalf("unexpected queue record: %+v", queue[0])
+	}
+}
+
+func TestCommandRunLifecycle(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "state.sqlite"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	runID, err := StartCommandRun(db, CommandRunRecord{
+		ModName:         "ssh",
+		ModVersion:      "v1",
+		Verb:            "help",
+		CommandText:     "./dialtone_mod ssh v1 help",
+		ArgsJSON:        `["ssh","v1","help"]`,
+		Transport:       "shell_bus",
+		Status:          "queued",
+		Target:          "codex-view:0:1",
+		FlakeShell:      "default",
+		PackageRefsJSON: `["nixpkgs#bashInteractive","nixpkgs#go_1_25"]`,
+	})
+	if err != nil {
+		t.Fatalf("StartCommandRun returned error: %v", err)
+	}
+
+	rowID, err := EnqueueShellBus(db, "shell", "desired", "command", "run", "dialtone_mod", "codex-view", "codex-view:0:1", `{"run_id":1,"command":"./dialtone_mod ssh v1 help"}`)
+	if err != nil {
+		t.Fatalf("EnqueueShellBus returned error: %v", err)
+	}
+	if err := LinkShellBusCommandRun(db, rowID, runID); err != nil {
+		t.Fatalf("LinkShellBusCommandRun returned error: %v", err)
+	}
+	if err := UpdateCommandRunQueued(db, runID, rowID, "codex-view:0:1", "/tmp/shell-bus-1.log"); err != nil {
+		t.Fatalf("UpdateCommandRunQueued returned error: %v", err)
+	}
+	if err := MarkCommandRunRunning(db, runID, 456, "codex-view:0:1", "/tmp/shell-bus-1.log"); err != nil {
+		t.Fatalf("MarkCommandRunRunning returned error: %v", err)
+	}
+	if err := FinishCommandRun(db, runID, "done", 456, 0, 1200, "codex-view:0:1", "/tmp/shell-bus-1.log", "ok", ""); err != nil {
+		t.Fatalf("FinishCommandRun returned error: %v", err)
+	}
+
+	run, ok, err := LoadCommandRun(db, runID)
+	if err != nil {
+		t.Fatalf("LoadCommandRun returned error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected command run %d", runID)
+	}
+	if run.Status != "done" || run.ShellBusID != rowID || run.PID != 456 || run.RuntimeMS != 1200 {
+		t.Fatalf("unexpected command run: %+v", run)
+	}
+
+	runs, err := LoadCommandRuns(db, 10)
+	if err != nil {
+		t.Fatalf("LoadCommandRuns returned error: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != runID {
+		t.Fatalf("unexpected command runs: %+v", runs)
+	}
+
+	record, ok, err := LoadShellBusRecord(db, rowID)
+	if err != nil {
+		t.Fatalf("LoadShellBusRecord returned error: %v", err)
+	}
+	if !ok || record.CommandRunID != runID {
+		t.Fatalf("unexpected linked shell bus record: ok=%v record=%+v", ok, record)
 	}
 }
 

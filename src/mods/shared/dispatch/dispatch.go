@@ -11,6 +11,7 @@ import (
 )
 
 type ShellCommandIntent struct {
+	RunID          int64    `json:"run_id,omitempty"`
 	Command        string   `json:"command,omitempty"`
 	Expect         string   `json:"expect,omitempty"`
 	InnerCommand   string   `json:"inner_command,omitempty"`

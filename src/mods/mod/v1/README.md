@@ -2,33 +2,86 @@
 
 The `mods` mod is the SQLite control surface for the Dialtone mods system. It
 syncs the repo into the local state database, prints dependency/state data, and
-lets callers inspect queue/state records directly from SQLite.
+lets callers inspect the canonical `command_runs` ledger, linked transport
+rows, and protocol/test records directly from SQLite.
 
 ## Quick Start
 
 ```sh
-# Show the mod command surface from the sqlite-managed mods system.
 ./dialtone_mod mods v1 help
-
-# Regenerate the sqlite DAG and the stepwise test plan before the next TDD loop.
 ./dialtone_mod mods v1 db sync
 ./dialtone_mod mods v1 db graph --format outline
+./dialtone_mod mods v1 db runs --limit 10
 ./dialtone_mod mods v1 db test-plan
+```
 
-# Inspect the latest protocol run that ties SQLite, codex-view, and
-# dialtone-view together.
-env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-runs --limit 5
-env DIALTONE_TMUX_PROXY_ACTIVE=1 ./dialtone_mod mods v1 db protocol-events --run 2
+## Workflows
 
-# Or query the tables directly through sqlite.
+### Refresh The SQLite Registry
+
+```sh
+./dialtone_mod mods v1 db path
+./dialtone_mod mods v1 db init
+./dialtone_mod mods v1 db sync
+./dialtone_mod mods v1 db graph --format outline
+./dialtone_mod mods v1 db topo
+```
+
+### Inspect Queue, State, And Protocol Data
+
+```sh
+./dialtone_mod mods v1 db env
+./dialtone_mod mods v1 db state
+./dialtone_mod mods v1 db queue --limit 20
+./dialtone_mod mods v1 db runs --limit 20
+./dialtone_mod mods v1 db run --id <run_id>
+./dialtone_mod mods v1 db protocol-runs --limit 10
+./dialtone_mod mods v1 db protocol-events --run <run_id>
+```
+
+### Use The Shared Test Config
+
+```sh
+export DIALTONE_ENV_FILE=env/test.dialtone.json
+./dialtone_mod mods v1 db sync
+./dialtone_mod mods v1 db runs --limit 10
+./dialtone_mod mods v1 db test-run --name default
+```
+
+### Query The SQLite Database Directly
+
+```sh
 nix --extra-experimental-features 'nix-command flakes' develop .#default \
   --command sqlite3 "$(./dialtone_mod mods v1 db path)" \
-  "select id,name,status,prompt_target,command_target,result_text from protocol_runs order by id desc limit 5;"
+  "select id,mod_name,mod_version,verb,status,target,log_path from command_runs order by id desc limit 5;"
+```
 
-# Run the Go test package for this mod under Nix.
+### Execute The SQLite Test Plan
+
+```sh
+./dialtone_mod mods v1 db sync
+./dialtone_mod mods v1 db test-plan
+./dialtone_mod mods v1 db test-run --name default
+./dialtone_mod mods v1 db test-runs --limit 10
+./dialtone_mod mods v1 db test-run-steps --run <run_id>
+```
+
+### Run The Go Tests For This Mod Under Nix
+
+```sh
 cd /Users/user/dialtone
-nix --extra-experimental-features 'nix-command flakes' develop .#default \
-  --command zsh -lc 'cd src && go test ./mods/mod/v1'
+DIALTONE_ENV_FILE=env/test.dialtone.json nix --extra-experimental-features 'nix-command flakes' develop .#default \
+  --command zsh -lc 'cd src && go test ./mods/mod/v1 ./mods/mod/v1/cli'
+```
+
+### Windows: Use The Visible Tmux Workflow
+
+```powershell
+.\dialtone_mod.ps1 mod v1 help
+.\dialtone_mod.ps1 mod v1 list
+.\dialtone_mod.ps1 mod v1 db sync
+.\dialtone_mod.ps1 mod v1 db graph --format outline
+.\dialtone_mod.ps1 read
 ```
 
 ## Dependencies

@@ -5,10 +5,11 @@
 Use this mental model:
 - plain `./dialtone.sh <plugin> ...` injects into the local REPL leader
 - queued task submission is the default; only explicit query/operator commands stay foreground
-- the leader turns the real command into a task or manages a long-lived service
-- NATS is the control plane for requests, lifecycle updates, and topic traffic
-- NATS KV stores durable task and service state
-- service tasks publish heartbeats and the leader reconciles them if heartbeats stop
+- the leader turns the real command into a task or manages a long-lived service wrapper around a process
+- one manager NATS instance is the normal control plane for requests, lifecycle updates, room traffic, and task KV
+- task state is durable in NATS KV
+- service state is currently a leader-local registry driven by local process events and service heartbeats
+- some plugins, such as `chrome src_v3`, may also run their own daemon-side command bus
 - `dialtone>` stays short and high-level
 - full output stays in the task log
 
@@ -18,24 +19,68 @@ Public terminology:
 - `service`: one long-lived managed process, such as `chrome src_v3` on `legion`
 - `topic`: the event/log stream for a task or service
 
+## Current Architecture
+
+The current center of gravity is:
+
+`./dialtone.sh` -> leader autostart if needed -> manager NATS command publish -> task record in NATS KV -> worker execution and log streaming -> optional service heartbeat publication -> query surfaces over task KV and service registry
+
+This is a control plane with durable task identity, not just a thin wrapper around one local process launch.
+
+### Current Topology
+
+```mermaid
+flowchart LR
+  A["./dialtone.sh"] --> B["REPL leader"]
+  B --> C["manager NATS"]
+  B --> D["task KV: repl_task_v3"]
+  B --> E["task worker"]
+
+  E --> F["normal plugin command"]
+  E --> G["service wrapper command"]
+
+  G --> H["testdaemon daemon"]
+  G --> I["chrome controller"]
+  I --> J["chrome daemon on target host"]
+
+  J -->|preferred| C
+  J -->|service heartbeat| C
+  J -->|fallback only| K["per-role embedded NATS"]
+```
+
+### What Is Actually Persisted Today
+
+- task identity and task state are stored in NATS KV
+- task logs are durable files under `~/.dialtone/logs`
+- service state is not yet a full KV desired and observed model
+- current service queries come from the leader-local service registry plus heartbeats
+- plugin-specific daemons may keep their own local state files in addition to REPL state
+
+### How The Main Examples Fit
+
+- `testdaemon src_v1` is a fixture process, not a NATS-native daemon; REPL wraps it as a task or service, while the fixture itself stores status under `~/.dialtone/testdaemon/services/<name>`
+- `chrome src_v3` is different: it runs a real daemon with a NATS request or reply command surface and publishes service heartbeats back into the REPL manager bus
+- in the normal WSL -> Windows flow, there is usually one manager NATS instance total; `chrome src_v3` only adds a second per-role NATS instance when it falls back to embedded daemon-local NATS instead of the manager bus
+
+### Current Truth Sources
+
+- `task list` and `task show`: task KV first
+- `task log`: durable task log file
+- `/ps`: leader-local managed process registry
+- service list and service status style views: leader-local service registry plus service heartbeats
+- plugin-specific doctor and logs commands: daemon-local or host-local state
+
 ## Control Plane Rules
 
-These are the key rules the runtime should follow:
+These are the key rules the runtime follows today or is actively moving toward:
 
 - every queued command gets a `task-id` before process launch
 - `task-id` is the primary identity; PID is only an observed runtime field that may appear later
-- task creation, task updates, and task lookup should be backed by NATS KV state
+- task creation, task updates, and task lookup are backed by NATS KV state
 - service identity should be `(host, service-name)`, not just a bare service name
-- service desired state and observed state should be backed by NATS KV state
-- service heartbeats update observed state continuously
-- missed heartbeats mark services unhealthy and should trigger reconcile or restart when desired state still says `running`
-- query commands should read the control-plane state, not rely only on ad hoc process inspection
-
-Short architecture summary:
-
-`./dialtone.sh` -> leader autostart if needed -> command publish -> task record in NATS KV -> execution and log streaming -> service heartbeats -> reconcile loop
-
-That is the center of gravity for `repl src_v3`: a control plane with durable state, not a thin wrapper around a single local process launch.
+- service heartbeats should keep observed service state fresh
+- query commands should read the best control-plane state available, not rely only on ad hoc process inspection
+- full desired and observed service KV is still a target, not a finished implementation
 
 ## Default Use
 
@@ -145,9 +190,9 @@ The intended service contract is:
 Use the fixture at `src/plugins/testdaemon/src_v1` to prove the shared service layer without depending on Chrome or any other plugin implementation.
 
 ```bash
-./dialtone.sh testdaemon src_v1 service --host legion --mode start --name demo
-./dialtone.sh testdaemon src_v1 service --host legion --mode status --name demo
-./dialtone.sh testdaemon src_v1 service --host legion --mode stop --name demo
+./dialtone.sh testdaemon src_v1 service --mode start --name demo
+./dialtone.sh testdaemon src_v1 service --mode status --name demo
+./dialtone.sh testdaemon src_v1 service --mode stop --name demo
 ./dialtone.sh testdaemon src_v1 emit-progress --steps 5
 ./dialtone.sh testdaemon src_v1 exit-code --code 17
 ./dialtone.sh testdaemon src_v1 panic
@@ -162,7 +207,7 @@ The current local REPL fixture slice should at least prove build, one-shot progr
 Target one-shot service submission pattern:
 
 ```text
-host-name> /testdaemon src_v1 service --host legion --mode start --name demo
+host-name> /testdaemon src_v1 service --mode start --name demo
 dialtone> Request received.
 dialtone> Task queued as task-20260327-svc001.
 dialtone> Task topic: task.task-20260327-svc001
@@ -187,9 +232,15 @@ The target REPL operator surface should make task and service state visible with
 These commands should read canonical control-plane state:
 
 - `task list` and `task show` should reflect NATS KV-backed task state
-- `service list` and `service show` should reflect NATS KV-backed desired and observed service state
+- `service list` and service-oriented status should currently reflect the REPL service registry plus heartbeats
 - `task log` should read the durable task log directly
 - `watch` and `logs src_v1 stream` are event views, not the source of truth
+
+Service note:
+
+- the README used to describe service state as fully KV-backed; that is still the target design, but the current code is registry and heartbeat-backed
+- `chrome src_v3` already publishes service heartbeats into the REPL manager bus
+- `testdaemon src_v1` proves the service wrapper lifecycle, but its fixture daemon state is file-backed rather than NATS-native
 
 Target `task list` example with a running remote service:
 

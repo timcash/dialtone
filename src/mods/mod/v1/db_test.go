@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"dialtone/dev/internal/modstate"
@@ -128,4 +133,106 @@ func TestRunDBSyncPersistsTopologyAndPlan(t *testing.T) {
 	if len(plan) != 2 || plan[1].CommandText != "go test ./mods/shell/v1/..." {
 		t.Fatalf("unexpected test plan after db sync: %+v", plan)
 	}
+}
+
+func TestRunDBRunsAndRunInspectCanonicalCommandLedger(t *testing.T) {
+	repoRoot := t.TempDir()
+	dbPath := filepath.Join(repoRoot, ".dialtone", "state.sqlite")
+	t.Setenv("DIALTONE_REPO_ROOT", repoRoot)
+	t.Setenv("DIALTONE_STATE_DB", dbPath)
+	writeDiscoverTestFile(t, filepath.Join(repoRoot, "dialtone_mod"), "#!/bin/sh\nexit 0\n")
+	writeDiscoverTestFile(t, filepath.Join(repoRoot, "src", "go.mod"), "module example\n\ngo 1.25\n")
+
+	db, err := modstate.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer db.Close()
+
+	runID, err := modstate.StartCommandRun(db, modstate.CommandRunRecord{
+		ModName:         "db",
+		ModVersion:      "v1",
+		Verb:            "test",
+		CommandText:     "./dialtone_mod db v1 test",
+		ArgsJSON:        `["db","v1","test"]`,
+		Transport:       "shell_bus",
+		Status:          "queued",
+		Target:          "dialtone-view:0:1",
+		FlakeShell:      "default",
+		PackageRefsJSON: `["nixpkgs#zig"]`,
+	})
+	if err != nil {
+		t.Fatalf("StartCommandRun returned error: %v", err)
+	}
+	if err := modstate.UpdateCommandRunQueued(db, runID, 17, "dialtone-view:0:1", "/tmp/shell-bus-17.log"); err != nil {
+		t.Fatalf("UpdateCommandRunQueued returned error: %v", err)
+	}
+	if err := modstate.FinishCommandRun(db, runID, "done", 4321, 0, 250, "dialtone-view:0:1", "/tmp/shell-bus-17.log", "ok", ""); err != nil {
+		t.Fatalf("FinishCommandRun returned error: %v", err)
+	}
+
+	runsText := captureStdout(t, func() {
+		if err := runDBRuns([]string{"--limit", "10"}); err != nil {
+			t.Fatalf("runDBRuns returned error: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"id\tmod_name\tmod_version\tverb\ttransport\tstatus",
+		"\tdb\tv1\ttest\tshell_bus\tdone\t17\t4321\t0\t250\tdefault\tdialtone-view:0:1\t/tmp/shell-bus-17.log",
+		"./dialtone_mod db v1 test",
+	} {
+		if !strings.Contains(runsText, want) {
+			t.Fatalf("expected %q in db runs output, got:\n%s", want, runsText)
+		}
+	}
+
+	runText := captureStdout(t, func() {
+		if err := runDBRun([]string{"--id", strconv.FormatInt(runID, 10)}); err != nil {
+			t.Fatalf("runDBRun returned error: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"run_id\t" + strconv.FormatInt(runID, 10),
+		"mod_name\tdb",
+		"mod_version\tv1",
+		"verb\ttest",
+		"transport\tshell_bus",
+		"status\tdone",
+		"shell_bus_id\t17",
+		"flake_shell\tdefault",
+		"args_json\t[\"db\",\"v1\",\"test\"]",
+		"package_refs_json\t[\"nixpkgs#zig\"]",
+		"result_text\tok",
+	} {
+		if !strings.Contains(runText, want) {
+			t.Fatalf("expected %q in db run output, got:\n%s", want, runText)
+		}
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+
+	oldStdout := os.Stdout
+	os.Stdout = writer
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer failed: %v", err)
+	}
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, reader); err != nil {
+		t.Fatalf("reading stdout pipe failed: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close reader failed: %v", err)
+	}
+	return buf.String()
 }

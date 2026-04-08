@@ -33,9 +33,20 @@ Common Windows commands:
 .\dialtone.ps1 tmux read -Session dialtone -Distro Ubuntu-24.04
 ```
 
+For versioned mods from Windows, use `dialtone_mod.ps1`:
+
+```powershell
+.\dialtone_mod.ps1 db v1 test
+.\dialtone_mod.ps1 db v1 run --benchmark
+.\dialtone_mod.ps1 mod v1 list
+.\dialtone_mod.ps1 status
+.\dialtone_mod.ps1 read
+```
+
 Important rule:
 
 - If the real runtime belongs in WSL, prefer `dialtone.ps1 tmux ... -- ./dialtone.sh ...`.
+- Prefer `dialtone_mod.ps1 ...` over hand-typing `dialtone.ps1 tmux send -- ./dialtone_mod ...` when you want to work with versioned mods from Windows.
 - The default `dialtone` tmux session is the same session opened by `.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04`.
 - Do not build a parallel workflow around raw `wsl.exe`, ad hoc PowerShell, or direct toolchain commands.
 
@@ -66,6 +77,82 @@ Important rules:
 - Prefer `./dialtone.sh <plugin> <src_vN> <command>` over raw `go`, `bun`, `vite`, `ssh`, `nats`, or browser launch commands.
 - Keep shared configuration in `env/dialtone.json`.
 - If a dependency is missing, bootstrap it through Dialtone instead of assuming a globally installed binary.
+
+## Mods System
+
+The versioned mods system lives under [`src/mods`](src/mods/README.md). Real mods use this layout:
+
+```text
+src/mods/<mod-name>/<version>/
+```
+
+Use these entrypoints:
+
+- Windows: `.\dialtone_mod.ps1 <mod> <version> <command>`
+- WSL or Linux: `./dialtone_mod <mod> <version> <command>`
+
+The mods system uses a local SQLite control-plane database, usually `~/.dialtone/state.sqlite`, to keep the mod registry, dependency graph, runtime env, canonical `command_runs`, linked `shell_bus` transport rows, protocol runs, and test history in one durable place.
+
+### Mods Command Flow
+
+```text
+./dialtone_mod <mod> <version> <command>
+  -> src/mods.go
+  -> open and sync ~/.dialtone/state.sqlite
+  -> resolve the mod CLI wrapper from the SQLite registry
+  -> either:
+     - run direct control-plane mods immediately
+     - or create/update a canonical command_runs row and queue a linked shell_bus row
+  -> shell v1 worker reads the linked transport row
+  -> tmux pane runs the visible command
+  -> SQLite stores status, output summary, protocol rows, and test history
+```
+
+In practice, `command_runs` is the durable command ledger, `shell_bus` is the delivery mechanism, and SQLite is the handshake point between the launcher, the dispatcher, the visible tmux worker, and the inspection tools.
+
+### Common Mods Workflows
+
+Inspect and test one mod:
+
+```bash
+./dialtone_mod ssh v1 help
+./dialtone_mod ssh v1 install
+./dialtone_mod ssh v1 format
+./dialtone_mod ssh v1 test
+./dialtone_mod ssh v1 build
+```
+
+Inspect the SQLite-backed mods control plane:
+
+```bash
+./dialtone_mod mods v1 db path
+./dialtone_mod mods v1 db sync
+./dialtone_mod mods v1 db graph --format outline
+./dialtone_mod mods v1 db runs --limit 10
+./dialtone_mod mods v1 db run --id <run_id>
+./dialtone_mod mods v1 db state
+./dialtone_mod mods v1 db queue --limit 20
+./dialtone_mod mods v1 db protocol-runs --limit 10
+```
+
+Use the shared test config when you want a clean Nix-oriented mods environment:
+
+```bash
+DIALTONE_ENV_FILE=env/test.dialtone.json ./dialtone_mod mods v1 db sync
+DIALTONE_ENV_FILE=env/test.dialtone.json ./dialtone_mod mods v1 db runs --limit 10
+DIALTONE_ENV_FILE=env/test.dialtone.json ./dialtone_mod db v1 test
+```
+
+Windows workflow with a visible WSL tmux session:
+
+```powershell
+.\dialtone.ps1 wsl src_v3 terminal --name Ubuntu-24.04
+.\dialtone_mod.ps1 mod v1 list
+.\dialtone_mod.ps1 db v1 test
+.\dialtone_mod.ps1 read
+```
+
+Use [`src/mods/README.md`](src/mods/README.md) as the main mods-system guide. It covers the CLI contract, the direct-vs-routed split, the SQLite schema/control surface, and the expected workflow for extending mods.
 
 ## Core Flow
 

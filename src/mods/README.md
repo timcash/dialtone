@@ -77,7 +77,115 @@ Practical meaning for agents:
 
 - prefer `./dialtone_mod <mod> <version> install|format|test|build` over ad hoc `gofmt`, `go test`, or `go build`
 - if a wrapper already exists, use it first
-- if a routed mod command returns a `command_id`, inspect that row instead of assuming the command already finished
+- if a routed mod command returns a `command_id` and `run_id`, inspect those SQLite-backed records instead of assuming the command already finished
+
+### CLI Link-Up Pattern
+
+`src/mods.go` does not need a hand-written case for most mods. The normal link-up path is:
+
+1. add `src/mods/<mod-name>/<version>/mod.json`
+2. add `src/mods/<mod-name>/<version>/cli/main.go`
+3. make sure `cli/` is a real Go package
+
+When that exists, [src/mods.go](/Users/user/dialtone/src/mods.go) resolves the mod to the `cli` package and runs it with `go run` from `src/`.
+
+Keep the Go wrapper minimal. Its job is to parse subcommands, call shared helpers, and delegate to the real toolchain/runtime. Prefer these helpers from `dialtone/dev/internal/modcli`:
+
+- `FindRepoRoot()` for repo discovery
+- `ModDir()` and `SrcRoot()` for stable paths
+- `BuildOutputPath()` for `bin/mods/<mod>/<version>/...`
+- `GoBuildCommand()` and `GoTestCommand()` for Go-based build/test commands
+- `NixDevelopCommand()` for non-Go toolchains such as `zig`, `cargo`, `bash`, or `gofmt`
+- `CollectGoFiles()` and `NormalizeOptionalPathArg()` for wrapper-local formatting flows
+
+Expected style:
+
+- use the repo flake `default` shell unless the mod truly needs a different shell
+- let Nix provide the toolchain instead of custom per-wrapper bootstrap logic
+- keep environment setup in the shared helpers, not duplicated in every mod
+- let the Go wrapper stay small even when the real implementation is Zig, Rust, shell, or C
+
+### Windows Entry Point
+
+On Windows, use `dialtone_mod.ps1` as the public mods launcher. It wraps `dialtone.ps1 tmux ...` and types `./dialtone_mod ...` into the visible WSL tmux session `dialtone`, so you can see the exact mod command and the pane output that follows.
+
+Common Windows examples:
+
+```powershell
+.\dialtone_mod.ps1 db v1 test
+.\dialtone_mod.ps1 db v1 run --benchmark
+.\dialtone_mod.ps1 mod v1 list
+.\dialtone_mod.ps1 status
+.\dialtone_mod.ps1 read
+```
+
+## Common Workflows
+
+### Windows: Visible Mod Workflow
+
+```powershell
+.\dialtone_mod.ps1 status
+.\dialtone_mod.ps1 mod v1 help
+.\dialtone_mod.ps1 mod v1 list
+.\dialtone_mod.ps1 db v1 test
+.\dialtone_mod.ps1 read
+```
+
+### WSL Or Linux: Inspect And Test One Mod
+
+```sh
+./dialtone_mod ssh v1 help
+./dialtone_mod ssh v1 install
+./dialtone_mod ssh v1 format
+./dialtone_mod ssh v1 test
+./dialtone_mod ssh v1 build
+```
+
+### SQLite Control Surface For Mods
+
+```sh
+./dialtone_mod mods v1 db path
+./dialtone_mod mods v1 db sync
+./dialtone_mod mods v1 db graph --format outline
+./dialtone_mod mods v1 db runs --limit 10
+./dialtone_mod mods v1 db run --id <run_id>
+./dialtone_mod mods v1 db topo
+./dialtone_mod mods v1 db queue --limit 20
+./dialtone_mod mods v1 db protocol-runs --limit 10
+```
+
+### Shared Test Config
+
+```sh
+export DIALTONE_ENV_FILE=env/test.dialtone.json
+./dialtone_mod mods v1 db sync
+./dialtone_mod mods v1 db runs --limit 10
+./dialtone_mod db v1 test
+```
+
+### Inspect A Routed Command
+
+```sh
+./dialtone_mod db v1 test
+./dialtone_mod mods v1 db runs --limit 10
+./dialtone_mod mods v1 db run --id <run_id>
+./dialtone_mod dialtone v1 commands --limit 10
+./dialtone_mod dialtone v1 command --row-id <command_id> --full
+./dialtone_mod dialtone v1 log --kind command --row-id <command_id>
+```
+
+### Add A New Mod Version
+
+```sh
+mkdir -p src/mods/example/v1/cli
+$EDITOR src/mods/example/v1/mod.json
+$EDITOR src/mods/example/v1/cli/main.go
+
+./dialtone_mod mods v1 db sync
+./dialtone_mod mods v1 db graph --format outline
+./dialtone_mod example v1 help
+./dialtone_mod example v1 test
+```
 
 ## Current Architecture
 
@@ -152,8 +260,9 @@ Current classification:
 Expected behavior for routed commands:
 
 - the caller usually gets a fast route report
-- the report includes a `command_id`
-- the durable row lives in SQLite
+- the report includes a `command_id` and a `run_id`
+- the canonical ledger row lives in SQLite `command_runs`
+- the linked `shell_bus` row is the delivery/transport row
 - the actual visible execution happens in `dialtone-view`
 
 ### 5. Background `dialtone` Control Plane
@@ -162,13 +271,23 @@ The background system is one pipeline:
 
 1. `dialtone_mod` receives a command
 2. direct commands run immediately; routed commands go to `dialtone v1 queue`
-3. `dialtone` records durable state in SQLite
+3. `dialtone` records durable state in SQLite, especially `command_runs`, `shell_bus`, and state rows
 4. `shell v1 serve` runs inside `dialtone-view` and executes queued visible work
 5. prompt rows target `codex-view`
 6. command rows target `dialtone-view`
 7. `test v1 start` ties prompt submission, routed command rows, pane reads, and protocol events together
 
 SQLite is the source of truth when stdout and pane text disagree.
+
+### SQLite-First Model
+
+Use this mental model when you extend the system:
+
+- `command_runs` is the canonical record for routed mod execution
+- `shell_bus` is the transport queue and pane-observation layer linked by `command_run_id`
+- `state_values` and `runtime_env` keep durable control-plane settings and captured env
+- `protocol_runs`, `protocol_events`, `mod_test_runs`, and `mod_test_run_steps` hold history and verification
+- tmux panes and PIDs are runtime details recorded into SQLite, not the primary identity of a command
 
 ## Control Points
 
@@ -179,7 +298,7 @@ These files are the main control points when you need to debug or extend the mod
 - [src/mods.go](/Users/user/dialtone/src/mods.go)
   Main Go dispatcher for direct-vs-routed execution and CLI wrapper resolution
 - [modstate.go](/Users/user/dialtone/src/internal/modstate/modstate.go)
-  SQLite-backed mod registry, entrypoint resolution, queue rows, protocol rows, and test-run state
+  SQLite-backed mod registry, entrypoint resolution, canonical command runs, transport rows, protocol rows, and test-run state
 - `src/mods/<mod>/<version>/cli/main.go`
   Per-mod contract entrypoint for `install|build|format|test` plus runtime/admin commands
 - `src/mods/<mod>/<version>/main.go`
@@ -209,6 +328,7 @@ There is one important exception:
 If you are unsure whether a command finished or only queued, inspect it with:
 
 ```sh
+./dialtone_mod mods v1 db run --id <run_id>
 ./dialtone_mod dialtone v1 command --row-id <command_id> --full
 ./dialtone_mod dialtone v1 log --kind command --row-id <command_id>
 ```
@@ -255,7 +375,7 @@ Use this before raw SQL.
 `dialtone v1 test` should stay independent of `tmux`, `ghostty`, `codex`, and the visible shell workflow. It is the right wrapper for validating:
 
 - SQLite schema/state behavior
-- `shell_bus` queue rows and command metadata
+- `command_runs` lifecycle and linked `shell_bus` transport metadata
 - daemon/process inspection formatting
 - log-path resolution and protocol/test-run inspection helpers
 
@@ -460,6 +580,7 @@ If the state is unhealthy, inspect the daemon and latest command first:
 ./dialtone_mod test v1 start
 
 # routed-command inspection
+./dialtone_mod mods v1 db run --id <id>
 ./dialtone_mod dialtone v1 command --row-id <id> --full
 ./dialtone_mod dialtone v1 log --kind command --row-id <id>
 ```

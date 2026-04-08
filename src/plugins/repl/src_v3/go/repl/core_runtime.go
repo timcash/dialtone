@@ -54,17 +54,17 @@ const controlRunHostTask = "run_host_task"
 
 type Hooks struct {
 	RunTaskWorkerWithEvents func(args []string, onEvent proc.TaskWorkerEventHandler) int
-	ListManaged          func() []proc.ManagedProcessSnapshot
-	KillManagedProcess   func(pid int) error
+	ListManaged             func() []proc.ManagedProcessSnapshot
+	KillManagedProcess      func(pid int) error
 }
 
 var (
 	runTaskWorkerWithEventsFn = proc.RunTaskWorkerWithEvents
-	listManagedFn          = proc.ListManagedProcesses
-	killManagedProcessFn   = proc.KillManagedProcess
-	taskIDMu               sync.Mutex
-	taskIDLastStamp        string
-	taskIDSeq              int
+	listManagedFn             = proc.ListManagedProcesses
+	killManagedProcessFn      = proc.KillManagedProcess
+	taskIDMu                  sync.Mutex
+	taskIDLastStamp           string
+	taskIDSeq                 int
 )
 
 // SetHooksForTest overrides REPL side-effect functions and returns a restore function.
@@ -494,6 +494,11 @@ func RunLeader(args []string) error {
 	if err := nc.Flush(); err != nil {
 		return err
 	}
+	if taskStore != nil {
+		if err := taskStore.ReconcileLocalRuntime(h, listManagedFn()); err != nil {
+			logs.Warn("REPL task KV initial reconcile failed: %v", err)
+		}
+	}
 
 	heartbeat := time.NewTicker(5 * time.Second)
 	defer heartbeat.Stop()
@@ -503,6 +508,11 @@ func RunLeader(args []string) error {
 	for {
 		select {
 		case <-heartbeat.C:
+			if taskStore != nil {
+				if err := taskStore.ReconcileLocalRuntime(h, listManagedFn()); err != nil {
+					logs.Warn("REPL task KV reconcile failed: %v", err)
+				}
+			}
 			for _, r := range presence.Rooms(roomName, time.Now(), daemonTTL) {
 				publishRoom(r, BusFrame{Type: frameTypeHeartbeat, Message: "alive"})
 			}
@@ -1125,6 +1135,9 @@ func executeCommand(
 			return
 		}
 		if registry != nil {
+			if item, ok := registry.Find(pid); ok && taskStore != nil && strings.TrimSpace(item.TaskID) != "" {
+				_ = taskStore.MarkExited(strings.TrimSpace(item.TaskID), pid, -1)
+			}
 			registry.Exited(pid, -1)
 		}
 		emitDialtoneIndexLine(emit, "status", fmt.Sprintf("Stopped task-worker-%d.", pid))
@@ -1147,6 +1160,9 @@ func executeCommand(
 			return
 		}
 		if registry != nil {
+			if taskItem, ok := registry.Find(item.PID); ok && taskStore != nil && strings.TrimSpace(taskItem.TaskID) != "" {
+				_ = taskStore.MarkExited(strings.TrimSpace(taskItem.TaskID), item.PID, -1)
+			}
 			registry.Exited(item.PID, -1)
 		}
 		if services != nil {

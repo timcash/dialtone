@@ -138,8 +138,16 @@ func printUsage() {
 	fmt.Println("       [--source PATH] [--dest PATH] [--repo-dir PATH] [--skip-self=true|false]")
 	fmt.Println("       [--branch-map host=branch ...] [--dry-run] [--force]")
 	fmt.Println("       Run `clean --force` then `pull` for the same host target")
-	fmt.Println("  db <path|init|sync|graph|env|state|queue|topo|test-plan|test-run|protocol-runs|protocol-events> [args]")
-	fmt.Println("       Manage the central sqlite state database for the mod DAG, protocol runs, queue/state, and TDD test execution")
+	fmt.Println("  db <path|init|sync|graph|env|state|queue|runs|run|topo|test-plan|test-run|protocol-runs|protocol-events> [args]")
+	fmt.Println("       Manage the central sqlite state database for the mod DAG, canonical command runs, transport rows, protocol runs, and TDD test execution")
+	fmt.Println("")
+	fmt.Println("Examples:")
+	fmt.Println("  ./dialtone_mod mods v1 db sync")
+	fmt.Println("  ./dialtone_mod mods v1 db graph --format outline")
+	fmt.Println("  ./dialtone_mod mods v1 db runs --limit 10")
+	fmt.Println("  ./dialtone_mod mods v1 db run --id 42")
+	fmt.Println("  ./dialtone_mod mods v1 db queue --limit 20")
+	fmt.Println("  ./dialtone_mod mods v1 db test-run --name default")
 }
 
 func runNew(args []string) error {

@@ -294,7 +294,7 @@ func runQueue(argv []string) error {
 	}
 	defer db.Close()
 
-	rowID, err := router.QueueCommandViaShell(db, repoRoot, argv)
+	rowID, runID, err := router.QueueCommandViaShell(db, repoRoot, argv)
 	if err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func runQueue(argv []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(renderRouteReport(repoRoot, db, rowID, dispatch.BuildDialtoneCommand(argv), commandTarget, result))
+	fmt.Print(renderRouteReport(repoRoot, db, rowID, runID, dispatch.BuildDialtoneCommand(argv), commandTarget, result))
 	return nil
 }
 
@@ -449,7 +449,7 @@ func runCommands(argv []string) error {
 	}
 	fmt.Printf("state_db\t%s\n", sqlitestate.ResolveStateDBPath(repoRoot))
 	fmt.Printf("rows\t%d\n", len(filtered))
-	fmt.Println("id\tscope\tsubject\taction\tstatus\tactor\tsession\tpane\tref_id\texit_code\truntime_ms\tlog_path\tsummary\tcommand\tupdated_at")
+	fmt.Println("id\trun_id\tscope\tsubject\taction\tstatus\tactor\tsession\tpane\tref_id\texit_code\truntime_ms\tlog_path\tsummary\tcommand\tupdated_at")
 	for _, row := range filtered {
 		body, _ := decodeIntentBody(row)
 		exitCode := "pending"
@@ -468,8 +468,9 @@ func runCommands(argv []string) error {
 		if logPath == "" && row.Subject == "command" && row.ID > 0 {
 			logPath = sqlitestate.ResolveCommandLogPath(repoRoot, row.ID)
 		}
-		fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Printf("%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			row.ID,
+			body.RunID,
 			row.Scope,
 			row.Subject,
 			row.Action,
@@ -1240,7 +1241,7 @@ func loadProtocolRunByID(db *sql.DB, runID int64) (modstate.ProtocolRunRecord, b
 	return record, true, nil
 }
 
-func renderRouteReport(repoRoot string, db *sql.DB, rowID int64, commandText, commandTarget string, result ensureResult) string {
+func renderRouteReport(repoRoot string, db *sql.DB, rowID, runID int64, commandText, commandTarget string, result ensureResult) string {
 	processes, _ := loadProcessReportFn()
 	total, totalBackground, dialtoneModCount, dialtoneModBackground, dialtoneCount, workerCount, ensureCount := summarizeProcessRecords(processes)
 
@@ -1275,6 +1276,9 @@ func renderRouteReport(repoRoot string, db *sql.DB, rowID int64, commandText, co
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "route\tqueued\n")
 	fmt.Fprintf(&out, "command_id\t%d\n", rowID)
+	if runID > 0 {
+		fmt.Fprintf(&out, "run_id\t%d\n", runID)
+	}
 	fmt.Fprintf(&out, "command_status\tqueued\n")
 	fmt.Fprintf(&out, "command_pid\tpending\n")
 	fmt.Fprintf(&out, "command_exit_code\tpending\n")
@@ -1308,6 +1312,9 @@ func renderRouteReport(repoRoot string, db *sql.DB, rowID int64, commandText, co
 	fmt.Fprintf(&out, "ensure_running\t%d\n", ensureCount)
 	fmt.Fprintf(&out, "inspect\t./dialtone_mod dialtone v1 command --row-id %d --full\n", rowID)
 	fmt.Fprintf(&out, "inspect_log\t./dialtone_mod dialtone v1 log --kind command --row-id %d\n", rowID)
+	if runID > 0 {
+		fmt.Fprintf(&out, "inspect_run\t./dialtone_mod mods v1 db run --id %d\n", runID)
+	}
 	fmt.Fprintf(&out, "\n")
 	fmt.Fprintf(&out, "%-8s %-8s %-6s %-6s %-12s %-10s %s\n", "PID", "PPID", "STAT", "TTY", "ROLE", "BACKGROUND", "COMMAND")
 	for _, record := range processes {
@@ -1370,6 +1377,9 @@ func decodeIntentBody(row modstate.ShellBusRecord) (dispatch.ShellCommandIntent,
 	if strings.TrimSpace(body.Target) == "" {
 		body.Target = strings.TrimSpace(row.Pane)
 	}
+	if body.RunID == 0 && row.CommandRunID > 0 {
+		body.RunID = row.CommandRunID
+	}
 	return body, true
 }
 
@@ -1430,6 +1440,9 @@ func latestPaneSnapshotText(rows []modstate.ShellBusRecord, pane string) string 
 
 func writeCommandStatus(out *bytes.Buffer, row modstate.ShellBusRecord, body dispatch.ShellCommandIntent, full bool) {
 	fmt.Fprintf(out, "command_row_id\t%d\n", row.ID)
+	if body.RunID > 0 {
+		fmt.Fprintf(out, "command_run_id\t%d\n", body.RunID)
+	}
 	fmt.Fprintf(out, "command_status\t%s\n", strings.TrimSpace(row.Status))
 	if strings.TrimSpace(body.DisplayCommand) != "" {
 		fmt.Fprintf(out, "command\t%s\n", strings.TrimSpace(body.DisplayCommand))
@@ -1653,7 +1666,7 @@ func startDetachedExecutable(repoRoot, executable string, args []string, logPref
 		"DIALTONE_STATE_DB="+sqlitestate.ResolveStateDBPath(repoRoot),
 		"DIALTONE_DAEMON_LOG_PATH="+logPath,
 	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setDetachedProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return 0, "", err
 	}

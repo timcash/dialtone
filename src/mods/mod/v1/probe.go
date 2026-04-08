@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -110,15 +110,27 @@ func startProbeBackgroundWriter(path, label string, sleep time.Duration) (int, e
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return 0, err
 	}
-	script := fmt.Sprintf(
-		"sleep %s; printf 'probe_background_done\\t%s\\n' > %s; printf 'probe_label\\t%s\\n' >> %s",
-		probeSleepLiteral(sleep),
-		probeShellEscapeLiteral(label),
-		probeShellQuote(path),
-		probeShellEscapeLiteral(label),
-		probeShellQuote(path),
-	)
-	cmd := exec.Command("sh", "-lc", script)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		script := fmt.Sprintf(
+			"$path=%s; Start-Sleep -Milliseconds %d; Set-Content -LiteralPath $path -Value @(%s,%s)",
+			probePowerShellQuote(path),
+			sleep.Milliseconds(),
+			probePowerShellQuote("probe_background_done\t"+label),
+			probePowerShellQuote("probe_label\t"+label),
+		)
+		cmd = exec.Command("powershell.exe", "-NoProfile", "-Command", script)
+	} else {
+		script := fmt.Sprintf(
+			"sleep %s; printf 'probe_background_done\\t%s\\n' > %s; printf 'probe_label\\t%s\\n' >> %s",
+			probeSleepLiteral(sleep),
+			probeShellEscapeLiteral(label),
+			probeShellQuote(path),
+			probeShellEscapeLiteral(label),
+			probeShellQuote(path),
+		)
+		cmd = exec.Command("sh", "-lc", script)
+	}
 	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err != nil {
 		return 0, err
@@ -127,7 +139,7 @@ func startProbeBackgroundWriter(path, label string, sleep time.Duration) (int, e
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull
 	cmd.Stdin = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setDetachedProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
@@ -154,4 +166,8 @@ func probeShellQuote(value string) string {
 
 func probeShellEscapeLiteral(value string) string {
 	return strings.ReplaceAll(value, "'", `'"'"'`)
+}
+
+func probePowerShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }

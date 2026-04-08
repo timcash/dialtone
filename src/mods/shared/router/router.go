@@ -2,12 +2,15 @@ package router
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
 	"dialtone/dev/internal/modstate"
 	"dialtone/dev/mods/shared/dispatch"
+	"dialtone/dev/mods/shared/nixplan"
 	"dialtone/dev/mods/shared/sqlitestate"
 )
 
@@ -22,15 +25,15 @@ func StartShellWorkflow(repoRoot, goBin string, runner GoPackageRunner) error {
 	return runner.Run(repoRoot, goBin, "./mods/shell/v1/cli", "start", "--run-tests=false")
 }
 
-func QueueCommandViaShell(db *sql.DB, repoRoot string, args []string) (int64, error) {
+func QueueCommandViaShell(db *sql.DB, repoRoot string, args []string) (int64, int64, error) {
 	if db == nil {
-		return 0, fmt.Errorf("sqlite state is required to queue command via shell")
+		return 0, 0, fmt.Errorf("sqlite state is required to queue command via shell")
 	}
 	session := "codex-view"
 	commandTarget := ""
 	targetRecord, ok, err := modstate.LoadStateValue(db, sqlitestate.SystemScope, sqlitestate.TmuxTargetKey)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if ok && strings.TrimSpace(targetRecord.Value) != "" {
 		commandTarget = strings.TrimSpace(targetRecord.Value)
@@ -39,7 +42,38 @@ func QueueCommandViaShell(db *sql.DB, repoRoot string, args []string) (int64, er
 		}
 	}
 	innerCommand := dispatch.BuildDialtoneCommand(args)
+	modName, version, verb := parseCommandRunIdentity(args)
+	plan := nixplan.Plan{}
+	if modName != "" && version != "" {
+		if builtPlan, planErr := nixplan.BuildPlan(db, repoRoot, modName, version, runtime.GOOS); planErr == nil {
+			plan = builtPlan
+		}
+	}
+	argsJSON := "[]"
+	if raw, marshalErr := json.Marshal(args); marshalErr == nil {
+		argsJSON = string(raw)
+	}
+	packageRefsJSON := "[]"
+	if raw, marshalErr := json.Marshal(plan.Packages); marshalErr == nil {
+		packageRefsJSON = string(raw)
+	}
+	runID, err := modstate.StartCommandRun(db, modstate.CommandRunRecord{
+		ModName:         modName,
+		ModVersion:      version,
+		Verb:            verb,
+		CommandText:     innerCommand,
+		ArgsJSON:        argsJSON,
+		Transport:       "shell_bus",
+		Status:          "queued",
+		Target:          commandTarget,
+		FlakeShell:      plan.FlakeShell,
+		PackageRefsJSON: packageRefsJSON,
+	})
+	if err != nil {
+		return 0, 0, err
+	}
 	body, err := dispatch.EncodeIntentBody(dispatch.ShellCommandIntent{
+		RunID:          runID,
 		Command:        innerCommand,
 		InnerCommand:   innerCommand,
 		DisplayCommand: innerCommand,
@@ -47,27 +81,56 @@ func QueueCommandViaShell(db *sql.DB, repoRoot string, args []string) (int64, er
 		Target:         commandTarget,
 	})
 	if err != nil {
-		return 0, err
+		_ = modstate.FinishCommandRun(db, runID, "failed", 0, -1, 0, commandTarget, "", "", err.Error())
+		return 0, runID, err
 	}
 	rowID, err := modstate.EnqueueShellBus(db, "shell", "desired", "command", "run", "dialtone_mod", session, commandTarget, body)
 	if err != nil {
-		return 0, err
+		_ = modstate.FinishCommandRun(db, runID, "failed", 0, -1, 0, commandTarget, "", "", err.Error())
+		return 0, runID, err
 	}
+	if err := modstate.LinkShellBusCommandRun(db, rowID, runID); err != nil {
+		_ = modstate.FinishCommandRun(db, runID, "failed", 0, -1, 0, commandTarget, "", "", err.Error())
+		return 0, runID, err
+	}
+	logPath := sqlitestate.ResolveCommandLogPath(repoRoot, rowID)
 	updatedBody, err := dispatch.EncodeIntentBody(dispatch.ShellCommandIntent{
+		RunID:          runID,
 		Command:        innerCommand,
 		InnerCommand:   innerCommand,
 		DisplayCommand: innerCommand,
 		Args:           append([]string(nil), args...),
 		Target:         commandTarget,
-		LogPath:        sqlitestate.ResolveCommandLogPath(repoRoot, rowID),
+		LogPath:        logPath,
 	})
 	if err != nil {
-		return 0, err
+		_ = modstate.FinishCommandRun(db, runID, "failed", 0, -1, 0, commandTarget, logPath, "", err.Error())
+		return 0, runID, err
 	}
 	if err := modstate.UpdateShellBusStatus(db, rowID, "queued", 0, updatedBody); err != nil {
-		return 0, err
+		_ = modstate.FinishCommandRun(db, runID, "failed", 0, -1, 0, commandTarget, logPath, "", err.Error())
+		return 0, runID, err
 	}
-	return rowID, nil
+	if err := modstate.UpdateCommandRunQueued(db, runID, rowID, commandTarget, logPath); err != nil {
+		return 0, runID, err
+	}
+	return rowID, runID, nil
+}
+
+func parseCommandRunIdentity(args []string) (string, string, string) {
+	if len(args) < 2 {
+		return "", "", ""
+	}
+	modName := strings.TrimSpace(args[0])
+	if strings.EqualFold(modName, "mods") {
+		modName = "mod"
+	}
+	version := strings.TrimSpace(args[1])
+	verb := ""
+	if len(args) > 2 {
+		verb = strings.TrimSpace(args[2])
+	}
+	return modName, version, verb
 }
 
 func SyncShell(repoRoot, goBin string, runner GoPackageRunner, limit, waitSeconds int) error {
