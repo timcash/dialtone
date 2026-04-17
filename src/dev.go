@@ -545,6 +545,12 @@ func shouldRunForegroundQuery(command string, args []string) bool {
 	command = strings.TrimSpace(strings.ToLower(command))
 	subcommand := scaffoldSubcommand(args)
 	switch command {
+	case "cad":
+		switch subcommand {
+		case "test":
+			// CAD test output is much easier to use when it streams directly.
+			return true
+		}
 	case "proc":
 		switch subcommand {
 		case "list", "ps":

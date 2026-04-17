@@ -78,8 +78,8 @@ class CadStage implements VisualizationControl {
       powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(0x02070d, 1);
-    this.scene.fog = new THREE.Fog(0x02070d, 90, 240);
+    this.renderer.setClearColor(0x050505, 1);
+    this.scene.fog = new THREE.Fog(0x050505, 90, 240);
 
     this.camera.position.set(0, 62, 152);
     this.camera.lookAt(0, 0, 0);
@@ -123,30 +123,30 @@ class CadStage implements VisualizationControl {
   }
 
   private bootstrapScene(): void {
-    const ambient = new THREE.AmbientLight(0xffffff, 0.48);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.62);
     this.scene.add(ambient);
 
-    const key = new THREE.DirectionalLight(0xd9f4ff, 1.25);
+    const key = new THREE.DirectionalLight(0xffffff, 1.1);
     key.position.set(80, 120, 90);
     this.scene.add(key);
 
-    const rim = new THREE.PointLight(0x4fc3ff, 1.8, 500);
+    const rim = new THREE.PointLight(0xb7b7b7, 1.25, 500);
     rim.position.set(-110, 55, 90);
     this.scene.add(rim);
 
     this.floor = new THREE.Mesh(
       new THREE.CircleGeometry(90, 64),
       new THREE.MeshStandardMaterial({
-        color: 0x06131f,
+        color: 0x0d0d0d,
         roughness: 0.95,
-        metalness: 0.08,
+        metalness: 0.1,
       }),
     );
     this.floor.rotation.x = -Math.PI / 2;
     this.floor.position.y = -20;
     this.scene.add(this.floor);
 
-    this.grid = new THREE.GridHelper(180, 28, 0x28556c, 0x0b2531);
+    this.grid = new THREE.GridHelper(180, 28, 0x545454, 0x1a1a1a);
     this.grid.position.y = -19.8;
     this.scene.add(this.grid);
 
@@ -365,10 +365,10 @@ class CadStage implements VisualizationControl {
     this.mesh = new THREE.Mesh(
       geometry,
       new THREE.MeshStandardMaterial({
-        color: 0x67dfff,
-        emissive: 0x0c2030,
-        metalness: 0.58,
-        roughness: 0.3,
+        color: 0xd6d6d6,
+        emissive: 0x111111,
+        metalness: 0.54,
+        roughness: 0.36,
       }),
     );
     this.root.add(this.mesh);
@@ -376,9 +376,9 @@ class CadStage implements VisualizationControl {
     this.wireframe = new THREE.LineSegments(
       new THREE.WireframeGeometry(geometry),
       new THREE.LineBasicMaterial({
-        color: 0xe1fbff,
+        color: 0xffffff,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.14,
       }),
     );
     this.wireframe.visible = this.wireframeVisible;

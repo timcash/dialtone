@@ -10,6 +10,33 @@ $EnvFile = Join-Path $ScriptDir "env/dialtone.json"
 $env:DIALTONE_REPO_ROOT = $ScriptDir
 $env:DIALTONE_SRC_ROOT = Join-Path $ScriptDir "src"
 
+function Resolve-WslExecutable {
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace([System.Environment]::SystemDirectory)) {
+        $candidates += (Join-Path ([System.Environment]::SystemDirectory) "wsl.exe")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+        $candidates += (Join-Path $env:SystemRoot "System32\\wsl.exe")
+        $candidates += (Join-Path $env:SystemRoot "Sysnative\\wsl.exe")
+    }
+
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    $command = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+        return $command.Source
+    }
+
+    throw "WSL is required, but wsl.exe was not found in PATH or the standard Windows locations."
+}
+
 function Write-EnvFile {
     param(
         [Parameter(Mandatory = $true)][string]$EnvFilePath,
@@ -166,7 +193,8 @@ function Invoke-DialtoneTmuxBash {
     $wslArgs += $linuxPath
 
     try {
-        & wsl.exe @wslArgs
+        $wslExe = Resolve-WslExecutable
+        & $wslExe @wslArgs
         if ($LASTEXITCODE -ne 0) {
             throw "wsl command failed with exit code $LASTEXITCODE"
         }
@@ -184,9 +212,7 @@ function Invoke-DialtoneTmux {
 
     $script:DialtoneTmuxHandled = $true
 
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
-        throw "WSL is required for dialtone.ps1 tmux ..."
-    }
+    $null = Resolve-WslExecutable
 
     $Action = ""
     $Session = Get-DefaultWslTmuxSession
@@ -265,7 +291,7 @@ function Invoke-DialtoneTmux {
         $Cwd = Get-DefaultWslTmuxCwd
     }
 
-    $knownActions = @("help", "ensure", "send", "read", "clear", "interrupt", "list", "status", "clean-state")
+    $knownActions = @("help", "ensure", "attach", "send", "read", "clear", "interrupt", "list", "status", "clean-state")
     if ([string]::IsNullOrWhiteSpace($Action)) {
         if ($CommandArgs.Count -gt 0) {
             $Action = "send"
@@ -298,6 +324,7 @@ Usage:
   .\dialtone.ps1 tmux clean-state
   .\dialtone.ps1 tmux interrupt
   .\dialtone.ps1 tmux ensure
+  .\dialtone.ps1 tmux attach
   .\dialtone.ps1 tmux list
   .\dialtone.ps1 tmux status
 
@@ -314,11 +341,29 @@ Behavior:
   - An unknown first argument is treated as a command to send.
   - send clears the current shell input line before typing the command.
   - interrupt sends Ctrl-C without killing the tmux session.
+  - attach opens a visible WSL terminal client on the chosen session.
   - The visible `wsl src_v3 terminal` window attaches to this same default session.
 "@ | Write-Output
         }
         "ensure" {
             Ensure-DialtoneTmuxSession
+        }
+        "attach" {
+            Ensure-DialtoneTmuxSession
+            $wslExe = Resolve-WslExecutable
+            $attachArgs = New-Object System.Collections.Generic.List[string]
+            if (-not [string]::IsNullOrWhiteSpace($Distro)) {
+                $attachArgs.Add("-d")
+                $attachArgs.Add($Distro)
+            }
+            $attachArgs.Add("--cd")
+            $attachArgs.Add($Cwd)
+            $attachArgs.Add("--")
+            $attachArgs.Add("tmux")
+            $attachArgs.Add("attach-session")
+            $attachArgs.Add("-t")
+            $attachArgs.Add($Session)
+            Start-Process -FilePath $wslExe -WindowStyle Normal -ArgumentList $attachArgs | Out-Null
         }
         "list" {
             Invoke-DialtoneTmuxBash -Distro $Distro -Script "tmux list-sessions"
@@ -466,9 +511,7 @@ function Use-WindowsLocalDialtonePaths {
 }
 
 function Invoke-WslPluginViaShell {
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
-        throw "WSL is required for dialtone.ps1 wsl ..."
-    }
+    $wslExe = Resolve-WslExecutable
 
     $wslRepo = Convert-ToWslPath -Path $ScriptDir
     $resolvedHome = if ([string]::IsNullOrWhiteSpace($env:DIALTONE_HOME)) {
@@ -491,7 +534,7 @@ function Invoke-WslPluginViaShell {
     $cmd = "cd $(Escape-BashArg -Value $wslRepo) && export DIALTONE_ONBOARDING_DONE=1 && export DIALTONE_REPO_ROOT=$(Escape-BashArg -Value $wslRepo) && export DIALTONE_ENV_FILE=$(Escape-BashArg -Value $wslEnvFile) && export DIALTONE_HOME=$(Escape-BashArg -Value $wslHome) && export DIALTONE_ENV=$(Escape-BashArg -Value $wslEnv) && export DIALTONE_USE_NIX=0 && ./dialtone.sh $argTail"
 
     Write-Host "DIALTONE> Running wsl plugin via WSL shell..."
-    & wsl.exe -e bash -lc $cmd
+    & $wslExe -e bash -lc $cmd
     exit $LASTEXITCODE
 }
 
@@ -507,9 +550,7 @@ function Enter-NixShellIfNeeded {
     $flakePath = Join-Path $ScriptDir "flake.nix"
     if (!(Test-Path $flakePath)) { return }
 
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
-        throw "WSL is required for Nix-first workflow on Windows. Install WSL and rerun."
-    }
+    $wslExe = Resolve-WslExecutable
 
     $wslRepo = Convert-ToWslPath -Path $ScriptDir
     $escapedArgs = @()
@@ -518,7 +559,7 @@ function Enter-NixShellIfNeeded {
     $cmd = "cd $(Escape-BashArg -Value $wslRepo) && export DIALTONE_NIX_SHELL_BOOTSTRAPPED=1 && ./dialtone.sh $argTail"
 
     Write-Host "DIALTONE> Entering WSL + Nix shell..."
-    & wsl.exe -e bash -lc $cmd
+    & $wslExe -e bash -lc $cmd
     exit $LASTEXITCODE
 }
 

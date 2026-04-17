@@ -1,15 +1,16 @@
 # CAD src_v1
 
-`cad src_v1` is a REPL-routed plugin with:
+`cad src_v1` is a CAD plugin with:
 - a Go HTTP server
 - a Python CAD backend under `backend/`
 - a browser UI under `ui/`
 
 Use this mental model:
 - run `./dialtone.sh cad src_v1 ...`
-- REPL queues a task
-- `DIALTONE>` stays short
-- full CAD server logs and browser-test logs stay in the task log
+- most operational commands stay REPL-routed
+- `test` runs in the foreground so the full suite transcript stays visible in the shell
+- routed commands keep `DIALTONE>` short
+- routed server logs and task detail stay in the task log
 
 ## Real Test
 
@@ -19,7 +20,7 @@ From WSL, the real end-to-end test is:
 ./dialtone.sh cad src_v1 test
 ```
 
-That command now auto-attaches to the default Windows Chrome host from WSL, runs the HTTP checks, and runs the real browser smoke against the CAD UI.
+That command now runs in the foreground so you can see the full live test transcript in the shell. It auto-attaches to the default Windows Chrome host from WSL, runs the HTTP checks, and runs the real browser smoke against the CAD UI.
 
 Use these only when you want narrower coverage:
 
