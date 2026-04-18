@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import type { VisualizationControl } from '@ui/types';
 
+declare const CAD_API_BASE_URL: string;
+
 type GearParams = {
   outer_diameter: number;
   inner_diameter: number;
@@ -31,6 +33,15 @@ const DEFAULT_PARAMS: GearParams = {
   num_mounting_holes: 4,
   mounting_hole_diameter: 6,
 };
+
+function cadAPIURL(path: string): string {
+  const origin =
+    typeof CAD_API_BASE_URL === 'string' && CAD_API_BASE_URL.trim() !== ''
+      ? CAD_API_BASE_URL.trim()
+      : window.location.origin;
+  const base = origin.endsWith('/') ? origin : `${origin}/`;
+  return new URL(path.replace(/^\//, ''), base).toString();
+}
 
 class CadStage implements VisualizationControl {
   private scene = new THREE.Scene();
@@ -317,7 +328,7 @@ class CadStage implements VisualizationControl {
     this.stats.mesh.textContent = 'requesting';
 
     try {
-      const response = await fetch('/api/cad/generate', {
+      const response = await fetch(cadAPIURL('/api/cad/generate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(this.params),
@@ -413,7 +424,7 @@ class CadStage implements VisualizationControl {
     const query = new URLSearchParams(
       Object.entries(this.params).map(([key, value]) => [key, String(value)]),
     );
-    window.open(`/api/cad/download?${query.toString()}`, '_blank', 'noopener');
+    window.open(`${cadAPIURL('/api/cad/download')}?${query.toString()}`, '_blank', 'noopener');
     this.setStatus('Downloading STL...');
   }
 

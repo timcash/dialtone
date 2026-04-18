@@ -17,6 +17,8 @@ if (versionEl) {
   versionEl.textContent = APP_VERSION;
 }
 
+void registerServiceWorker();
+
 sections.register(SECTION_ID, {
   containerId: SECTION_ID,
   canonicalName: SECTION_ID,
@@ -42,3 +44,15 @@ menu.addButton('CAD Stage', 'Navigate CAD 3D stage', () => {
 void sections.navigateTo(SECTION_ID).catch((err) => {
   console.error('[cad/ui] initial navigation failed', err);
 });
+
+async function registerServiceWorker(): Promise<void> {
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
+  try {
+    const swURL = new URL('service-worker.js', window.location.href);
+    await navigator.serviceWorker.register(swURL);
+  } catch (error) {
+    console.warn('[cad/ui] service worker registration failed', error);
+  }
+}

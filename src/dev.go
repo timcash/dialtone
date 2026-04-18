@@ -547,8 +547,8 @@ func shouldRunForegroundQuery(command string, args []string) bool {
 	switch command {
 	case "cad":
 		switch subcommand {
-		case "test":
-			// CAD test output is much easier to use when it streams directly.
+		case "test", "publish":
+			// CAD test/publish output is much easier to use when it streams directly.
 			return true
 		}
 	case "proc":

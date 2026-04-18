@@ -297,6 +297,7 @@ func runTunnel(args []string) error {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 		cmd.Stdin = nil
+		configureDetachedBackgroundProcess(cmd)
 		if err := cmd.Start(); err != nil {
 			return err
 		}

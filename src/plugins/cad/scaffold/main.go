@@ -66,6 +66,15 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "publish":
+			plan, err := cadv1.RunPublish(rest)
+			if err != nil {
+				logs.Error("cad src_v1 publish failed: %v", err)
+				os.Exit(1)
+			}
+			logs.Info("DIALTONE_INDEX: cad publish: site %s", plan.PagesURL)
+			logs.Info("DIALTONE_INDEX: cad publish: backend %s", plan.BackendOrigin)
+			return
 		case "dev":
 			if err := runDev(rest); err != nil {
 				logs.Error("cad src_v1 dev failed: %v", err)
@@ -117,6 +126,7 @@ func printUsage() {
 	logs.Raw("  dev [--port <n>] [--backend-port <n>] [--host <host>] [--browser-node <node>] [--public-url <url>]")
 	logs.Raw("  install              Verify/install CAD backend and UI dependencies")
 	logs.Raw("  build                Build the CAD UI assets")
+	logs.Raw("  publish              Build the GitHub Pages PWA and wire it to the live backend tunnel")
 	logs.Raw("  format               Format Go and UI sources")
 	logs.Raw("  lint                 Run Go and UI lint checks")
 	logs.Raw("  test                 Run cad src_v1 test suite")
@@ -305,17 +315,17 @@ func runDev(args []string) error {
 
 	logs.Info("DIALTONE_INDEX: cad dev: starting vite on %s", localURL)
 	return testv1.RunDev(testv1.DevOptions{
-		RepoRoot:          paths.Runtime.RepoRoot,
-		PluginDir:         paths.Preset.PluginVersionRoot,
-		UIDir:             paths.UIDir,
-		DevPort:           *port,
-		DevHost:           strings.TrimSpace(*host),
-		DevPublicURL:      devURL,
-		Role:              "cad-dev",
-		DisableBrowser:    node == "",
-		BrowserMetaPath:   filepath.Join(paths.Preset.PluginVersionRoot, "dev.browser.json"),
-		NATSURL:           resolveDevNATSURL(),
-		NATSSubject:       "logs.dev.cad.src-v1",
+		RepoRoot:        paths.Runtime.RepoRoot,
+		PluginDir:       paths.Preset.PluginVersionRoot,
+		UIDir:           paths.UIDir,
+		DevPort:         *port,
+		DevHost:         strings.TrimSpace(*host),
+		DevPublicURL:    devURL,
+		Role:            "cad-dev",
+		DisableBrowser:  node == "",
+		BrowserMetaPath: filepath.Join(paths.Preset.PluginVersionRoot, "dev.browser.json"),
+		NATSURL:         resolveDevNATSURL(),
+		NATSSubject:     "logs.dev.cad.src-v1",
 	})
 }
 

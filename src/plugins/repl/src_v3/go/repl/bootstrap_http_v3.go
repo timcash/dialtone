@@ -11,10 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	logs "dialtone/dev/plugins/logs/src_v1/go"
@@ -215,9 +213,7 @@ func EnsureBootstrapHTTPRunning(host string, port int) error {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = nil
-	if runtime.GOOS != "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	configureDetachedBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

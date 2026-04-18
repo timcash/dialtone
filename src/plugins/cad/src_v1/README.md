@@ -36,6 +36,7 @@ Working now:
 - `./dialtone.sh cad src_v1 format`
 - `./dialtone.sh cad src_v1 lint`
 - `./dialtone.sh cad src_v1 build`
+- `./dialtone.sh cad src_v1 publish`
 - `./dialtone.sh cad src_v1 serve`
 - `./dialtone.sh cad src_v1 status`
 - `./dialtone.sh cad src_v1 stop`
@@ -57,6 +58,7 @@ What to debug next:
 ./dialtone.sh cad src_v1 test
 ./dialtone.sh cad src_v1 test --filter self-check
 ./dialtone.sh cad src_v1 test --attach legion --filter cad-ui-browser-smoke
+./dialtone.sh cad src_v1 publish
 ```
 
 ```bash
@@ -64,10 +66,38 @@ What to debug next:
 ./dialtone.sh cad src_v1 format
 ./dialtone.sh cad src_v1 lint
 ./dialtone.sh cad src_v1 build
+./dialtone.sh cad src_v1 publish
 ./dialtone.sh cad src_v1 serve
 ./dialtone.sh cad src_v1 status
 ./dialtone.sh cad src_v1 stop
 ```
+
+## Publish
+
+`publish` is the operator path for the public CAD site.
+
+```bash
+# Full publish: ensure the local backend is running, expose it through Cloudflare,
+# and build the GitHub Pages artifact that points at that live backend.
+./dialtone.sh cad src_v1 publish
+
+# Build only the GitHub Pages artifact. This is what CI uses.
+./dialtone.sh cad src_v1 publish --pages-only
+```
+
+The current default target is:
+
+```text
+https://timcash.github.io/dialtone/cad-src-v1/
+```
+
+The published PWA points at the live backend origin:
+
+```text
+https://cad-src-v1.dialtone.earth
+```
+
+The command runs in the foreground so the full publish transcript stays visible in the shell, just like `cad src_v1 test`.
 
 The focused smoke currently verifies:
 - the CAD page loads in `chrome src_v3`
@@ -128,6 +158,12 @@ DIALTONE> cad stop: server stopped
 
 # Build the UI assets.
 ./dialtone.sh cad src_v1 build
+
+# Publish the public Pages app and live backend tunnel.
+./dialtone.sh cad src_v1 publish
+
+# Build only the Pages artifact without touching the backend/tunnel.
+./dialtone.sh cad src_v1 publish --pages-only
 
 # Run the real WSL-backed CAD test flow.
 ./dialtone.sh cad src_v1 test
