@@ -4,6 +4,7 @@ import { LatencyEstimator } from '../../data/latency';
 import { logError, logInfo } from '../../data/logging';
 import { registerButtons, renderButtons } from '../../buttons';
 import { ROBOT_SECTION_IDS } from '../../section_ids';
+import { sendDriveDown, sendDriveDownLeft, sendDriveDownRight, sendDriveLeft, sendDriveRight, sendDriveUp, sendStopNow } from '../../data/steering';
 
 class VideoControl implements VisualizationControl {
   private img: HTMLImageElement | null;
@@ -40,7 +41,7 @@ class VideoControl implements VisualizationControl {
     if (btn) btn.addEventListener('click', () => this.resumeStream());
 
     // Register Buttons
-    registerButtons(ROBOT_SECTION_IDS.video, ['View'], {
+    registerButtons(ROBOT_SECTION_IDS.video, ['View', 'Move'], {
       'View': [
         { label: 'Feed A', action: () => this.updateFeedSource('Primary') },
         { label: 'Feed B', action: () => this.updateFeedSource('Secondary') },
@@ -51,6 +52,16 @@ class VideoControl implements VisualizationControl {
         null,
         null,
         null,
+        null,
+      ],
+      'Move': [
+        { label: 'Up-L', action: () => sendDriveLeft() },
+        { label: 'Up', action: () => sendDriveUp() },
+        { label: 'Up-R', action: () => sendDriveRight() },
+        { label: 'Down-L', action: () => sendDriveDownLeft() },
+        { label: 'Down', action: () => sendDriveDown() },
+        { label: 'Down-R', action: () => sendDriveDownRight() },
+        { label: 'Stop', action: () => sendStopNow() },
         null,
       ],
     });

@@ -41,6 +41,7 @@ export default defineConfig({
     port: 3000,
     allowedHosts: [
       'legion-wsl-1.shad-artichoke.ts.net',
+      'legion.tail3786ed.ts.net',
       '.shad-artichoke.ts.net',
     ],
     headers: {

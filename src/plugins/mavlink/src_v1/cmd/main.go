@@ -54,6 +54,16 @@ func main() {
 			logs.Error("mavlink key-params failed: %v", err)
 			os.Exit(1)
 		}
+	case "logs-clear":
+		if err := logsClear(os.Args[2:]); err != nil {
+			logs.Error("mavlink logs-clear failed: %v", err)
+			os.Exit(1)
+		}
+	case "reboot-fc":
+		if err := rebootFC(os.Args[2:]); err != nil {
+			logs.Error("mavlink reboot-fc failed: %v", err)
+			os.Exit(1)
+		}
 	case "stream":
 		if err := stream(os.Args[2:]); err != nil {
 			logs.Error("mavlink stream failed: %v", err)
@@ -232,6 +242,237 @@ func minDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+func logsClear(args []string) error {
+	fs := flag.NewFlagSet("logs-clear", flag.ContinueOnError)
+	endpoint := fs.String("endpoint", envOrDefault("MAVLINK_ENDPOINT", ""), "MAVLink endpoint (serial:/dev/...:baud or udp:host:port)")
+	timeout := fs.Duration("timeout", 20*time.Second, "Total wait timeout")
+	targetSystem := fs.Int("target-system", 0, "Target autopilot system ID (0=learn from heartbeat)")
+	targetComponent := fs.Int("target-component", 0, "Target autopilot component ID (0=learn from heartbeat)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ep := strings.TrimSpace(*endpoint)
+	if ep == "" {
+		return fmt.Errorf("mavlink endpoint is required (set --endpoint or MAVLINK_ENDPOINT)")
+	}
+	endpointConf, err := parseMAVLinkEndpoint(ep)
+	if err != nil {
+		return err
+	}
+	node := &gomavlib.Node{
+		Endpoints:   []gomavlib.EndpointConf{endpointConf},
+		Dialect:     common.Dialect,
+		OutVersion:  gomavlib.V2,
+		OutSystemID: 255,
+	}
+	if err := node.Initialize(); err != nil {
+		return err
+	}
+	defer node.Close()
+
+	deadline := time.Now().Add(*timeout)
+	sys := uint8(*targetSystem)
+	comp := uint8(*targetComponent)
+	if sys == 0 || comp == 0 {
+		var err error
+		sys, comp, err = learnTargetFromHeartbeat(node, deadline)
+		if err != nil {
+			return err
+		}
+	}
+	logs.Raw("target system=%d component=%d", sys, comp)
+
+	before := requestLogList(node, sys, comp, deadline)
+	logs.Raw("logs before clear: %s", summarizeLogEntries(before))
+
+	if err := node.WriteMessageAll(&common.MessageLogErase{
+		TargetSystem:    sys,
+		TargetComponent: comp,
+	}); err != nil {
+		return fmt.Errorf("send LOG_ERASE: %w", err)
+	}
+	logs.Raw("sent LOG_ERASE")
+
+	time.Sleep(3 * time.Second)
+	after := requestLogList(node, sys, comp, deadline)
+	logs.Raw("logs after clear: %s", summarizeLogEntries(after))
+	_ = node.WriteMessageAll(&common.MessageLogRequestEnd{
+		TargetSystem:    sys,
+		TargetComponent: comp,
+	})
+	return nil
+}
+
+func rebootFC(args []string) error {
+	fs := flag.NewFlagSet("reboot-fc", flag.ContinueOnError)
+	endpoint := fs.String("endpoint", envOrDefault("MAVLINK_ENDPOINT", ""), "MAVLink endpoint (serial:/dev/...:baud or udp:host:port)")
+	timeout := fs.Duration("timeout", 20*time.Second, "Total wait timeout")
+	targetSystem := fs.Int("target-system", 0, "Target autopilot system ID (0=learn from heartbeat)")
+	targetComponent := fs.Int("target-component", 0, "Target autopilot component ID (0=learn from heartbeat)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ep := strings.TrimSpace(*endpoint)
+	if ep == "" {
+		return fmt.Errorf("mavlink endpoint is required (set --endpoint or MAVLINK_ENDPOINT)")
+	}
+	endpointConf, err := parseMAVLinkEndpoint(ep)
+	if err != nil {
+		return err
+	}
+	node := &gomavlib.Node{
+		Endpoints:   []gomavlib.EndpointConf{endpointConf},
+		Dialect:     common.Dialect,
+		OutVersion:  gomavlib.V2,
+		OutSystemID: 255,
+	}
+	if err := node.Initialize(); err != nil {
+		return err
+	}
+	defer node.Close()
+
+	deadline := time.Now().Add(*timeout)
+	sys := uint8(*targetSystem)
+	comp := uint8(*targetComponent)
+	if sys == 0 || comp == 0 {
+		var err error
+		sys, comp, err = learnTargetFromHeartbeat(node, deadline)
+		if err != nil {
+			return err
+		}
+	}
+	logs.Raw("target system=%d component=%d", sys, comp)
+	err = node.WriteMessageAll(&common.MessageCommandLong{
+		TargetSystem:    sys,
+		TargetComponent: comp,
+		Command:         common.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
+		Param1:          1, // reboot autopilot
+	})
+	if err != nil {
+		return fmt.Errorf("send reboot command: %w", err)
+	}
+	logs.Raw("sent MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN")
+
+	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		select {
+		case evt := <-node.Events():
+			frame, ok := evt.(*gomavlib.EventFrame)
+			if !ok {
+				continue
+			}
+			switch msg := frame.Message().(type) {
+			case *common.MessageCommandAck:
+				if msg.Command == common.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN {
+					logs.Raw("ack command=%s result=%s", msg.Command.String(), msg.Result.String())
+					return nil
+				}
+			case *common.MessageStatustext:
+				text := strings.TrimSpace(msg.Text)
+				if text != "" {
+					logs.Raw("statustext: %s", text)
+				}
+			}
+		case <-time.After(minDuration(250*time.Millisecond, remaining)):
+		}
+	}
+	return fmt.Errorf("no reboot command ack before timeout")
+}
+
+func learnTargetFromHeartbeat(node *gomavlib.Node, deadline time.Time) (uint8, uint8, error) {
+	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		select {
+		case evt := <-node.Events():
+			frame, ok := evt.(*gomavlib.EventFrame)
+			if !ok {
+				continue
+			}
+			if _, ok := frame.Message().(*common.MessageHeartbeat); ok {
+				return frame.SystemID(), frame.ComponentID(), nil
+			}
+		case <-time.After(minDuration(250*time.Millisecond, remaining)):
+		}
+	}
+	return 0, 0, fmt.Errorf("no heartbeat received before timeout")
+}
+
+func requestLogList(node *gomavlib.Node, sys, comp uint8, deadline time.Time) []common.MessageLogEntry {
+	_ = node.WriteMessageAll(&common.MessageLogRequestList{
+		TargetSystem:    sys,
+		TargetComponent: comp,
+		Start:           0,
+		End:             0xffff,
+	})
+
+	entries := []common.MessageLogEntry{}
+	quiet := time.NewTimer(1200 * time.Millisecond)
+	defer quiet.Stop()
+	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		select {
+		case evt := <-node.Events():
+			frame, ok := evt.(*gomavlib.EventFrame)
+			if !ok {
+				continue
+			}
+			switch msg := frame.Message().(type) {
+			case *common.MessageLogEntry:
+				entries = append(entries, *msg)
+				if !quiet.Stop() {
+					select {
+					case <-quiet.C:
+					default:
+					}
+				}
+				quiet.Reset(500 * time.Millisecond)
+				if msg.NumLogs == 0 || len(entries) >= int(msg.NumLogs) {
+					return entries
+				}
+			case *common.MessageStatustext:
+				text := strings.TrimSpace(msg.Text)
+				if text != "" {
+					logs.Raw("statustext: %s", text)
+				}
+			}
+		case <-quiet.C:
+			return entries
+		case <-time.After(minDuration(250*time.Millisecond, remaining)):
+		}
+	}
+	return entries
+}
+
+func summarizeLogEntries(entries []common.MessageLogEntry) string {
+	if len(entries) == 0 {
+		return "no LOG_ENTRY response"
+	}
+	first := entries[0]
+	if first.NumLogs == 0 {
+		return "0"
+	}
+	totalBytes := uint64(0)
+	lastID := uint16(0)
+	for _, e := range entries {
+		totalBytes += uint64(e.Size)
+		if e.Id > lastID {
+			lastID = e.Id
+		}
+	}
+	return fmt.Sprintf("reported=%d received=%d last_id=%d bytes=%d", first.NumLogs, len(entries), lastID, totalBytes)
 }
 
 func run(args []string) error {
@@ -713,6 +954,8 @@ func usage() {
 	logs.Raw("  stream --host rover [--cmd stop|mode|drive_up ...] [--duration 12s]")
 	logs.Raw("  params [--endpoint MAVLINK_ENDPOINT] [--names CSV] [--timeout 10s] [--target-system 0] [--target-component 0] [--json]")
 	logs.Raw("  key-params [--endpoint MAVLINK_ENDPOINT] [--timeout 10s] [--target-system 0] [--target-component 0] [--json]")
+	logs.Raw("  logs-clear [--endpoint MAVLINK_ENDPOINT] [--timeout 20s] [--target-system 0] [--target-component 0]")
+	logs.Raw("  reboot-fc [--endpoint MAVLINK_ENDPOINT] [--timeout 20s] [--target-system 0] [--target-component 0]")
 	logs.Raw("  version")
 }
 
