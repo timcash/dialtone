@@ -57,7 +57,11 @@
           "--mock-if-no-endpoint=false"
         ],
         "env": {
-          "MAVLINK_ENDPOINT": "serial:/dev/ttyAMA0:57600"
+          "MAVLINK_ENDPOINT": "serial:/dev/ttyAMA0:57600",
+          "MAVLINK_STARTUP_ARM": "1",
+          "MAVLINK_STARTUP_DELAY": "2s",
+          "MAVLINK_STARTUP_MODE": "MANUAL",
+          "MAVLINK_STARTUP_NEUTRAL": "1"
         }
       },
       {

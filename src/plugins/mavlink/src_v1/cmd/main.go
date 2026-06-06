@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluenviron/gomavlib/v3"
@@ -29,6 +30,14 @@ type roverCommand struct {
 }
 
 const defaultRoverKeyParamsCSV = "RCMAP_STEERING,RCMAP_THROTTLE,RCMAP_ROLL,RCMAP_PITCH,RCMAP_YAW,RC1_MIN,RC1_TRIM,RC1_MAX,RC3_MIN,RC3_TRIM,RC3_MAX,SERVO1_FUNCTION,SERVO1_MIN,SERVO1_TRIM,SERVO1_MAX,SERVO3_FUNCTION,SERVO3_MIN,SERVO3_TRIM,SERVO3_MAX,CRUISE_SPEED,CRUISE_THROTTLE,WP_SPEED"
+
+type startupOptions struct {
+	Mode        string
+	Arm         bool
+	Neutral     bool
+	Delay       time.Duration
+	WaitTimeout time.Duration
+}
 
 func main() {
 	logs.SetOutput(os.Stdout)
@@ -481,6 +490,11 @@ func run(args []string) error {
 	natsURL := fs.String("nats-url", "nats://127.0.0.1:4222", "NATS URL")
 	natsConnectTimeout := fs.Duration("nats-connect-timeout", 30*time.Second, "Max time to wait for initial NATS connection")
 	mockIfNoEndpoint := fs.Bool("mock-if-no-endpoint", true, "Publish mock heartbeat if endpoint not set")
+	startupMode := fs.String("startup-mode", envOrDefault("MAVLINK_STARTUP_MODE", ""), "Optional mode to set after first heartbeat (for example MANUAL)")
+	startupArm := fs.Bool("startup-arm", envBoolOrDefault("MAVLINK_STARTUP_ARM", false), "Arm after applying startup mode")
+	startupNeutral := fs.Bool("startup-neutral", envBoolOrDefault("MAVLINK_STARTUP_NEUTRAL", true), "Send neutral stop before startup mode/arm")
+	startupDelay := fs.Duration("startup-delay", envDurationOrDefault("MAVLINK_STARTUP_DELAY", 2*time.Second), "Delay after first heartbeat before startup commands")
+	startupWait := fs.Duration("startup-wait", envDurationOrDefault("MAVLINK_STARTUP_WAIT", 30*time.Second), "Max wait for first heartbeat before skipping startup commands")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -503,9 +517,11 @@ func run(args []string) error {
 	retryDelay := 1 * time.Second
 	const retryDelayMax = 10 * time.Second
 	for {
+		firstHeartbeat := make(chan struct{})
+		var heartbeatOnce sync.Once
 		svc, err := mavlinkapp.NewMavlinkService(mavlinkapp.MavlinkConfig{
 			Endpoint: endpointValue,
-			Callback: func(evt *mavlinkapp.MavlinkEvent) {
+			Callback: wrapStartupHeartbeatCallback(func(evt *mavlinkapp.MavlinkEvent) {
 				subj, payload := toNATSPayload(evt)
 				if subj == "" || payload == nil {
 					return
@@ -515,7 +531,7 @@ func run(args []string) error {
 					return
 				}
 				_ = nc.Publish(subj, data)
-			},
+			}, firstHeartbeat, &heartbeatOnce),
 		})
 		if err != nil {
 			logs.Warn("mavlink endpoint connect failed endpoint=%s: %v", endpointValue, err)
@@ -530,12 +546,73 @@ func run(args []string) error {
 			return fmt.Errorf("rover.command subscribe failed: %w", subErr)
 		}
 		logs.Info("mavlink_v1 bridge started endpoint=%s nats=%s", endpointValue, *natsURL)
+		go runStartupActions(svc, startupOptions{
+			Mode:        strings.TrimSpace(*startupMode),
+			Arm:         *startupArm,
+			Neutral:     *startupNeutral,
+			Delay:       *startupDelay,
+			WaitTimeout: *startupWait,
+		}, firstHeartbeat)
 		svc.Start()
 		_ = sub.Unsubscribe()
 		svc.Close()
 		logs.Warn("mavlink_v1 endpoint stream ended; reconnecting in %s", retryDelay)
 		time.Sleep(retryDelay)
 		retryDelay = minDuration(retryDelay*2, retryDelayMax)
+	}
+}
+
+func wrapStartupHeartbeatCallback(callback func(*mavlinkapp.MavlinkEvent), firstHeartbeat chan<- struct{}, once *sync.Once) func(*mavlinkapp.MavlinkEvent) {
+	return func(evt *mavlinkapp.MavlinkEvent) {
+		if evt != nil && evt.Type == "HEARTBEAT" && once != nil {
+			once.Do(func() {
+				close(firstHeartbeat)
+			})
+		}
+		if callback != nil {
+			callback(evt)
+		}
+	}
+}
+
+func runStartupActions(svc *mavlinkapp.MavlinkService, opts startupOptions, firstHeartbeat <-chan struct{}) {
+	mode := strings.ToUpper(strings.TrimSpace(opts.Mode))
+	if !opts.Neutral && mode == "" && !opts.Arm {
+		return
+	}
+	if opts.WaitTimeout <= 0 {
+		opts.WaitTimeout = 30 * time.Second
+	}
+	timer := time.NewTimer(opts.WaitTimeout)
+	defer timer.Stop()
+	select {
+	case <-firstHeartbeat:
+	case <-timer.C:
+		logs.Warn("mavlink startup actions skipped: no heartbeat before %s", opts.WaitTimeout)
+		return
+	}
+	if opts.Delay > 0 {
+		time.Sleep(opts.Delay)
+	}
+	logs.Info("mavlink startup actions: neutral=%t mode=%q arm=%t", opts.Neutral, mode, opts.Arm)
+	if opts.Neutral {
+		if err := svc.StopMotion(); err != nil {
+			logs.Error("mavlink startup neutral failed: %v", err)
+			return
+		}
+	}
+	if mode != "" {
+		if err := svc.SetMode(mode); err != nil {
+			logs.Error("mavlink startup mode failed: %v", err)
+			return
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	if opts.Arm {
+		if err := svc.Arm(); err != nil {
+			logs.Error("mavlink startup arm failed: %v", err)
+			return
+		}
 	}
 }
 
@@ -909,7 +986,8 @@ func toNATSPayload(evt *mavlinkapp.MavlinkEvent) (string, map[string]any) {
 	}
 	switch msg := evt.Data.(type) {
 	case *common.MessageHeartbeat:
-		return "mavlink.heartbeat", map[string]any{"type": "HEARTBEAT", "mav_type": msg.Type, "custom_mode": msg.CustomMode, "timestamp": now, "t_raw": now}
+		armed := (uint8(msg.BaseMode) & 0x80) != 0 // MAV_MODE_FLAG_SAFETY_ARMED
+		return "mavlink.heartbeat", map[string]any{"type": "HEARTBEAT", "mav_type": msg.Type, "custom_mode": msg.CustomMode, "base_mode": msg.BaseMode, "armed": armed, "system_status": msg.SystemStatus, "timestamp": now, "t_raw": now}
 	case *common.MessageAttitude:
 		return "mavlink.attitude", map[string]any{"type": "ATTITUDE", "roll": msg.Roll, "pitch": msg.Pitch, "yaw": msg.Yaw, "rollspeed": msg.Rollspeed, "pitchspeed": msg.Pitchspeed, "yawspeed": msg.Yawspeed, "timestamp": now, "t_raw": now}
 	case *common.MessageGlobalPositionInt:
@@ -947,10 +1025,37 @@ func envOrDefault(key, fallback string) string {
 	return v
 }
 
+func envBoolOrDefault(key string, fallback bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func envDurationOrDefault(key string, fallback time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return fallback
+	}
+	return d
+}
+
 func usage() {
 	logs.Raw("Usage: dialtone_mavlink_v1 <command>")
 	logs.Raw("Commands:")
-	logs.Raw("  run [--endpoint MAVLINK_ENDPOINT] [--nats-url URL] [--mock-if-no-endpoint]")
+	logs.Raw("  run [--endpoint MAVLINK_ENDPOINT] [--nats-url URL] [--mock-if-no-endpoint] [--startup-mode MANUAL] [--startup-arm]")
 	logs.Raw("  stream --host rover [--cmd stop|mode|drive_up ...] [--duration 12s]")
 	logs.Raw("  params [--endpoint MAVLINK_ENDPOINT] [--names CSV] [--timeout 10s] [--target-system 0] [--target-component 0] [--json]")
 	logs.Raw("  key-params [--endpoint MAVLINK_ENDPOINT] [--timeout 10s] [--target-system 0] [--target-component 0] [--json]")
