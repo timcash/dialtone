@@ -29,7 +29,6 @@ use crate::identity::{
 };
 use crate::refs::ServiceAdvertisement;
 
-pub const DIALTONE_GOSSIP_TOPIC_BYTES: &[u8; 32] = b"dialtone-iroh-gossip-topic-00001";
 pub const DIALTONE_HEARTBEAT_SCHEMA: &str = "dialtone.iroh.heartbeat.v1";
 pub const DIALTONE_ENVELOPE_SCHEMA_V2: &str = "dialtone.iroh.envelope.v2";
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
@@ -63,10 +62,6 @@ pub fn parse_duration_secs(raw: &str) -> Result<u64, String> {
             .map_err(|e| e.to_string());
     }
     s.parse::<u64>().map_err(|e| e.to_string())
-}
-
-pub fn default_topic_id() -> TopicId {
-    TopicId::from_bytes(*DIALTONE_GOSSIP_TOPIC_BYTES)
 }
 
 pub fn default_channel_name() -> String {
@@ -1586,13 +1581,27 @@ mod tests {
             addr
         });
         let ticket = GossipTicket {
-            topic: default_topic_id(),
+            topic: derive_standby_topic_id("test-endpoint-id"),
             peers: vec![addr],
         };
         let encoded = ticket.to_text().unwrap();
         let decoded = GossipTicket::from_str(&encoded).unwrap();
         assert_eq!(decoded.topic, ticket.topic);
         assert_eq!(decoded.peers.len(), 1);
+    }
+
+    #[test]
+    fn issue_9_no_static_public_gossip_topic_exists_and_unconfigured_nodes_use_unique_standby_topics(
+    ) {
+        let legacy_public_bytes: [u8; 32] = *b"dialtone-iroh-gossip-topic-00001";
+        let standby_a = derive_standby_topic_id("endpoint-alpha");
+        let standby_b = derive_standby_topic_id("endpoint-beta");
+        assert_ne!(standby_a, standby_b);
+        assert_ne!(standby_a.as_bytes(), &legacy_public_bytes);
+        assert_ne!(standby_b.as_bytes(), &legacy_public_bytes);
+
+        let keys = derive_channel_keys_v2("dialtone", "dt-StrongTestPassword_2026_Argon2id!");
+        assert_ne!(keys.topic_id.as_bytes(), &legacy_public_bytes);
     }
 
     #[test]
