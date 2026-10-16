@@ -1,0 +1,13 @@
+/target
+/bin
+.DS_Store
+*.swp
+.dialtone/
+.dialtone2/
+*config.json
+*fleet*.json
+*.key
+*.pem
+*.secret
+.env
+.env.*
