@@ -72,7 +72,108 @@ Open **`http://127.0.0.1:8788`** (also served at `/nodes`, `/peer`, and `/hud`) 
 
 ---
 
-## 3. Joining a Mesh Channel, Peer Allowlist & Invite Tickets
+## 3. Starting a Gossip Mesh from Scratch
+
+Because `dialtone` ships with **zero hardcoded fleet peers** and enforces a **deny-by-default peer allowlist** + **Argon2id / XChaCha20-Poly1305 encrypted channel**, a brand-new node boots into an isolated `dialtone:locked-standby` topic until you configure a channel password and authorize your peers.
+
+Below are the two ways to bootstrap a new multi-node mesh from scratch (using generic example nodes `node-alpha` and `node-beta`).
+
+### Option A: Bootstrap with an Expiring Single-Use Invite Ticket (Fastest)
+
+#### Step 1 — Generate a password & initialize `node-alpha`
+On **Host A** (`node-alpha`), generate a 256-bit channel password, derive and save the Argon2id channel keys into `~/.dialtone/config.json` (`0600`), and mint a 15-minute single-use invite ticket:
+
+```bash
+# 1. Generate a high-entropy channel password (save this to share with your other nodes)
+CHANNEL_PW=$(./dialtone gen-password)
+echo "Channel password: $CHANNEL_PW"
+
+# 2. Derive Argon2id subkeys and save to ~/.dialtone/config.json without starting the long-running loop yet
+./dialtone join "$CHANNEL_PW" --node node-alpha --once
+
+# 3. Mint a signed, single-use bootstrap invite ticket valid for 15 minutes
+./dialtone invite --ttl 15m
+```
+
+Copy the `"invite_ticket": "dialtone-invite-v1:..."` string from the JSON output.
+
+#### Step 2 — Join `node-beta` using the invite ticket
+On **Host B** (`node-beta`), redeem the invite ticket with the same channel password. Redeeming a valid `dialtone-invite-v1:` ticket automatically verifies the issuer signature under `auth_key`, records the single-use nonce, adds `node-alpha` to `node-beta`'s `allowed_endpoint_ids` and `seed_peers`, and prints `node-beta`'s `EndpointId`:
+
+```bash
+# 1. Inspect node-beta's persistent EndpointId (created at ~/.dialtone/iroh-secret-key)
+./dialtone status --node node-beta
+
+# 2. Join the channel and redeem the single-use invite ticket from node-alpha
+./dialtone join "<CHANNEL_PW>" \
+  --node node-beta \
+  --bootstrap-ticket "dialtone-invite-v1:<ticket-from-node-alpha>" \
+  --once
+```
+
+#### Step 3 — Allow `node-beta` on `node-alpha` & start both nodes
+On **Host A** (`node-alpha`), authorize `node-beta`'s `EndpointId` (so both sides permit each other and include each other in `seed_peers`) and start the daemons:
+
+```bash
+# On Host A (node-alpha): allow node-beta's 64-hex EndpointId and start
+./dialtone peers allow <node-beta-endpoint-id>
+./dialtone up --node node-alpha
+```
+
+```bash
+# On Host B (node-beta): start the daemon
+./dialtone up --node node-beta
+```
+
+---
+
+### Option B: Explicit Allowlist Provisioning Across N Nodes (Deterministic / Automated)
+
+If you are provisioning 2, 3, or more hosts via a setup script or SSH, you can pre-populate each node's allowlist directly using `dialtone status`, `dialtone join --once`, and `dialtone peers allow`:
+
+```bash
+# 1. On EVERY host, initialize its persistent Ed25519 identity (~/.dialtone/iroh-secret-key)
+#    and record its 64-character hex "endpoint_id":
+./dialtone status --node <node-name>
+
+# 2. On ONE host, generate the shared channel password:
+./dialtone gen-password
+# -> e.g. dt-R9xK4mP7vQ2wL8nJ5tB3yF6hC1zX0sW9_AbCdEfGhIj
+
+# 3. On EVERY host, derive the Argon2id channel keys into ~/.dialtone/config.json:
+./dialtone join "<CHANNEL_PW>" --node <node-name> --once
+
+# 4. On EVERY host, authorize every peer's EndpointId (adds to allowed_endpoint_ids & seed_peers):
+./dialtone peers allow <endpoint-id-of-node-alpha>
+./dialtone peers allow <endpoint-id-of-node-beta>
+./dialtone peers allow <endpoint-id-of-node-gamma>
+
+# Verify the local allowlist and seed peers:
+./dialtone peers list
+
+# 5. Start dialtone in the foreground (or install as a persistent background service):
+./dialtone up --node <node-name>
+# or:
+./dialtone daemon install
+```
+
+### Step 4 — Verify Mesh Convergence
+
+Within a few seconds of starting, verify that all nodes are exchanging encrypted heartbeats (`dialtone.iroh.envelope.v2`) and incrementing their `counter`:
+
+```bash
+# Check discovered peers and heartbeat counters via the local HTTP API
+curl -s http://127.0.0.1:8788/api/state | jq '.nodes[] | {node, role, endpoint_id, counter}'
+
+# Check the 5 boot stages and active channel fingerprint (ch-...)
+curl -s http://127.0.0.1:8788/api/config | jq '{node, channel_fingerprint: .mesh_config.channel_fingerprint, boot_stages}'
+```
+
+Or open **`http://127.0.0.1:8788`** in your browser to view the live 3D topology and terminal `top` table.
+
+---
+
+## 4. Channel Security, Peer Allowlist & Control API Reference
 
 ### Unlock & Join the `"dialtone"` Channel (`join` & `gen-password`)
 
@@ -157,16 +258,16 @@ curl -X POST http://127.0.0.1:8788/api/mesh/join \
 
 ---
 
-## 4. Persistent OS Daemon & Service Units
+## 5. Persistent OS Daemon & Service Units
 
-`dialtone` can install itself into your user account so it starts automatically on boot/login without requiring `root` or `sudo`. Channel passwords are saved to `~/.dialtone/config.json` (`0600`) and are never passed on the service command line:
+`dialtone` can install itself into your user account so it starts automatically on boot/login without requiring `root` or `sudo`. Derived Argon2id channel keys are saved to `~/.dialtone/config.json` (`0600`) and raw passwords are never written to disk or passed on the service command line:
 
 ```bash
 # Copy binary to ~/.dialtone/bin/ and register OS login service
 ./dialtone daemon install
 
 # Or install inline while booting
-./dialtone up --password my-fleet-password --install-daemon
+./dialtone up --password "<CHANNEL_PW>" --install-daemon
 
 # Check installation status and saved configuration
 ./dialtone daemon status
@@ -192,16 +293,19 @@ Bootstrap script and release manifest endpoints are also served over HTTP at `GE
 
 ---
 
-## 5. Content-Addressed Blob Store (CAS) & Tiered Hydration
+## 6. Content-Addressed Blob Store (CAS) & Tiered Hydration
 
 All artifacts and executable payloads are stored by SHA-256 digest under `~/.dialtone/blobs/<2-hex-prefix>/<64-hex-digest>`. Uploads are staged to a temporary file, verified against SHA-256, and atomically renamed into the store.
 
 ### Store, Fetch & Verify Blobs via HTTP
 
 ```bash
+API_TOKEN=$(cat ~/.dialtone/api-token)
+
 # 1. Upload base64 payload into the verified CAS
 BLOB_B64=$(printf '#!/bin/sh\nsleep 30\n' | base64 | tr -d '\n')
 curl -X POST http://127.0.0.1:8788/api/artifacts/blob \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"bytes_base64\":\"$BLOB_B64\"}"
 
@@ -225,21 +329,25 @@ When hydrating an artifact across the mesh, `dialtone` evaluates a 3-tier resolu
 
 # HTTP evaluation
 curl -X POST http://127.0.0.1:8788/api/artifacts/fetch \
+  -H "Authorization: Bearer $(cat ~/.dialtone/api-token)" \
   -H "Content-Type: application/json" \
   -d '{"sha256":"sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d","uri":"iroh-blobs://ticket/blob123","provider_node":"node-gamma","expected_bytes":4096}'
 ```
 
 ---
 
-## 6. Supervised Blob Subprocesses & Process Intent
+## 7. Supervised Blob Subprocesses & Process Intent
 
 ### Keep a CAS Blob Running as a Daemon Subprocess
 
 Once an executable binary or script is stored in the local CAS (`~/.dialtone/blobs`), you can configure `dialtone` to stage it into `~/.dialtone/run/<name>-<short_sha>` (`chmod 0755`) and supervise it as a child process of the daemon:
 
 ```bash
+API_TOKEN=$(cat ~/.dialtone/api-token)
+
 # Spawn and supervise a CAS blob as a child process of dialtone
 curl -X POST http://127.0.0.1:8788/api/processes/blob \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "telemetry-blob-worker",
@@ -254,6 +362,7 @@ curl -s http://127.0.0.1:8788/api/processes
 
 # Stop a supervised blob subprocess cleanly
 curl -X POST http://127.0.0.1:8788/api/processes/blob \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "telemetry-blob-worker",
@@ -278,7 +387,7 @@ Or via HTTP: `GET /api/process-intent?node=edge-1&action=restart` and `POST /api
 
 ---
 
-## 7. Manifest-Driven Deployment, Build Cache & Rollback
+## 8. Manifest-Driven Deployment, Build Cache & Rollback
 
 ### Deploy Target Plans (`deploy-plan-fixture`)
 
@@ -325,7 +434,7 @@ Or via HTTP: `GET /api/rollback-plan?node=edge-1` and `POST /api/rollback-plan`.
 
 ---
 
-## 8. Service Discovery, Command Journals, Catalogs & Evidence
+## 9. Service Discovery, Command Journals, Catalogs & Evidence
 
 ### Canonical `dialtone://` Service Discovery
 
@@ -369,15 +478,17 @@ HTTP endpoints: `GET /api/program-catalog`, `GET /api/catalogs`, and `GET /api/c
 
 ---
 
-## 9. HTTP API Quick Reference
+## 10. HTTP API Quick Reference
+
+All `POST` routes require `Authorization: Bearer <token>` (or `X-Dialtone-Token: <token>`) matching `~/.dialtone/api-token`.
 
 | Method & Path | Description |
 | :--- | :--- |
 | `GET /` (`/nodes`, `/peer`, `/hud`) | Embedded 3D Tactical HUD & Terminal `top` Web UI |
 | `GET /ws` | Real-time WebSocket telemetry stream |
 | `GET /health` | Node health status JSON |
-| `GET /api/boot-status` (`/api/config`) | 5-stage boot progress, mesh config, and blob store path |
-| `POST /api/mesh/join` (`/api/config/join`) | Join or switch secret-key gossip channel live |
+| `GET /api/boot-status` (`/api/config`) | 5-stage boot progress, mesh config (`derived_keys` redacted), and blob store path |
+| `POST /api/mesh/join` (`/api/config/join`) | Join or switch encrypted gossip channel live |
 | `POST /api/daemon/install` | Install persistent OS user daemon |
 | `GET /api/state` | Full daemon runtime state (supports `include_kv`, `kv_offset`, `kv_limit`) |
 | `GET /api/mesh` (`/api/gossip`) | Active mesh peer heartbeats and `dialtone://` service endpoints |
@@ -401,23 +512,25 @@ HTTP endpoints: `GET /api/program-catalog`, `GET /api/catalogs`, and `GET /api/c
 
 ---
 
-## 10. Environment Variables & Local Paths
+## 11. Environment Variables & Local Paths
 
 | Variable / Path | Default | Purpose |
 | :--- | :--- | :--- |
 | `DIALTONE_STATE_DIR` / `DIALTONE_HOME` | `~/.dialtone` | Root state directory for config, identity, blobs, and staged executables |
 | `DIALTONE_IROH_SECRET_KEY_FILE` | `~/.dialtone/iroh-secret-key` | Persistent 32-byte Ed25519 Iroh endpoint secret key (`0600` permissions) |
+| `DIALTONE_API_TOKEN` | `~/.dialtone/api-token` | Bearer token required for all `POST` control API routes (and required when `--listen` is non-loopback) |
 | `DIALTONE_CHANNEL` | `dialtone` | Default gossip channel name when `--channel` is not passed |
-| `DIALTONE_PASSWORD` (`DIALTONE_SECRET_KEY`) | *(unset)* | Password required to unlock and authenticate the gossip channel on boot |
+| `DIALTONE_PASSWORD` (`DIALTONE_SECRET_KEY`) | *(unset)* | Password used to derive Argon2id `v2` channel keys on boot |
 | `DIALTONE_NODE` | System hostname | Override default node name when `--node` is not passed |
 | `DIALTONE_DEPLOY_ALLOWED_ROOTS` | `/opt/dialtone/,/var/lib/dialtone/,/tmp/dialtone-staging/` | Comma-separated allowed filesystem prefixes for manifest staging |
-| `~/.dialtone/config.json` | — | Host-local mesh config (`0600`): channel password, `seed_peers`, `allowed_endpoint_ids`, and supervised process specs |
+| `~/.dialtone/config.json` | — | Host-local mesh config (`0600`): Argon2id `derived_keys` (no plaintext password), `seed_peers`, `allowed_endpoint_ids`, `used_invite_nonces`, and supervised process specs |
+| `~/.dialtone/api-token` | — | Auto-generated 256-bit local HTTP control API bearer token (`0600`) |
 | `~/.dialtone/blobs/` | — | SHA-256 Content-Addressed Blob Store (`<2-hex>/<64-hex>`) |
 | `~/.dialtone/run/` | — | Staged `0755` executables spawned by the blob subprocess supervisor |
 
 ---
 
-## 11. Self-Test & Local CI Verification
+## 12. Self-Test & Local CI Verification
 
 Run the built-in 7-capability live verification suite or the full local CI pipeline at any time:
 
