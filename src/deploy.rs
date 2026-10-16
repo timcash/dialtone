@@ -491,10 +491,8 @@ pub fn install_persistent_os_daemon(
         let mut cfg = crate::gossip::load_mesh_config(&cfg_path);
         cfg.node_name = Some(node.to_string());
         cfg.listen_addr = Some(listen.to_string());
-        cfg.configured = true;
-        cfg.secret_key = Some(sec.trim().to_string());
-        cfg.channel_fingerprint =
-            crate::gossip::secret_channel_fingerprint(&format!("{}:{}", cfg.channel, sec.trim()));
+        let ch = cfg.channel.clone();
+        cfg.apply_channel_password(&ch, sec.trim());
         let _ = crate::gossip::save_mesh_config(&cfg_path, &cfg);
     }
 

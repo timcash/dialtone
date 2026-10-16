@@ -13,15 +13,20 @@ use dialtone::deploy::{
 };
 use dialtone::evidence::{evaluate_proof_case, plan_alert_ack, sample_live_host_resources};
 use dialtone::gossip::{
-    default_arch, default_blob_cache_dir, default_config_path, default_fleet_seed_peers,
-    default_os, derive_standby_topic_id, detect_default_node_name, is_allowed_main_fleet_peer,
-    load_mesh_config, node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
-    observe_peer_remote_addrs, parse_secret_or_ticket, save_mesh_config,
-    secret_channel_fingerprint, sign_heartbeat_with_password, validate_channel_password,
-    verify_heartbeat_password, DialtoneHeartbeat, GossipTicket, MeshControlCommand,
-    DEFAULT_CHANNEL_NAME, DIALTONE_HEARTBEAT_SCHEMA,
+    allow_peer_in_config, create_invite_ticket, decrypt_heartbeat_from_gossip, default_arch,
+    default_blob_cache_dir, default_config_path, default_fleet_seed_peers, default_os,
+    derive_standby_topic_id, detect_default_node_name, encrypt_heartbeat_for_gossip,
+    generate_channel_password, is_allowed_peer_in_list, load_mesh_config, node_capabilities_for,
+    node_role_for, normalize_channel_name, now_unix, observe_peer_remote_addrs,
+    parse_duration_secs, redeem_invite_ticket, revoke_peer_in_config, save_mesh_config,
+    sign_heartbeat_with_keys, validate_channel_password, DerivedChannelKeys, DialtoneHeartbeat,
+    GossipTicket, MeshControlCommand, DEFAULT_CHANNEL_NAME, DIALTONE_HEARTBEAT_SCHEMA,
+    INVITE_TICKET_PREFIX,
 };
-use dialtone::http::{default_boot_stages, serve_http_blocking, DaemonRuntimeState};
+use dialtone::http::{
+    default_boot_stages, load_or_create_api_token, serve_http_blocking,
+    validate_listen_addr_security, DaemonRuntimeState,
+};
 use dialtone::identity::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
     load_or_create_secret_key_at, IrohRelayPolicy, IrohTransportConfig, IrohTransportDiagnostics,
@@ -45,6 +50,9 @@ fn print_usage() {
          actions:\n\
          \x20 up | start | hub         Boot in dependency order: Local Web HUD -> Blob Store -> Iroh QUIC -> Gossip Mesh\n\
          \x20 join <password>          Unlock & join the 'dialtone' gossip channel with a password (live or persistent)\n\
+         \x20 gen-password             Generate a CSPRNG high-entropy channel password (dtp-...)\n\
+         \x20 peers [allow|revoke|list] [<endpoint_id>] Manage the local peer allowlist in ~/.dialtone/config.json\n\
+         \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use bootstrap invite ticket\n\
          \x20 daemon [install|status]  Install or inspect persistent OS background daemon (survives restarts)\n\
          \x20 index                    Run HTTP dashboard, registration, and state API server\n\
          \x20 node                     Run headless Iroh 1.3 gossip + blob mesh peer node\n\
@@ -66,9 +74,12 @@ fn print_usage() {
          flags:\n\
          \x20 --node <name>            Peer name (default: auto-detected hostname or saved config)\n\
          \x20 --listen <addr>          Local Web HUD listen address (default: 127.0.0.1:8788)\n\
+         \x20 --api-token <token>      Explicit API bearer token for POST routes (default: ~/.dialtone/api-token)\n\
          \x20 --channel <name>         Gossip channel name (default: dialtone)\n\
          \x20 --password <pass>        Password required to unlock & authenticate the gossip channel\n\
-         \x20 --bootstrap-ticket <t>   Bootstrap Iroh gossip ticket (repeatable)\n\
+         \x20 --bootstrap-ticket <t>   Bootstrap Iroh gossip or invite ticket (repeatable)\n\
+         \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 300s; default: 15m)\n\
+         \x20 --peer <endpoint_id>     Optional target EndpointId for 'dialtone invite' or 'dialtone peers'\n\
          \x20 --install-daemon         Register persistent OS service so dialtone survives restarts\n\
          \x20 --no-tailnet             Exclude Tailscale (100.64.0.0/10 & fd7a:115c:a1e0::/48) and bind physical IPv4\n\
          \x20 --allow-tailnet          Allow Tailscale interface addresses\n\
@@ -99,10 +110,14 @@ struct CliOptions {
     node_explicit: bool,
     listen: String,
     listen_explicit: bool,
+    api_token: Option<String>,
     channel: String,
     secret_key: Option<String>,
     install_daemon: bool,
     daemon_subcmd: String,
+    peers_subcmd: String,
+    peer_target: Option<String>,
+    invite_ttl_secs: u64,
     once: bool,
     deploy_target: String,
     build_case: Option<String>,
@@ -146,10 +161,16 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         node_explicit: false,
         listen: default_listen,
         listen_explicit: false,
+        api_token: env::var("DIALTONE_API_TOKEN")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
         channel: default_channel,
         secret_key: env_password.or(saved.secret_key),
         install_daemon: false,
         daemon_subcmd: "install".to_string(),
+        peers_subcmd: "list".to_string(),
+        peer_target: None,
+        invite_ttl_secs: 900,
         once: false,
         deploy_target: "robot-v4-default".to_string(),
         build_case: None,
@@ -185,6 +206,32 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.action = "self-test".to_string();
                 action_set = true;
             }
+            "gen-password" | "generate-password" if !action_set => {
+                opts.action = "gen-password".to_string();
+                action_set = true;
+            }
+            "peers" | "peer" if !action_set => {
+                opts.action = "peers".to_string();
+                action_set = true;
+                if let Some(sub) = args.get(idx + 1) {
+                    if !sub.starts_with('-') {
+                        idx += 1;
+                        opts.peers_subcmd = sub.clone();
+                        if matches!(opts.peers_subcmd.as_str(), "allow" | "revoke" | "remove") {
+                            if let Some(target) = args.get(idx + 1) {
+                                if !target.starts_with('-') {
+                                    idx += 1;
+                                    opts.peer_target = Some(target.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "invite" if !action_set => {
+                opts.action = "invite".to_string();
+                action_set = true;
+            }
             "up" | "start" if !action_set => {
                 opts.action = "up".to_string();
                 action_set = true;
@@ -200,6 +247,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                                 && !pass.trim().is_empty()
                                 && !next_arg.starts_with("iroh-gossip-v1:")
                                 && !next_arg.starts_with("dialtone-gossip-v1:")
+                                && !next_arg.starts_with(INVITE_TICKET_PREFIX)
                             {
                                 opts.channel = normalize_channel_name(Some(ch));
                                 opts.secret_key = Some(pass.trim().to_string());
@@ -253,6 +301,10 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.listen = args.get(idx).ok_or("missing --listen value")?.clone();
                 opts.listen_explicit = true;
             }
+            "--api-token" => {
+                idx += 1;
+                opts.api_token = Some(args.get(idx).ok_or("missing --api-token value")?.clone());
+            }
             "--channel" => {
                 idx += 1;
                 let ch = args.get(idx).ok_or("missing --channel value")?;
@@ -262,6 +314,15 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             | "--key" | "--secret" => {
                 idx += 1;
                 opts.secret_key = Some(args.get(idx).ok_or("missing --password value")?.clone());
+            }
+            "--ttl" => {
+                idx += 1;
+                let raw_ttl = args.get(idx).ok_or("missing --ttl value")?;
+                opts.invite_ttl_secs = parse_duration_secs(raw_ttl)?;
+            }
+            "--peer" | "--endpoint-id" => {
+                idx += 1;
+                opts.peer_target = Some(args.get(idx).ok_or("missing --peer value")?.clone());
             }
             "--install-daemon" | "--daemon" => {
                 opts.install_daemon = true;
@@ -463,6 +524,7 @@ fn try_join_running_local_daemon(
     password: &str,
     bootstrap_tickets: &[String],
     node: Option<&str>,
+    api_token: &str,
 ) -> Option<serde_json::Value> {
     let sock_addr = listen_addr.parse::<std::net::SocketAddr>().ok()?;
     let mut stream = TcpStream::connect_timeout(&sock_addr, Duration::from_millis(600)).ok()?;
@@ -471,13 +533,12 @@ fn try_join_running_local_daemon(
     let payload = serde_json::to_string(&json!({
         "channel": channel,
         "password": password,
-        "secret_key": password,
         "bootstrap_ticket": bootstrap_tickets.first().cloned().unwrap_or_default(),
         "node": node
     }))
     .ok()?;
     let req = format!(
-        "POST /api/mesh/join HTTP/1.1\r\nHost: {listen_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST /api/mesh/join HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {api_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         payload.len(),
         payload
     );
@@ -497,6 +558,10 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     let config_path = default_config_path();
     let blob_dir = default_blob_cache_dir();
 
+    if serve_http {
+        validate_listen_addr_security(&opts.listen, opts.api_token.is_some())?;
+    }
+
     // =========================================================================
     // [BOOT 1/5] Local Runtime, Config & Stdout Logger
     // =========================================================================
@@ -513,15 +578,22 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         }
     }
     let mut active_channel = normalize_channel_name(Some(&opts.channel));
-    let mut active_password = opts
+    let validated_password = opts
         .secret_key
         .as_deref()
         .and_then(|raw| validate_channel_password(raw).ok());
-    let has_mesh_credentials = active_password.is_some();
+    let mut active_keys: Option<DerivedChannelKeys> = if let Some(ref pass) = validated_password {
+        Some(saved_cfg.apply_channel_password(&active_channel, pass))
+    } else if saved_cfg.channel == active_channel {
+        saved_cfg.active_channel_keys()
+    } else {
+        None
+    };
+    let has_mesh_credentials = active_keys.is_some();
 
     if opts.install_daemon {
         if let Ok(rep) =
-            install_persistent_os_daemon(&opts.node, &opts.listen, active_password.as_deref())
+            install_persistent_os_daemon(&opts.node, &opts.listen, validated_password.as_deref())
         {
             saved_cfg.daemon_installed = true;
             saved_cfg.daemon_service_path = Some(rep.service_unit_path.clone());
@@ -584,6 +656,11 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
             blob_dir.clone(),
             placeholder_diag.clone(),
         );
+        if let Some(ref explicit_tok) = opts.api_token {
+            seeded.api_token = explicit_tok.clone();
+        } else if let Ok(tok) = load_or_create_api_token() {
+            seeded.api_token = tok;
+        }
         seeded.control_tx = Some(control_tx.clone());
         seeded.boot_stages = default_boot_stages(&opts.listen, &blob_dir);
         for stg in &mut seeded.boot_stages {
@@ -592,8 +669,8 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                 stg.detail = "Initializing subsystem in dependency order...".to_string();
             }
         }
-        let fp = if let Some(ref pass) = active_password {
-            secret_channel_fingerprint(&format!("{active_channel}:{pass}"))
+        let fp = if let Some(ref keys) = active_keys {
+            keys.fingerprint()
         } else {
             format!("{active_channel}:locked-standby")
         };
@@ -601,7 +678,6 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         saved_cfg.listen_addr = Some(opts.listen.clone());
         saved_cfg.channel = active_channel.clone();
         saved_cfg.configured = has_mesh_credentials;
-        saved_cfg.secret_key = active_password.clone();
         saved_cfg.channel_fingerprint = fp;
         saved_cfg.bootstrap_tickets = opts.bootstrap_tickets.clone();
         saved_cfg.updated_at_unix = now_unix();
@@ -638,8 +714,8 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                 placeholder_diag,
             );
             boot_hb.managed_processes = seeded.managed_processes.clone();
-            if let Some(ref pass) = active_password {
-                sign_heartbeat_with_password(&mut boot_hb, &active_channel, pass);
+            if let Some(ref keys) = active_keys {
+                sign_heartbeat_with_keys(&mut boot_hb, keys);
             }
             seeded.nodes = vec![boot_hb];
         }
@@ -715,7 +791,9 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         let _ = tokio::time::timeout(Duration::from_secs(4), endpoint.online()).await;
     }
 
-    let gossip = Gossip::builder().spawn(endpoint.clone());
+    let gossip = Gossip::builder()
+        .max_message_size(65_536)
+        .spawn(endpoint.clone());
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
         .spawn();
@@ -751,13 +829,34 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     // =========================================================================
     // [BOOT 5/5] Gossip Mesh & Channel Password (iroh-gossip)
     // =========================================================================
-    let (mut topic_id, mut channel_fp, seed_extra_peers) = if let Some(ref pass) = active_password {
-        parse_secret_or_ticket(&format!("{active_channel}:{pass}"))
+    let mut invite_peer_addrs = Vec::new();
+    if let Some(ref keys) = active_keys {
+        let now = now_unix();
+        let raw_tickets_snapshot = opts.bootstrap_tickets.clone();
+        let mut redeemed_any = false;
+        for raw_t in &raw_tickets_snapshot {
+            if raw_t.starts_with(INVITE_TICKET_PREFIX) {
+                if let Ok(parsed_inv) = raw_t.parse::<dialtone::gossip::InviteTicket>() {
+                    if let Ok(issuer_addr) =
+                        redeem_invite_ticket(&parsed_inv, keys, &endpoint_id, now, &mut saved_cfg)
+                    {
+                        invite_peer_addrs.push(issuer_addr);
+                        redeemed_any = true;
+                    }
+                }
+            }
+        }
+        if redeemed_any {
+            let _ = save_mesh_config(&config_path, &saved_cfg);
+        }
+    }
+
+    let (mut topic_id, mut channel_fp) = if let Some(ref keys) = active_keys {
+        (keys.topic_id, keys.fingerprint())
     } else {
         (
             derive_standby_topic_id(&endpoint_id),
             format!("{active_channel}:locked-standby"),
-            Vec::new(),
         )
     };
 
@@ -767,7 +866,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         std::collections::HashSet::new();
     let mut bootstrap_ids = Vec::new();
 
-    // Only dial fleet seed peers and bootstrap tickets once a valid channel password is active.
+    // Only dial fleet seed peers and bootstrap tickets once valid channel keys are active.
     if has_mesh_credentials && opts.transport.relay_mode != IrohRelayPolicy::Disabled && !opts.once
     {
         for seed_addr in default_fleet_seed_peers() {
@@ -782,7 +881,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     }
 
     if has_mesh_credentials {
-        for peer_addr in seed_extra_peers {
+        for peer_addr in invite_peer_addrs {
             let clean_addr = advertised_endpoint_addr(&peer_addr, &opts.transport);
             if clean_addr.id != endpoint.id() {
                 if joined_peer_ids.insert(clean_addr.id) {
@@ -822,16 +921,16 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         1,
         diagnostics.clone(),
     );
-    if let Some(ref pass) = active_password {
-        sign_heartbeat_with_password(&mut initial_self_hb, &active_channel, pass);
+    if let Some(ref keys) = active_keys {
+        sign_heartbeat_with_keys(&mut initial_self_hb, keys);
     }
 
     if let Some(st_arc) = &shared_state {
         if let Ok(mut st) = st_arc.lock() {
             st.reconcile_live_processes();
             initial_self_hb.managed_processes = st.managed_processes.clone();
-            if let Some(ref pass) = active_password {
-                sign_heartbeat_with_password(&mut initial_self_hb, &active_channel, pass);
+            if let Some(ref keys) = active_keys {
+                sign_heartbeat_with_keys(&mut initial_self_hb, keys);
             }
             st.iroh_runtime = diagnostics.clone();
             st.nodes = vec![initial_self_hb.clone()];
@@ -897,7 +996,11 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     if opts.once {
         let json = serde_json::to_string_pretty(&initial_self_hb).map_err(|e| e.to_string())?;
         println!("{json}");
-        let _ = sender.broadcast(json.into_bytes().into()).await;
+        if let Some(ref keys) = active_keys {
+            if let Ok(enc) = encrypt_heartbeat_for_gossip(&initial_self_hb, keys) {
+                let _ = sender.broadcast(enc.into()).await;
+            }
+        }
         let _ = router.shutdown().await;
         return Ok(());
     }
@@ -909,7 +1012,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                 match cmd {
                     MeshControlCommand::JoinMesh {
                         channel: new_channel,
-                        secret_key: new_secret,
+                        keys: new_keys,
                         bootstrap_tickets: new_tickets,
                         node_name: maybe_node,
                     } => {
@@ -917,21 +1020,12 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                             opts.node = nn;
                         }
                         active_channel = normalize_channel_name(Some(&new_channel));
-                        let Ok(valid_pass) = validate_channel_password(&new_secret) else {
-                            eprintln!(
-                                "[GOSSIP-JOIN] Rejected invalid password for channel '{}'",
-                                active_channel
-                            );
-                            continue;
-                        };
-                        active_password = Some(valid_pass.clone());
-                        let (new_topic_id, new_fp, extra_peers) =
-                            parse_secret_or_ticket(&format!("{active_channel}:{valid_pass}"));
-                        topic_id = new_topic_id;
-                        channel_fp = new_fp;
+                        topic_id = new_keys.topic_id;
+                        channel_fp = new_keys.fingerprint();
+                        active_keys = Some(new_keys);
 
                         let mut new_boot_ids = Vec::new();
-                        for seed_addr in default_fleet_seed_peers().into_iter().chain(extra_peers.into_iter()) {
+                        for seed_addr in default_fleet_seed_peers() {
                             let clean = advertised_endpoint_addr(&seed_addr, &opts.transport);
                             if clean.id != endpoint.id() {
                                 known_peer_addrs.insert(clean.id, clean.clone());
@@ -979,7 +1073,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                 }
             }
             _ = tick.tick() => {
-                if active_password.is_some() && counter % 5 == 0 && !bootstrap_ids.is_empty() {
+                if active_keys.is_some() && counter % 5 == 0 && !bootstrap_ids.is_empty() {
                     for seed_addr in default_fleet_seed_peers() {
                         if seed_addr.id != endpoint.id() {
                             memory_lookup.add_endpoint_info(seed_addr);
@@ -1004,16 +1098,16 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                 }
                 .to_text()?;
                 let mut self_hb = build_self_heartbeat(&opts.node, &endpoint_id, current_ticket, counter, diag.clone());
-                if let Some(ref pass) = active_password {
-                    sign_heartbeat_with_password(&mut self_hb, &active_channel, pass);
+                if let Some(ref keys) = active_keys {
+                    sign_heartbeat_with_keys(&mut self_hb, keys);
                 }
                 if let Some(st_arc) = &shared_state {
                     let peer_ids: Vec<String> = {
                         let mut st = st_arc.lock().unwrap();
                         st.reconcile_live_processes();
                         self_hb.managed_processes = st.managed_processes.clone();
-                        if let Some(ref pass) = active_password {
-                            sign_heartbeat_with_password(&mut self_hb, &active_channel, pass);
+                        if let Some(ref keys) = active_keys {
+                            sign_heartbeat_with_keys(&mut self_hb, keys);
                         }
                         st.iroh_runtime = diag;
                         st.host_resources = self_hb.host_resources.clone();
@@ -1041,23 +1135,24 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                         }
                     }
                 }
-                let payload = serde_json::to_vec(&self_hb).map_err(|e| e.to_string())?;
                 if counter == 1 && !serve_http {
                     println!("{}", serde_json::to_string_pretty(&self_hb).unwrap());
                 }
-                if active_password.is_some() {
-                    let _ = tokio::time::timeout(
-                        Duration::from_millis(600),
-                        sender.broadcast(payload.into()),
-                    )
-                    .await;
+                if let Some(ref keys) = active_keys {
+                    if let Ok(wire_bytes) = encrypt_heartbeat_for_gossip(&self_hb, keys) {
+                        let _ = tokio::time::timeout(
+                            Duration::from_millis(600),
+                            sender.broadcast(wire_bytes.into()),
+                        )
+                        .await;
+                    }
                 }
                 counter += 1;
             }
             maybe_event = receiver.next() => {
                 match maybe_event {
                     Some(Ok(GossipEvent::NeighborUp(_peer_id))) => {
-                        let Some(ref pass) = active_password else {
+                        let Some(ref keys) = active_keys else {
                             continue;
                         };
                         let adv = advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
@@ -1069,96 +1164,108 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                             peers: ticket_peers,
                         }
                         .to_text()?;
-                        let mut self_hb = build_self_heartbeat(&opts.node, &endpoint_id, current_ticket, counter, diag);
-                        sign_heartbeat_with_password(&mut self_hb, &active_channel, pass);
-                        if let Ok(payload) = serde_json::to_vec(&self_hb) {
+                        let self_hb = build_self_heartbeat(&opts.node, &endpoint_id, current_ticket, counter, diag);
+                        if let Ok(wire_bytes) = encrypt_heartbeat_for_gossip(&self_hb, keys) {
                             let _ = tokio::time::timeout(
                                 Duration::from_millis(600),
-                                sender.broadcast(payload.into()),
+                                sender.broadcast(wire_bytes.into()),
                             )
                             .await;
                         }
                     }
                     Some(Ok(GossipEvent::Received(msg))) => {
-                        let Some(ref pass) = active_password else {
+                        let Some(ref keys) = active_keys else {
                             continue;
                         };
-                        if let Ok(mut rx_hb) = serde_json::from_slice::<DialtoneHeartbeat>(&msg.content) {
-                            if rx_hb.node != opts.node {
-                                if !verify_heartbeat_password(&rx_hb, &active_channel, pass) {
-                                    eprintln!(
-                                        "[gossip-auth-reject] dropped unauthenticated heartbeat from node={} endpoint_id={} (invalid '{}' channel password MAC)",
-                                        rx_hb.node, rx_hb.endpoint_id, active_channel
-                                    );
-                                    continue;
-                                }
-                                if active_channel == DEFAULT_CHANNEL_NAME
-                                    && opts.bootstrap_tickets.is_empty()
-                                    && !is_allowed_main_fleet_peer(&rx_hb.endpoint_id)
-                                {
-                                    eprintln!(
-                                        "[gossip-allowlist-reject] dropped non-fleet peer node={} endpoint_id={} on main 'dialtone' channel",
-                                        rx_hb.node, rx_hb.endpoint_id
-                                    );
-                                    continue;
-                                }
-                                let mut discovered_addrs = Vec::new();
-                                if let Ok(peer_ticket) = GossipTicket::from_str(&rx_hb.ticket) {
-                                    discovered_addrs.extend(peer_ticket.peers);
-                                }
-                                if let Ok(pid) = rx_hb.endpoint_id.parse::<iroh::EndpointId>() {
-                                    let mut direct_addr = iroh::EndpointAddr::new(pid);
-                                    for r in &rx_hb.iroh_transport.advertised_relay_urls {
-                                        if let Ok(rurl) = r.parse::<iroh::RelayUrl>() {
-                                            direct_addr = direct_addr.with_relay_url(rurl);
-                                        }
-                                    }
-                                    for ip_s in &rx_hb.iroh_transport.advertised_ip_addrs {
-                                        if let Ok(sock) = ip_s.parse::<std::net::SocketAddr>() {
-                                            direct_addr = direct_addr.with_ip_addr(sock);
-                                        }
-                                    }
-                                    discovered_addrs.push(direct_addr);
-                                }
-                                let mut new_peers = Vec::new();
-                                for p_addr in discovered_addrs {
-                                    let clean = advertised_endpoint_addr(&p_addr, &opts.transport);
-                                    if clean.id != endpoint.id() {
-                                        known_peer_addrs.insert(clean.id, clean.clone());
-                                        if joined_peer_ids.insert(clean.id) {
-                                            new_peers.push(clean.id);
-                                        }
-                                    }
-                                    memory_lookup.add_endpoint_info(clean);
-                                }
-                                if !new_peers.is_empty() {
-                                    for np in &new_peers {
-                                        if !bootstrap_ids.contains(np) {
-                                            bootstrap_ids.push(*np);
-                                        }
-                                    }
-                                    let _ = tokio::time::timeout(
-                                        Duration::from_millis(600),
-                                        sender.join_peers(new_peers),
-                                    )
-                                    .await;
-                                }
-                                let (obs, tailnet) = tokio::time::timeout(
-                                    Duration::from_millis(400),
-                                    observe_peer_remote_addrs(&endpoint, &rx_hb.endpoint_id),
-                                )
-                                .await
-                                .unwrap_or_else(|_| (vec!["iroh-quic:active".to_string()], false));
-                                rx_hb.observed_remote_addrs = obs;
-                                rx_hb.tailnet_used = tailnet;
-                                println!(
-                                    "[gossip-rx] node={} endpoint_id={} counter={} addrs={:?} tailnet_used={}",
-                                    rx_hb.node, rx_hb.endpoint_id, rx_hb.counter, rx_hb.observed_remote_addrs, rx_hb.tailnet_used
+                        let mut rx_hb = match decrypt_heartbeat_from_gossip(&msg.content, keys) {
+                            Ok(hb) => hb,
+                            Err(reason) => {
+                                eprintln!(
+                                    "[gossip-auth-reject] dropped gossip payload on channel '{}': {}",
+                                    active_channel, reason
                                 );
-                                if let Some(st_arc) = &shared_state {
-                                    let mut st = st_arc.lock().unwrap();
-                                    upsert_heartbeat(&mut st.nodes, rx_hb);
+                                continue;
+                            }
+                        };
+                        if rx_hb.node != opts.node {
+                            if active_channel == DEFAULT_CHANNEL_NAME {
+                                let allowed_ids = if let Some(st_arc) = &shared_state {
+                                    st_arc
+                                        .lock()
+                                        .ok()
+                                        .map(|st| st.mesh_config.allowed_endpoint_ids.clone())
+                                        .unwrap_or_else(|| saved_cfg.allowed_endpoint_ids.clone())
+                                } else {
+                                    saved_cfg.allowed_endpoint_ids.clone()
+                                };
+                                if !is_allowed_peer_in_list(
+                                    &allowed_ids,
+                                    &rx_hb.endpoint_id,
+                                    Some(&endpoint_id),
+                                ) {
+                                    eprintln!(
+                                        "[gossip-allowlist-reject] dropped unlisted peer node={} endpoint_id={} on main 'dialtone' channel (run 'dialtone peers allow {}' to authorize)",
+                                        rx_hb.node, rx_hb.endpoint_id, rx_hb.endpoint_id
+                                    );
+                                    continue;
                                 }
+                            }
+                            let mut discovered_addrs = Vec::new();
+                            if let Ok(peer_ticket) = GossipTicket::from_str(&rx_hb.ticket) {
+                                discovered_addrs.extend(peer_ticket.peers);
+                            }
+                            if let Ok(pid) = rx_hb.endpoint_id.parse::<iroh::EndpointId>() {
+                                let mut direct_addr = iroh::EndpointAddr::new(pid);
+                                for r in &rx_hb.iroh_transport.advertised_relay_urls {
+                                    if let Ok(rurl) = r.parse::<iroh::RelayUrl>() {
+                                        direct_addr = direct_addr.with_relay_url(rurl);
+                                    }
+                                }
+                                for ip_s in &rx_hb.iroh_transport.advertised_ip_addrs {
+                                    if let Ok(sock) = ip_s.parse::<std::net::SocketAddr>() {
+                                        direct_addr = direct_addr.with_ip_addr(sock);
+                                    }
+                                }
+                                discovered_addrs.push(direct_addr);
+                            }
+                            let mut new_peers = Vec::new();
+                            for p_addr in discovered_addrs {
+                                let clean = advertised_endpoint_addr(&p_addr, &opts.transport);
+                                if clean.id != endpoint.id() {
+                                    known_peer_addrs.insert(clean.id, clean.clone());
+                                    if joined_peer_ids.insert(clean.id) {
+                                        new_peers.push(clean.id);
+                                    }
+                                }
+                                memory_lookup.add_endpoint_info(clean);
+                            }
+                            if !new_peers.is_empty() {
+                                for np in &new_peers {
+                                    if !bootstrap_ids.contains(np) {
+                                        bootstrap_ids.push(*np);
+                                    }
+                                }
+                                let _ = tokio::time::timeout(
+                                    Duration::from_millis(600),
+                                    sender.join_peers(new_peers),
+                                )
+                                .await;
+                            }
+                            let (obs, tailnet) = tokio::time::timeout(
+                                Duration::from_millis(400),
+                                observe_peer_remote_addrs(&endpoint, &rx_hb.endpoint_id),
+                            )
+                            .await
+                            .unwrap_or_else(|_| (vec!["iroh-quic:active".to_string()], false));
+                            rx_hb.observed_remote_addrs = obs;
+                            rx_hb.tailnet_used = tailnet;
+                            println!(
+                                "[gossip-rx] node={} endpoint_id={} counter={} addrs={:?} tailnet_used={}",
+                                rx_hb.node, rx_hb.endpoint_id, rx_hb.counter, rx_hb.observed_remote_addrs, rx_hb.tailnet_used
+                            );
+                            if let Some(st_arc) = &shared_state {
+                                let mut st = st_arc.lock().unwrap();
+                                upsert_heartbeat(&mut st.nodes, rx_hb);
                             }
                         }
                     }
@@ -1201,6 +1308,116 @@ async fn main() {
             print_usage();
             Ok(())
         }
+        "gen-password" => {
+            let pw = generate_channel_password();
+            println!("{pw}");
+            Ok(())
+        }
+        "peers" => (|| -> Result<(), String> {
+            let cfg_path = default_config_path();
+            match opts.peers_subcmd.as_str() {
+                "list" | "ls" => {
+                    let cfg = load_mesh_config(&cfg_path);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({
+                            "schema": "dialtone.peers_allowlist.v1",
+                            "config_path": cfg_path,
+                            "default_policy": "deny_unless_listed",
+                            "allowed_endpoint_ids": cfg.allowed_endpoint_ids,
+                            "seed_peers": cfg.seed_peers
+                        }))
+                        .unwrap()
+                    );
+                    Ok(())
+                }
+                "allow" | "add" => {
+                    let target = opts
+                        .peer_target
+                        .as_deref()
+                        .ok_or_else(|| "usage: dialtone peers allow <endpoint_id>".to_string())?;
+                    let updated = allow_peer_in_config(&cfg_path, target, None)?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({
+                            "status": "allowed",
+                            "endpoint_id": target.trim().to_ascii_lowercase(),
+                            "allowed_endpoint_ids": updated.allowed_endpoint_ids,
+                            "config_path": cfg_path
+                        }))
+                        .unwrap()
+                    );
+                    Ok(())
+                }
+                "revoke" | "remove" | "rm" => {
+                    let target = opts
+                        .peer_target
+                        .as_deref()
+                        .ok_or_else(|| "usage: dialtone peers revoke <endpoint_id>".to_string())?;
+                    let updated = revoke_peer_in_config(&cfg_path, target)?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({
+                            "status": "revoked",
+                            "endpoint_id": target.trim().to_ascii_lowercase(),
+                            "allowed_endpoint_ids": updated.allowed_endpoint_ids,
+                            "config_path": cfg_path
+                        }))
+                        .unwrap()
+                    );
+                    Ok(())
+                }
+                other => Err(format!(
+                    "unknown peers subcommand {other:?}; use: dialtone peers [allow|revoke|list] [<endpoint_id>]"
+                )),
+            }
+        })(),
+        "invite" => (|| -> Result<(), String> {
+            let cfg_path = default_config_path();
+            let mut cfg = load_mesh_config(&cfg_path);
+            let channel = normalize_channel_name(Some(&opts.channel));
+            let keys = if let Some(ref raw_pass) = opts.secret_key {
+                let valid = validate_channel_password(raw_pass)?;
+                cfg.apply_channel_password(&channel, &valid)
+            } else if let Some(k) = cfg.active_channel_keys() {
+                k
+            } else {
+                return Err(
+                    "cannot mint invite ticket: no channel keys configured (pass --password <PASSWORD> or run 'dialtone join <PASSWORD>' first)"
+                        .to_string(),
+                );
+            };
+
+            let key_path = default_secret_key_path();
+            let secret_key = load_or_create_secret_key_at(&key_path)?;
+            let endpoint_id = secret_key.public().to_string();
+
+            let now = now_unix();
+            let invite = create_invite_ticket(
+                &endpoint_id,
+                Some("https://usw1-1.relay.n0.iroh.link./"),
+                &keys,
+                now,
+                opts.invite_ttl_secs,
+                opts.peer_target.as_deref(),
+            )?;
+            let invite_token = invite.to_text()?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "schema": "dialtone.invite.v1",
+                    "channel": keys.channel,
+                    "channel_fingerprint": keys.fingerprint(),
+                    "inviter_endpoint_id": endpoint_id,
+                    "bound_endpoint_id": opts.peer_target,
+                    "ttl_secs": opts.invite_ttl_secs,
+                    "expires_at_unix": invite.expires_at_unix,
+                    "invite_ticket": invite_token
+                }))
+                .unwrap()
+            );
+            Ok(())
+        })(),
         "join" => {
             let Some(raw_secret) = opts
                 .secret_key
@@ -1208,7 +1425,7 @@ async fn main() {
                 .or_else(|| opts.bootstrap_tickets.first().cloned())
             else {
                 eprintln!(
-                    "dialtone: usage: dialtone join <PASSWORD> [--channel dialtone] [--listen 127.0.0.1:8788]"
+                    "dialtone: usage: dialtone join <PASSWORD> [--channel dialtone] [--bootstrap-ticket <TICKET_OR_INVITE>] [--listen 127.0.0.1:8788]"
                 );
                 std::process::exit(2);
             };
@@ -1220,21 +1437,47 @@ async fn main() {
                     std::process::exit(2);
                 }
             };
-            let (topic_id, fp, _) = parse_secret_or_ticket(&format!("{channel}:{password}"));
             let mut cfg = load_mesh_config(&default_config_path());
             cfg.node_name = Some(opts.node.clone());
             cfg.listen_addr = Some(opts.listen.clone());
-            cfg.channel = channel.clone();
-            cfg.configured = true;
-            cfg.secret_key = Some(password.clone());
-            cfg.channel_fingerprint = fp.clone();
+            let keys = cfg.apply_channel_password(&channel, &password);
+            let fp = keys.fingerprint();
+            let topic_id = keys.topic_id;
+
+            let key_path = default_secret_key_path();
+            let self_ep_id = load_or_create_secret_key_at(&key_path)
+                .ok()
+                .map(|k| k.public().to_string())
+                .unwrap_or_default();
+            let now = now_unix();
+
             for t in &opts.bootstrap_tickets {
-                if !cfg.bootstrap_tickets.contains(t) {
+                if t.starts_with(INVITE_TICKET_PREFIX) {
+                    let parsed_inv = match t.parse::<dialtone::gossip::InviteTicket>() {
+                        Ok(inv) => inv,
+                        Err(err) => {
+                            eprintln!("dialtone: {err}");
+                            std::process::exit(2);
+                        }
+                    };
+                    if let Err(err) =
+                        redeem_invite_ticket(&parsed_inv, &keys, &self_ep_id, now, &mut cfg)
+                    {
+                        eprintln!("dialtone: {err}");
+                        std::process::exit(2);
+                    }
+                } else if !cfg.bootstrap_tickets.contains(t) {
                     cfg.bootstrap_tickets.push(t.clone());
                 }
             }
-            cfg.updated_at_unix = now_unix();
+            cfg.updated_at_unix = now;
             let _ = save_mesh_config(&default_config_path(), &cfg);
+
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
 
             if let Some(resp) = try_join_running_local_daemon(
                 &opts.listen,
@@ -1246,6 +1489,7 @@ async fn main() {
                 } else {
                     None
                 },
+                &api_token,
             ) {
                 println!(
                     "{}",
@@ -1275,7 +1519,7 @@ async fn main() {
                 Ok(())
             } else {
                 println!(
-                    "[JOIN] Saved password for '{}' channel ({}) — booting dialtone daemon & local Web HUD...",
+                    "[JOIN] Derived & saved v2 channel subkeys for '{}' channel ({}) — booting dialtone daemon & local Web HUD...",
                     channel, fp
                 );
                 run_node_or_hub(opts, true).await

@@ -1,8 +1,11 @@
 use std::collections::HashMap;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -22,8 +25,8 @@ use crate::evidence::{
     HostResourceTelemetry, KeyValueRecord, KvPageMeta, ServiceLogRecord,
 };
 use crate::gossip::{
-    default_arch, default_config_path, default_os, node_capabilities_for, node_role_for,
-    normalize_channel_name, now_unix, parse_secret_or_ticket, prune_stale_peers, save_mesh_config,
+    default_arch, default_config_path, default_os, default_state_dir, node_capabilities_for,
+    node_role_for, normalize_channel_name, now_unix, prune_stale_peers, save_mesh_config,
     secret_channel_fingerprint, validate_channel_password, BootStageStatus, DialtoneHeartbeat,
     MeshControlCommand, PersistentMeshConfig, DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS,
 };
@@ -34,6 +37,68 @@ use crate::metadata::{
 };
 use crate::refs::ServiceAdvertisement;
 use crate::supervisor::{plan_process_intent, stage_executable_blob, ManagedProcessSupervisor};
+
+pub const MAX_HTTP_BODY_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_CONCURRENT_HTTP_CONNECTIONS: usize = 32;
+pub const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(2);
+
+pub fn default_api_token_path() -> PathBuf {
+    default_state_dir().join("api-token")
+}
+
+/// Load or generate a persistent 32-byte random API token stored in `~/.dialtone/api-token` (`0600`) (Issue #7).
+pub fn load_or_create_api_token() -> Result<String, String> {
+    if let Ok(env_tok) = std::env::var("DIALTONE_API_TOKEN") {
+        let trimmed = env_tok.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    let path = default_api_token_path();
+    if let Ok(raw) = fs::read_to_string(&path) {
+        let trimmed = raw.trim();
+        if trimmed.len() >= 16 {
+            return Ok(trimmed.to_string());
+        }
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("create api-token dir {}: {e}", parent.display()))?;
+    }
+    let rand_bytes = iroh::SecretKey::generate().to_bytes();
+    let token = format!("dtk-{}", crate::base64url_encode(&rand_bytes));
+    fs::write(&path, format!("{token}\n"))
+        .map_err(|e| format!("write api-token {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(token)
+}
+
+/// Refuse non-loopback `--listen` addresses unless an explicit API token has been configured (Issue #7).
+pub fn validate_listen_addr_security(
+    listen: &str,
+    explicit_token_configured: bool,
+) -> Result<(), String> {
+    let trimmed = listen.trim();
+    let host_part = if let Some(rest) = trimmed.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        trimmed.rsplit_once(':').map(|(h, _)| h).unwrap_or(trimmed)
+    };
+    let is_loopback = matches!(
+        host_part.trim().to_ascii_lowercase().as_str(),
+        "127.0.0.1" | "localhost" | "::1"
+    );
+    if !is_loopback && !explicit_token_configured {
+        return Err(format!(
+            "refusing non-loopback --listen address '{listen}' without an explicit API token (pass --api-token <token> or set DIALTONE_API_TOKEN)"
+        ));
+    }
+    Ok(())
+}
 
 pub fn default_boot_stages(listen: &str, blob_dir: &std::path::Path) -> Vec<BootStageStatus> {
     let now = now_unix();
@@ -90,6 +155,8 @@ pub struct DaemonRuntimeState {
     pub listen: String,
     pub blob_cache_dir: PathBuf,
     pub allowed_deploy_roots: Vec<String>,
+    #[serde(skip)]
+    pub api_token: String,
     #[serde(default)]
     pub boot_stages: Vec<BootStageStatus>,
     #[serde(default)]
@@ -242,20 +309,25 @@ impl DaemonRuntimeState {
             channel: DEFAULT_CHANNEL_NAME.to_string(),
             configured: true,
             secret_key: None,
+            derived_keys: None,
             channel_fingerprint: secret_channel_fingerprint("dialtone:seeded"),
             bootstrap_tickets: Vec::new(),
             seed_peers: Vec::new(),
             allowed_endpoint_ids: Vec::new(),
+            used_invite_nonces: Vec::new(),
             daemon_installed: false,
             daemon_service_path: None,
             managed_processes: Vec::new(),
             updated_at_unix: now,
         };
+        let api_token =
+            load_or_create_api_token().unwrap_or_else(|_| "dtk-seeded-token".to_string());
 
         Self {
             node: node.to_string(),
             mode: mode.to_string(),
             listen: listen.to_string(),
+            api_token,
             blob_cache_dir,
             allowed_deploy_roots: vec!["/opt/dialtone/".to_string(), "/tmp/".to_string()],
             boot_stages,
@@ -372,6 +444,7 @@ impl DaemonRuntimeState {
 fn masked_mesh_config(cfg: &PersistentMeshConfig) -> PersistentMeshConfig {
     let mut c = cfg.clone();
     c.secret_key = None;
+    c.derived_keys = None;
     c
 }
 
@@ -380,10 +453,30 @@ pub fn serve_http_blocking(
     state: Arc<Mutex<DaemonRuntimeState>>,
     max_requests: Option<usize>,
 ) -> Result<(), String> {
+    let active_workers = Arc::new(AtomicUsize::new(0));
     let mut handled = 0usize;
+    let mut join_handles = Vec::new();
+
     for stream in listener.incoming() {
-        let stream = stream.map_err(|e| format!("accept connection: {e}"))?;
-        let _ = handle_connection(stream, &state);
+        let mut stream = stream.map_err(|e| format!("accept connection: {e}"))?;
+        if active_workers.load(Ordering::SeqCst) >= MAX_CONCURRENT_HTTP_CONNECTIONS {
+            let _ = write_json(
+                &mut stream,
+                503,
+                &json!({ "error": "too many concurrent HTTP connections" }),
+            );
+            continue;
+        }
+        active_workers.fetch_add(1, Ordering::SeqCst);
+        let state_clone = state.clone();
+        let active_clone = active_workers.clone();
+        let worker = thread::spawn(move || {
+            let _ = handle_connection(stream, &state_clone);
+            active_clone.fetch_sub(1, Ordering::SeqCst);
+        });
+        if max_requests.is_some() {
+            join_handles.push(worker);
+        }
         handled += 1;
         if let Some(limit) = max_requests {
             if handled >= limit {
@@ -391,23 +484,82 @@ pub fn serve_http_blocking(
             }
         }
     }
+
+    for h in join_handles {
+        let _ = h.join();
+    }
     Ok(())
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Result<Option<(String, String)>, (u16, String)> {
+    let mut buf = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 8192];
+    let header_end = loop {
+        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break pos;
+        }
+        if buf.len() >= 65536 {
+            return Err((400, "HTTP header exceeds 64 KiB limit".to_string()));
+        }
+        let n = stream.read(&mut chunk).map_err(|e| (400, e.to_string()))?;
+        if n == 0 {
+            if buf.is_empty() {
+                return Ok(None);
+            }
+            break buf.len();
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    };
+
+    let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
+    let body_start = (header_end + 4).min(buf.len());
+    let mut body_bytes = buf[body_start..].to_vec();
+
+    let mut content_length = 0usize;
+    for line in head.lines().skip(1) {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("content-length") {
+                content_length = v.trim().parse::<usize>().unwrap_or(0);
+            }
+        }
+    }
+
+    if content_length > MAX_HTTP_BODY_BYTES {
+        return Err((
+            413,
+            format!("HTTP request body exceeds maximum size of {MAX_HTTP_BODY_BYTES} bytes"),
+        ));
+    }
+
+    while body_bytes.len() < content_length {
+        let remaining = content_length - body_bytes.len();
+        let to_read = remaining.min(chunk.len());
+        let n = stream
+            .read(&mut chunk[..to_read])
+            .map_err(|e| (400, e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        body_bytes.extend_from_slice(&chunk[..n]);
+    }
+
+    let body = String::from_utf8_lossy(&body_bytes).to_string();
+    Ok(Some((head, body)))
 }
 
 fn handle_connection(
     mut stream: TcpStream,
     state: &Arc<Mutex<DaemonRuntimeState>>,
 ) -> Result<(), String> {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_read_timeout(Some(HTTP_IO_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(HTTP_IO_TIMEOUT));
 
-    let mut buf = vec![0u8; 65536];
-    let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
-    if n == 0 {
-        return Ok(());
-    }
-    let raw = String::from_utf8_lossy(&buf[..n]);
-    let (head, body_part) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+    let (head, body_owned) = match read_http_request(&mut stream) {
+        Ok(Some(v)) => v,
+        Ok(None) => return Ok(()),
+        Err((status, msg)) => return write_json(&mut stream, status, &json!({ "error": msg })),
+    };
+    let body_part = body_owned.as_str();
     let mut lines = head.lines();
     let request_line = lines.next().unwrap_or_default();
     let mut parts = request_line.split_whitespace();
@@ -434,6 +586,11 @@ fn handle_connection(
     }
 
     let mut st = state.lock().map_err(|_| "state poisoned".to_string())?;
+    if method.eq_ignore_ascii_case("POST") {
+        if let Err(err) = validate_bearer_token(&headers, &st.api_token) {
+            return write_json(&mut stream, 401, &json!({ "error": err }));
+        }
+    }
     let now = now_unix();
     let self_name = st.node.clone();
     if let Some(self_hb) = st.nodes.iter_mut().find(|n| n.node == self_name) {
@@ -513,24 +670,40 @@ fn handle_connection(
                 }
             };
 
-            let combined_secret = format!("{channel}:{validated_password}");
-            let (topic_id, fp, _extra_peers) = parse_secret_or_ticket(&combined_secret);
-
             if let Some(ref nn) = new_node_name {
                 st.node = nn.clone();
             }
-            let mut tickets = st.mesh_config.bootstrap_tickets.clone();
-            if !raw_ticket.is_empty() && !tickets.contains(&raw_ticket) {
-                tickets.push(raw_ticket.clone());
+
+            let keys = st
+                .mesh_config
+                .apply_channel_password(&channel, &validated_password);
+            let fp = keys.fingerprint();
+            let topic_id = keys.topic_id;
+
+            if raw_ticket.starts_with(crate::gossip::INVITE_TICKET_PREFIX) {
+                let parsed_invite = match raw_ticket.parse::<crate::gossip::InviteTicket>() {
+                    Ok(inv) => inv,
+                    Err(err) => return write_json(&mut stream, 400, &json!({ "error": err })),
+                };
+                let self_ep = st.iroh_runtime.endpoint_id.clone();
+                if let Err(err) = crate::gossip::redeem_invite_ticket(
+                    &parsed_invite,
+                    &keys,
+                    &self_ep,
+                    now,
+                    &mut st.mesh_config,
+                ) {
+                    return write_json(&mut stream, 400, &json!({ "error": err }));
+                }
+            } else if !raw_ticket.is_empty()
+                && !st.mesh_config.bootstrap_tickets.contains(&raw_ticket)
+            {
+                st.mesh_config.bootstrap_tickets.push(raw_ticket.clone());
             }
 
+            let tickets = st.mesh_config.bootstrap_tickets.clone();
             st.mesh_config.node_name = Some(st.node.clone());
             st.mesh_config.listen_addr = Some(st.listen.clone());
-            st.mesh_config.channel = channel.clone();
-            st.mesh_config.configured = true;
-            st.mesh_config.secret_key = Some(validated_password.clone());
-            st.mesh_config.channel_fingerprint = fp.clone();
-            st.mesh_config.bootstrap_tickets = tickets.clone();
             st.mesh_config.updated_at_unix = now;
             let _ = save_mesh_config(&default_config_path(), &st.mesh_config);
 
@@ -558,7 +731,7 @@ fn handle_connection(
             if let Some(tx) = &st.control_tx {
                 let _ = tx.send(MeshControlCommand::JoinMesh {
                     channel: channel.clone(),
-                    secret_key: validated_password,
+                    keys,
                     bootstrap_tickets: tickets,
                     node_name: new_node_name,
                 });
@@ -1403,6 +1576,7 @@ fn render_dashboard_html(state: &DaemonRuntimeState, selected_peer: Option<&str>
 
 <script>
 const INITIAL_STATE = __INITIAL_JSON__;
+const API_TOKEN = "__API_TOKEN__";
 let meshState = INITIAL_STATE;
 let selectedNode = INITIAL_STATE.selected_peer || INITIAL_STATE.self_node || "node-alpha";
 let autoOrbit = true;
@@ -1547,7 +1721,10 @@ async function submitMeshJoin() {
   try {
     const resp = await fetch("/api/mesh/join", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + API_TOKEN
+      },
       body: JSON.stringify({
         channel: channelName,
         password: password,
@@ -1573,7 +1750,10 @@ async function installSystemDaemon() {
   toggleSetupModal(true);
   fb.textContent = "installing persistent os service...";
   try {
-    const resp = await fetch("/api/daemon/install", { method: "POST" });
+    const resp = await fetch("/api/daemon/install", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + API_TOKEN }
+    });
     const data = await resp.json();
     if (!resp.ok) {
       fb.innerHTML = `<span class="alert-text">error: ${data.error || "daemon install failed"}</span>`;
@@ -1593,7 +1773,10 @@ async function stageSampleBlob() {
   try {
     const resp = await fetch("/api/artifacts/blob", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + API_TOKEN
+      },
       body: JSON.stringify({ bytes_base64: payload })
     });
     const data = await resp.json();
@@ -1983,6 +2166,45 @@ setInterval(pollGossipState, 1500);
         .replace("__SELF_NODE__", &state.node)
         .replace("__PEER_FOCUS__", peer_focus)
         .replace("__INITIAL_JSON__", &initial_json)
+        .replace("__API_TOKEN__", &state.api_token)
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+fn validate_bearer_token(
+    headers: &HashMap<String, String>,
+    expected_token: &str,
+) -> Result<(), String> {
+    if expected_token.trim().is_empty() {
+        return Err("API token is not configured on this daemon".to_string());
+    }
+    let provided = headers
+        .get("authorization")
+        .and_then(|v| {
+            let v = v.trim();
+            v.strip_prefix("Bearer ")
+                .or_else(|| v.strip_prefix("bearer "))
+                .map(str::trim)
+        })
+        .or_else(|| headers.get("x-dialtone-token").map(|s| s.trim()));
+
+    match provided {
+        Some(tok) if constant_time_eq(tok.as_bytes(), expected_token.trim().as_bytes()) => Ok(()),
+        Some(_) => Err("invalid API bearer token".to_string()),
+        None => Err(
+            "missing API authentication: pass 'Authorization: Bearer <token>' (see ~/.dialtone/api-token)"
+                .to_string(),
+        ),
+    }
 }
 
 fn validate_local_http_request(
@@ -2059,8 +2281,11 @@ fn write_response(
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
+        401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        413 => "Payload Too Large",
+        503 => "Service Unavailable",
         _ => "Response",
     };
     let header = format!(
@@ -2153,6 +2378,114 @@ mod tests {
         assert!(resp_ws.contains("101 Switching Protocols"));
         assert!(resp_ws.contains("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
 
+        handle.join().unwrap();
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn issue_7_post_routes_require_bearer_token_and_non_loopback_listen_is_guarded() {
+        assert!(validate_listen_addr_security("127.0.0.1:8787", false).is_ok());
+        assert!(validate_listen_addr_security("localhost:8787", false).is_ok());
+        assert!(validate_listen_addr_security("[::1]:8787", false).is_ok());
+        assert!(validate_listen_addr_security("0.0.0.0:8787", false).is_err());
+        assert!(validate_listen_addr_security("0.0.0.0:8787", true).is_ok());
+
+        let tmp_dir = env::temp_dir().join(format!("dialtone-auth-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let cfg = IrohTransportConfig::local_offline();
+        let ep_addr = EndpointAddr::new(SecretKey::generate().public());
+        let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-auth");
+
+        let mut seeded = DaemonRuntimeState::new_seeded(
+            "node-alpha",
+            "hub",
+            &addr.to_string(),
+            tmp_dir.clone(),
+            diag,
+        );
+        seeded.api_token = "dtk-test-token-1234567890abcdef".to_string();
+        let state = Arc::new(Mutex::new(seeded));
+
+        let state_bg = state.clone();
+        let handle = thread::spawn(move || {
+            serve_http_blocking(listener, state_bg, Some(3)).unwrap();
+        });
+
+        // 1. POST without token -> 401 Unauthorized
+        let resp_unauth = raw_http_request(
+            addr,
+            "POST /api/artifacts/blob HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 27\r\n\r\n{\"bytes_base64\":\"ZGlhbHRvbmU=\"}",
+        );
+        assert!(resp_unauth.contains("401 Unauthorized"));
+
+        // 2. POST with wrong token -> 401 Unauthorized
+        let resp_wrong = raw_http_request(
+            addr,
+            "POST /api/artifacts/blob HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer wrong-token\r\nContent-Type: application/json\r\nContent-Length: 27\r\n\r\n{\"bytes_base64\":\"ZGlhbHRvbmU=\"}",
+        );
+        assert!(resp_wrong.contains("401 Unauthorized"));
+
+        // 3. POST with valid Bearer token -> 200 OK
+        let body = "{\"bytes_base64\":\"ZGlhbHRvbmU=\"}";
+        let req_ok = format!(
+            "POST /api/artifacts/blob HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer dtk-test-token-1234567890abcdef\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let resp_ok = raw_http_request(addr, &req_ok);
+        assert!(resp_ok.contains("200 OK"));
+        assert!(resp_ok.contains("\"sha256\""));
+
+        handle.join().unwrap();
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn issue_8_concurrent_requests_succeed_while_stalled_connection_is_open() {
+        let tmp_dir = env::temp_dir().join(format!("dialtone-conc-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let cfg = IrohTransportConfig::local_offline();
+        let ep_addr = EndpointAddr::new(SecretKey::generate().public());
+        let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-conc");
+
+        let state = Arc::new(Mutex::new(DaemonRuntimeState::new_seeded(
+            "node-alpha",
+            "hub",
+            &addr.to_string(),
+            tmp_dir.clone(),
+            diag,
+        )));
+
+        let state_bg = state.clone();
+        let handle = thread::spawn(move || {
+            serve_http_blocking(listener, state_bg, Some(3)).unwrap();
+        });
+
+        // Client 1 opens a TCP connection and stalls (never sends headers)
+        let _stalled_stream = TcpStream::connect(addr).unwrap();
+        thread::sleep(Duration::from_millis(40));
+
+        // Clients 2 and 3 must still be served immediately in < 500ms without head-of-line blocking
+        let start = std::time::Instant::now();
+        let resp_2 = raw_http_request(addr, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        let resp_3 = raw_http_request(addr, "GET /api/gossip HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        let elapsed = start.elapsed();
+
+        assert!(resp_2.contains("200 OK"));
+        assert!(resp_3.contains("200 OK"));
+        assert!(
+            elapsed < Duration::from_millis(800),
+            "concurrent requests took {:?}, expected < 800ms despite stalled connection",
+            elapsed
+        );
+
+        drop(_stalled_stream);
         handle.join().unwrap();
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }

@@ -72,42 +72,66 @@ Open **`http://127.0.0.1:8788`** (also served at `/nodes`, `/peer`, and `/hud`) 
 
 ---
 
-## 3. Joining a Mesh Channel & Host-Local Fleet Config
+## 3. Joining a Mesh Channel, Peer Allowlist & Invite Tickets
 
-### Unlock & Join the `"dialtone"` Channel (`join`)
+### Unlock & Join the `"dialtone"` Channel (`join` & `gen-password`)
 
-The `"dialtone"` channel (and any custom `--channel <name>`) is **password-protected**:
+The `"dialtone"` channel (and any custom `--channel <name>`) is **password-protected and end-to-end encrypted**:
 - Booting `dialtone` without a configured password places the node on an isolated per-node standby topic (`dialtone:locked-standby`) and does **not** dial fleet seed peers until unlocked.
-- Empty passwords or default names (`"dialtone"`, `"default"`) are rejected.
-- When unlocked with a password, `dialtone` derives:
-  1. A 32-byte `iroh-gossip` `TopicId` via `SHA-256("dialtone.channel.topic.v1:<channel>:<password>")`.
-  2. A separate 32-byte channel authentication key via `SHA-256("dialtone.channel.auth.v1:<channel>:<password>")` that signs every outbound `DialtoneHeartbeat` (`channel_mac`) and verifies every inbound heartbeat in constant time.
-- **Host-Local `seed_peers` & `allowed_endpoint_ids`**: Real node names, seed peer `EndpointId`s, and allowlisted `EndpointId`s are stored in each host's local `~/.dialtone/config.json` (`0600` permissions, outside git) and are never hardcoded in the repository.
+- **Minimum Password Strength**: Passwords must be at least 16 characters long with multiple character classes and `>= 8` unique characters; weak or dictionary passwords (`"dialtone"`, `"dialtone2"`, `"password123"`, `"default"`) are rejected. Run `./dialtone gen-password` to generate a CSPRNG 256-bit password (`dt-...`).
+- **Argon2id Key Derivation (`v2`) & XChaCha20-Poly1305 Gossip Encryption**:
+  1. `dialtone` derives three domain-separated 32-byte subkeys (`topic_id`, `auth_key`, `enc_key`) from `(channel, password)` using **Argon2id** (`m=19456 KiB, t=2, p=1`).
+  2. Only the derived subkey bundle (`derived_keys`) is persisted in `~/.dialtone/config.json` (`0600` permissions) — the plaintext password is **never** written to disk. Any legacy `~/.dialtone2/config.json` is automatically migrated and scrubbed on startup.
+  3. Every `DialtoneHeartbeat` broadcast over `iroh-gossip` is signed with `auth_key` (`channel_mac`) and encrypted with **XChaCha20-Poly1305** (`dialtone.iroh.envelope.v2`, random 24-byte nonce). Unencrypted or unauthenticated frames are dropped.
+- **Deny-by-Default Peer Allowlist (`peers`)**:
+  - On the main `"dialtone"` channel, inbound peers are **denied by default** unless their `EndpointId` is listed in the host's local `~/.dialtone/config.json` (`allowed_endpoint_ids`), even if `--bootstrap-ticket` is passed.
+  - Manage the allowlist via CLI:
+    ```bash
+    ./dialtone peers list
+    ./dialtone peers allow <endpoint_id>
+    ./dialtone peers revoke <endpoint_id>
+    ```
+- **Expiring, Single-Use Invite Tickets (`invite`)**:
+  - Mint a signed, time-limited, single-use bootstrap invite ticket (`dialtone-invite-v1:...`) that automatically authorizes the peer upon redemption:
+    ```bash
+    ./dialtone invite --ttl 15m
+    ./dialtone invite --ttl 15m --peer <target_endpoint_id>
+    ```
 
 ```bash
+# Generate a high-entropy 256-bit channel password
+./dialtone gen-password
+
 # Unlock the default 'dialtone' channel with a password (updates a running local daemon live, or boots a new one)
 ./dialtone join <password>
 
-# Unlock a custom named channel (<channel>:<password> or --channel <name> --password <pass>)
-./dialtone join ops-fleet:<password>
+# Redeem a single-use invite ticket while joining
+./dialtone join <password> --bootstrap-ticket dialtone-invite-v1:<ticket>
 
-# Save channel password to ~/.dialtone/config.json (0600 permissions) and exit immediately
+# Save derived channel keys to ~/.dialtone/config.json (0600 permissions) and exit immediately
 ./dialtone join <password> --once
 ```
 
-You can also unlock or switch channels on a running node via the Web UI drawer (`[channel: ...]`) or HTTP:
+### Local HTTP Control API Bearer Authentication (`~/.dialtone/api-token`)
+
+All state-changing `POST` routes on the local HTTP control plane require bearer token authentication (`Authorization: Bearer <token>` or `X-Dialtone-Token: <token>`):
+- On first boot, `dialtone` generates a 32-byte random token in `~/.dialtone/api-token` (`0600` permissions). Override with `--api-token <token>` or `DIALTONE_API_TOKEN`.
+- Binding `--listen` to a non-loopback address (e.g. `0.0.0.0:8788`) is refused unless an explicit `--api-token` or `DIALTONE_API_TOKEN` is configured.
+- The HTTP server processes requests concurrently on bounded worker threads (`MAX_CONCURRENT_HTTP_CONNECTIONS = 32`) with a 2-second socket read/write timeout and 2 MiB body size limit.
 
 ```bash
+API_TOKEN=$(cat ~/.dialtone/api-token)
 curl -X POST http://127.0.0.1:8788/api/mesh/join \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"channel":"dialtone","password":"my-fleet-password","node":"node-alpha"}'
+  -d '{"channel":"dialtone","password":"dt-...","node":"node-alpha"}'
 ```
 
 ### Headless Peer Mode (`node`) & Transport Inspection (`status`)
 
 ```bash
 # Run a headless Iroh 1.3 gossip + blob peer (no HTTP server)
-./dialtone node --node node-alpha --channel dialtone --password my-fleet-password
+./dialtone node --node node-alpha --channel dialtone --password <password>
 
 # Emit one heartbeat JSON payload and exit
 ./dialtone node --node node-alpha --no-dns --no-relay --once
@@ -128,7 +152,8 @@ curl -X POST http://127.0.0.1:8788/api/mesh/join \
 | `--no-relay` | Disables Iroh relay servers (direct UDP/QUIC only). |
 | `--relay-only` | Strips direct IP addresses from tickets so traffic routes strictly via relay (`relay_only` profile). |
 | `--relay-url <url>` | Adds a custom Iroh relay server URL (repeatable). |
-| `--bootstrap-ticket <t>` | Adds an explicit bootstrap gossip ticket (repeatable; alias `--join-ticket`). |
+| `--bootstrap-ticket <t>` | Adds an explicit bootstrap gossip or `dialtone-invite-v1:` ticket (repeatable; alias `--join-ticket`). |
+| `--api-token <token>` | Sets an explicit bearer token for `POST` routes on the HTTP control API. |
 
 ---
 

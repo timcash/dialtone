@@ -23,11 +23,15 @@ cargo test
 echo "==> [3/5] Building single release binary (cargo build --release)"
 cargo build --release
 mkdir -p bin
+rm -f bin/dialtone
 cp target/release/dialtone bin/dialtone
 shasum -a 256 bin/dialtone > bin/dialtone.sha256
 echo "    Staged single binary: $(cat bin/dialtone.sha256)"
 
 BIN="./bin/dialtone"
+CI_BLOB_DIR=$(mktemp -d /tmp/dialtone-ci-blob-sup-XXXXXX)
+trap 'kill ${CI_DAEMON_PID:-} 2>/dev/null || true; rm -rf "$CI_BLOB_DIR" /tmp/dialtone-ci-*.json /tmp/dialtone-ci-*.log' EXIT
+export DIALTONE_STATE_DIR="$CI_BLOB_DIR"
 
 echo "==> [4/5] Running end-to-end single-binary CLI & 7-capability acceptance suite"
 "$BIN" self-test > /tmp/dialtone-ci-self-test.json
@@ -74,9 +78,6 @@ grep -q '"row-05-calibration"' /tmp/dialtone-ci-cat.json
 "$BIN" service --os linux --node node-alpha | grep -q 'EnvironmentFile=-/etc/dialtone/daemon.env'
 "$BIN" service --os windows --node node-beta | grep -q 'up --node node-beta'
 
-CI_BLOB_DIR=$(mktemp -d /tmp/dialtone-ci-blob-sup-XXXXXX)
-trap 'kill ${CI_DAEMON_PID:-} 2>/dev/null || true; rm -rf "$CI_BLOB_DIR" /tmp/dialtone-ci-*.json /tmp/dialtone-ci-*.log' EXIT
-
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" node --node node-alpha --no-dns --no-relay --once > /tmp/dialtone-ci-node.json
 grep -q '"schema": "dialtone.iroh.heartbeat.v1"' /tmp/dialtone-ci-node.json
 
@@ -87,16 +88,42 @@ grep -q '\[BOOT 3/5\] Content-Addressed Blob Store' /tmp/dialtone-ci-up.log
 grep -q '\[BOOT 4/5\] Iroh 1.3 QUIC Endpoint' /tmp/dialtone-ci-up.log
 grep -q '\[BOOT 5/5\] Gossip Mesh & Channel Password' /tmp/dialtone-ci-up.log
 
+# Issue #1: Reject weak or default channel passwords, accept CSPRNG gen-password
 if DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" join dialtone --listen 127.0.0.1:19999 --once >/dev/null 2>&1; then
   echo "ERROR: 'dialtone join dialtone' should be rejected (default channel name is not a valid password)"
   exit 1
 fi
+if DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" join shortpass1 --listen 127.0.0.1:19999 --once >/dev/null 2>&1; then
+  echo "ERROR: weak <16 char password should be rejected"
+  exit 1
+fi
 
-DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" join rover-mesh-pass --listen 127.0.0.1:19999 --once > /tmp/dialtone-ci-join.json
+GEN_PW=$("$BIN" gen-password)
+echo "$GEN_PW" | grep -q '^dt-'
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" join "$GEN_PW" --listen 127.0.0.1:19999 --once > /tmp/dialtone-ci-join.json
 grep -q '"channel": "dialtone"' /tmp/dialtone-ci-join.json
-grep -q '"channel_fingerprint": "ch-31302a6cf281"' /tmp/dialtone-ci-join.json
+grep -q '"status": "saved_mesh_config"' /tmp/dialtone-ci-join.json
 
-echo "==> [5/5] Verifying live CAS blob subprocess supervision & crash auto-respawn"
+# Issue #2: Ensure plaintext password is never persisted in config.json (only derived_keys)
+if grep -q "$GEN_PW" "$CI_BLOB_DIR/config.json"; then
+  echo "ERROR: plaintext password was written to config.json!" >&2
+  exit 1
+fi
+grep -q '"derived_keys"' "$CI_BLOB_DIR/config.json"
+
+# Issue #3 & #6: Verify peers allow/list/revoke CLI and expiring single-use invite tickets
+FAKE_PEER_ID="1111111111111111111111111111111111111111111111111111111111111111"
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers allow "$FAKE_PEER_ID" > /tmp/dialtone-ci-peers-allow.json
+grep -q '"status": "allowed"' /tmp/dialtone-ci-peers-allow.json
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers list > /tmp/dialtone-ci-peers-list.json
+grep -q "$FAKE_PEER_ID" /tmp/dialtone-ci-peers-list.json
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers revoke "$FAKE_PEER_ID" > /tmp/dialtone-ci-peers-revoke.json
+grep -q '"status": "revoked"' /tmp/dialtone-ci-peers-revoke.json
+
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" invite --ttl 15m --no-dns --no-relay > /tmp/dialtone-ci-invite.json
+grep -q '"invite_ticket": "dialtone-invite-v1:' /tmp/dialtone-ci-invite.json
+
+echo "==> [5/5] Verifying live CAS blob subprocess supervision, API bearer auth & crash auto-respawn"
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" up \
   --node ci-blob-sup \
   --listen 127.0.0.1:18794 \
@@ -111,15 +138,28 @@ for _ in $(seq 1 30); do
   sleep 0.2
 done
 
+API_TOKEN=$(tr -d '\r\n' < "$CI_BLOB_DIR/api-token")
+
+# Issue #7: Unauthenticated POST must return HTTP 401 Unauthorized
+UNAUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:18794/api/artifacts/blob \
+  -H "Content-Type: application/json" \
+  -d '{"bytes_base64":"ZGlhbHRvbmU="}')
+if [ "$UNAUTH_CODE" != "401" ]; then
+  echo "ERROR: expected HTTP 401 on unauthenticated POST, got $UNAUTH_CODE" >&2
+  exit 1
+fi
+
 # 1. Stage an executable payload into the node's Content-Addressed Blob Store
 BLOB_B64=$(printf '#!/bin/sh\nsleep 30\n' | base64 | tr -d '\n')
 BLOB_SHA=$(curl -fsS -X POST http://127.0.0.1:18794/api/artifacts/blob \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"bytes_base64\":\"$BLOB_B64\"}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["sha256"])')
 echo "    1. Staged executable blob into CAS: $BLOB_SHA"
 
 # 2. Configure the node to keep the blob running as a supervised daemon subprocess
 PROC_RESP=$(curl -fsS -X POST http://127.0.0.1:18794/api/processes/blob \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"telemetry-blob-worker\",\"sha256\":\"$BLOB_SHA\",\"desired_state\":\"running\",\"env\":[\"WORKER_MODE=live\"]}")
 PID_1=$(printf '%s' "$PROC_RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin)["process"]; assert d["status"]=="running"; assert d["sha256"]=="'"$BLOB_SHA"'"; print(d["pid"])')
@@ -139,6 +179,7 @@ echo "    3. Simulated crash (kill -9 $PID_1) -> daemon auto-respawned blob subp
 
 # 4. Stop the supervised blob subprocess cleanly
 STOP_STATUS=$(curl -fsS -X POST http://127.0.0.1:18794/api/processes/blob \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"telemetry-blob-worker\",\"sha256\":\"$BLOB_SHA\",\"desired_state\":\"stopped\"}" | python3 -c 'import sys,json; d=json.load(sys.stdin)["process"]; assert d["pid"] is None; print(d["status"])')
 echo "    4. Cleanly stopped supervised blob subprocess (status=$STOP_STATUS)"

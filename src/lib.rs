@@ -90,6 +90,13 @@ pub fn base64_encode(bytes: &[u8]) -> String {
     out
 }
 
+pub fn base64url_encode(bytes: &[u8]) -> String {
+    base64_encode(bytes)
+        .trim_end_matches('=')
+        .replace('+', "-")
+        .replace('/', "_")
+}
+
 pub fn base64_decode(raw: &str) -> Result<Vec<u8>, String> {
     fn val(b: u8) -> Result<u8, String> {
         match b {
