@@ -4,9 +4,72 @@
 
 ---
 
-## 1. Installation & Quick Start
+## Quick Start (60 Seconds)
 
-### Download Pre-Compiled Single Binary
+### 1. Download (or Build) the Single Binary
+
+```bash
+# macOS (Apple Silicon)
+curl -fsSL https://github.com/timcash/dialtone/releases/latest/download/dialtone-macos-arm64 -o dialtone && chmod +x dialtone
+
+# Linux (x86_64 static musl)
+curl -fsSL https://github.com/timcash/dialtone/releases/latest/download/dialtone-linux-x86_64 -o dialtone && chmod +x dialtone
+
+# Or build from source with Rust
+cargo build --release && cp target/release/dialtone ./dialtone
+```
+
+```powershell
+# Windows (PowerShell)
+Invoke-WebRequest -Uri https://github.com/timcash/dialtone/releases/latest/download/dialtone-windows-x86_64.exe -OutFile dialtone.exe
+```
+
+### 2. Boot a Node & Open the 3D Tactical HUD
+
+```bash
+./dialtone up --node node-alpha
+```
+
+Open **`http://127.0.0.1:8788`** in your browser to view the live 3D mesh topology and terminal `top` telemetry table.
+
+### 3. Link Two Nodes into an Encrypted Gossip Mesh
+
+```bash
+# On Node A (node-alpha): generate a 256-bit password, unlock the channel, and mint a 15m invite ticket
+CHANNEL_PW=$(./dialtone gen-password)
+echo "Channel password: $CHANNEL_PW"
+./dialtone join "$CHANNEL_PW" --node node-alpha --once
+./dialtone invite --ttl 15m
+```
+
+```bash
+# On Node B (node-beta): inspect EndpointId and join using the password + single-use invite ticket
+./dialtone status --node node-beta
+./dialtone join "<CHANNEL_PW>" --node node-beta --bootstrap-ticket "dialtone-invite-v1:<ticket>" --once
+./dialtone up --node node-beta
+```
+
+```bash
+# Back on Node A (node-alpha): allow Node B's EndpointId and start
+./dialtone peers allow <node-beta-endpoint-id>
+./dialtone up --node node-alpha
+```
+
+### 4. Optional: Install as a Background Login Service & Run Self-Test
+
+```bash
+# Register dialtone as a user-level OS service (launchd / systemd --user / Windows Scheduled Task)
+./dialtone daemon install
+
+# Verify all 7 capabilities (live Iroh 1.3 QUIC gossip, SHA-256 CAS, and process supervision)
+./dialtone self-test
+```
+
+---
+
+## 1. Installation & Boot Pipeline
+
+### Pre-Compiled Release Assets
 
 Every GitHub Release publishes standalone, size-optimized single-file executables with all runtime assets and the Web UI compiled directly into the binary:
 
@@ -17,22 +80,7 @@ Every GitHub Release publishes standalone, size-optimized single-file executable
 | **Linux (ARM64 / Edge)** | `dialtone-linux-arm64` |
 | **Windows (x86_64)** | `dialtone-windows-x86_64.exe` |
 
-```bash
-# macOS (Apple Silicon)
-curl -fsSL https://github.com/timcash/dialtone/releases/latest/download/dialtone-macos-arm64 -o dialtone
-chmod +x dialtone
-
-# Linux (x86_64 static musl — zero host libc dependencies)
-curl -fsSL https://github.com/timcash/dialtone/releases/latest/download/dialtone-linux-x86_64 -o dialtone
-chmod +x dialtone
-```
-
-```powershell
-# Windows (PowerShell)
-Invoke-WebRequest -Uri https://github.com/timcash/dialtone/releases/latest/download/dialtone-windows-x86_64.exe -OutFile dialtone.exe
-```
-
-### Boot `dialtone`
+### 5-Stage Boot Sequence
 
 Running `./dialtone` (with no arguments, or `./dialtone up` / `start` / `hub`) boots 5 subsystems in strict dependency order and starts the local Web HUD immediately:
 
@@ -41,7 +89,7 @@ Running `./dialtone` (with no arguments, or `./dialtone up` / `start` / `hub`) b
 [BOOT 2/5] Local Web HUD & Config Server ................. [READY] http://127.0.0.1:8788
 [BOOT 3/5] Content-Addressed Blob Store (iroh-blobs) ..... [READY] ~/.dialtone/blobs
 [BOOT 4/5] Iroh 1.3 QUIC Endpoint (No-Tailnet NIC) ....... [READY] id=a67ff536b0f9.. ip=192.168.1.40
-[BOOT 5/5] Gossip Mesh & Channel Password ................ [READY] channel=ch-6469616c746f peers=3
+[BOOT 5/5] Gossip Mesh & Channel Password ................ [READY] channel=ch-7981c39da07e peers=2
 ```
 
 - **Port Auto-Fallback**: Defaults to `127.0.0.1:8788` (override with `--listen <ip:port>`). If `8788` is in use and `--listen` was not explicitly forced, `dialtone` automatically scans `127.0.0.1:8788..=8799` (falling back to an OS-assigned port).
@@ -68,7 +116,7 @@ Open **`http://127.0.0.1:8788`** (also served at `/nodes`, `/peer`, and `/hud`) 
 - **Live WebSocket & Health Endpoints**:
   - `GET /ws` — RFC 6455 WebSocket upgrade streaming real-time mesh state snapshots.
   - `GET /health` — Lightweight JSON health check (`{"ok": true, "node": "..."}`).
-  - `GET /api/boot-status` (alias `GET /api/config`) — Returns the 5 boot stages, active `mesh_config` (with `secret_key` redacted), and `blob_store_dir`.
+  - `GET /api/boot-status` (alias `GET /api/config`) — Returns the 5 boot stages, active `mesh_config` (with `derived_keys` redacted), and `blob_cache_dir`.
 
 ---
 
