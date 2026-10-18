@@ -22,7 +22,7 @@ use iroh_gossip::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::evidence::{sample_live_host_resources, HostResourceTelemetry};
+use crate::evidence::{sample_live_host_resources, HostResourceTelemetry, TelemetryWindowSummary};
 use crate::identity::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, is_tailnet_ip,
     IrohTransportConfig, IrohTransportDiagnostics,
@@ -35,6 +35,10 @@ pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
 pub const INVITE_TICKET_PREFIX: &str = "dialtone-invite-v1:";
 pub const DEFAULT_CHANNEL_NAME: &str = "dialtone";
 pub const DEFAULT_PEER_TTL_SECS: u64 = 300;
+pub const HEARTBEAT_INTERVAL_SECS: u64 = 5;
+pub const SUMMARY_HEARTBEAT_INTERVAL_SECS: u64 = 30;
+pub const SUMMARY_HEARTBEAT_EVERY_N_TICKS: u64 =
+    SUMMARY_HEARTBEAT_INTERVAL_SECS / HEARTBEAT_INTERVAL_SECS;
 
 /// Documented Argon2id parameters (OWASP recommended: 19 MiB memory, 2 iterations, 1 lane).
 pub const ARGON2ID_M_COST_KIB: u32 = 19_456;
@@ -261,7 +265,7 @@ pub fn derive_channel_keys_v2(channel: &str, password: &str) -> DerivedChannelKe
         h.update(label);
         h.update(b":");
         h.update(norm_channel.as_bytes());
-        h.update(&[0x01]);
+        h.update([0x01]);
         h.finalize().into()
     };
 
@@ -332,6 +336,8 @@ pub struct SeedPeerConfig {
     pub endpoint_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ip_addrs: Vec<String>,
 }
 
 /// Returns the seed peer endpoints configured in the host's local `~/.dialtone/config.json`
@@ -346,8 +352,18 @@ pub fn default_fleet_seed_peers() -> Vec<EndpointAddr> {
                 .relay_url
                 .as_deref()
                 .unwrap_or("https://usw1-1.relay.n0.iroh.link./");
-            if let Ok(relay_url) = relay_str.parse::<iroh::RelayUrl>() {
-                addr = addr.with_relay_url(relay_url);
+            if !matches!(
+                relay_str.trim().to_ascii_lowercase().as_str(),
+                "" | "none" | "disabled"
+            ) {
+                if let Ok(relay_url) = relay_str.parse::<iroh::RelayUrl>() {
+                    addr = addr.with_relay_url(relay_url);
+                }
+            }
+            for raw_ip in &entry.ip_addrs {
+                if let Ok(sock) = raw_ip.trim().parse::<std::net::SocketAddr>() {
+                    addr = addr.with_ip_addr(sock);
+                }
             }
             out.push(addr);
         }
@@ -393,11 +409,32 @@ pub fn allow_peer_in_config(
     endpoint_id: &str,
     relay_url: Option<&str>,
 ) -> Result<PersistentMeshConfig, String> {
+    allow_peer_in_config_with_addrs(config_path, endpoint_id, relay_url, &[])
+}
+
+/// Atomically add `endpoint_id` with optional relay URL and direct IP:port addresses to `config_path`.
+pub fn allow_peer_in_config_with_addrs(
+    config_path: &Path,
+    endpoint_id: &str,
+    relay_url: Option<&str>,
+    ip_addrs: &[String],
+) -> Result<PersistentMeshConfig, String> {
     let parsed_id = endpoint_id
         .trim()
         .parse::<iroh::EndpointId>()
         .map_err(|e| format!("invalid EndpointId '{}': {e}", endpoint_id.trim()))?
         .to_string();
+    let mut validated_ips = Vec::new();
+    for raw_ip in ip_addrs {
+        let sock = raw_ip
+            .trim()
+            .parse::<std::net::SocketAddr>()
+            .map_err(|e| format!("invalid peer SocketAddr '{}': {e}", raw_ip.trim()))?;
+        let s = sock.to_string();
+        if !validated_ips.contains(&s) {
+            validated_ips.push(s);
+        }
+    }
     let mut cfg = load_mesh_config(config_path);
     if !cfg
         .allowed_endpoint_ids
@@ -406,11 +443,20 @@ pub fn allow_peer_in_config(
     {
         cfg.allowed_endpoint_ids.push(parsed_id.clone());
     }
-    if !cfg
+    if let Some(existing) = cfg
         .seed_peers
-        .iter()
-        .any(|s| s.endpoint_id.eq_ignore_ascii_case(&parsed_id))
+        .iter_mut()
+        .find(|s| s.endpoint_id.eq_ignore_ascii_case(&parsed_id))
     {
+        if let Some(r) = relay_url {
+            existing.relay_url = Some(r.to_string());
+        }
+        for ip in validated_ips {
+            if !existing.ip_addrs.contains(&ip) {
+                existing.ip_addrs.push(ip);
+            }
+        }
+    } else {
         cfg.seed_peers.push(SeedPeerConfig {
             endpoint_id: parsed_id,
             relay_url: Some(
@@ -418,6 +464,7 @@ pub fn allow_peer_in_config(
                     .unwrap_or("https://usw1-1.relay.n0.iroh.link./")
                     .to_string(),
             ),
+            ip_addrs: validated_ips,
         });
     }
     cfg.updated_at_unix = now_unix();
@@ -929,6 +976,545 @@ impl FromStr for GossipTicket {
     }
 }
 
+pub fn monotonic_now_ms() -> u64 {
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_millis() as u64
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerRttEcho {
+    pub echoed_mono_ms: u64,
+    pub hold_time_ms: u64,
+}
+
+pub fn compute_rtt_ms_from_echo(now_mono_ms: u64, echo: &PeerRttEcho) -> Option<f64> {
+    if echo.echoed_mono_ms == 0 || now_mono_ms < echo.echoed_mono_ms {
+        return None;
+    }
+    let elapsed_ms = now_mono_ms - echo.echoed_mono_ms;
+    if elapsed_ms < echo.hold_time_ms {
+        return None;
+    }
+    let net_ms = (elapsed_ms - echo.hold_time_ms) as f64;
+    if net_ms > 5_000.0 {
+        return None;
+    }
+    Some(((net_ms.max(0.2)) * 10.0).round() / 10.0)
+}
+
+pub fn build_mesh_rtt_matrix(
+    nodes: &[DialtoneHeartbeat],
+) -> std::collections::BTreeMap<String, f64> {
+    let mut matrix = std::collections::BTreeMap::new();
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for n in nodes {
+        for (peer, &rtt) in &n.peer_rtt_ms {
+            if n.node == *peer || rtt <= 0.0 {
+                continue;
+            }
+            let (a, b) = if n.node <= *peer {
+                (n.node.as_str(), peer.as_str())
+            } else {
+                (peer.as_str(), n.node.as_str())
+            };
+            let key = format!("{a}<->{b}");
+            let entry = matrix.entry(key.clone()).or_insert(0.0);
+            let cnt = counts.entry(key).or_insert(0);
+            *entry += rtt;
+            *cnt += 1;
+        }
+    }
+    for (k, val) in matrix.iter_mut() {
+        let c = counts.get(k).copied().unwrap_or(1).max(1) as f64;
+        *val = ((*val / c) * 10.0).round() / 10.0;
+    }
+    matrix
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NodeGeoLocation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_ip: Option<String>,
+    pub lat: f64,
+    pub lng: f64,
+    #[serde(default)]
+    pub label: String,
+    /// `"public_ip_geo"` when placed from a public IP address, or `"latency_cluster"` when placed by RTT clustering.
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor_node: Option<String>,
+    #[serde(default)]
+    pub cluster_radius_km: f64,
+}
+
+pub fn is_globally_routable_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    let o = ip.octets();
+    !ip.is_private()
+        && !ip.is_loopback()
+        && !ip.is_link_local()
+        && !ip.is_broadcast()
+        && !ip.is_documentation()
+        && !ip.is_unspecified()
+        && !is_tailnet_ip(std::net::IpAddr::V4(ip))
+        && o[0] < 224
+        && !(o[0] == 192 && o[1] == 0 && o[2] == 0)
+        && !(o[0] == 198 && (o[1] == 18 || o[1] == 19))
+}
+
+pub fn mask_public_ipv4(ip: std::net::Ipv4Addr) -> String {
+    let o = ip.octets();
+    format!("{}.{}.x.x", o[0], o[1])
+}
+
+/// Deterministic approximate `(lat, lng)` from a globally routable IPv4 prefix when external Geo-IP API is unavailable.
+pub fn approx_geo_from_public_ipv4(ip: std::net::Ipv4Addr) -> NodeGeoLocation {
+    let o = ip.octets();
+    let (base_lat, base_lng, region): (f64, f64, &str) = match o[0] {
+        1
+        | 14
+        | 27
+        | 36
+        | 39
+        | 42
+        | 49
+        | 58..=61
+        | 101
+        | 103
+        | 106
+        | 110..=126
+        | 133
+        | 150
+        | 153
+        | 163
+        | 175
+        | 180
+        | 182
+        | 183
+        | 202
+        | 203
+        | 210
+        | 211
+        | 218..=223 => (35.68, 139.69, "APAC"),
+        2
+        | 5
+        | 31
+        | 37
+        | 46
+        | 51
+        | 62
+        | 77..=95
+        | 109
+        | 141
+        | 145
+        | 151
+        | 176
+        | 178
+        | 185
+        | 188
+        | 193..=195
+        | 212
+        | 213
+        | 217 => (50.11, 8.68, "EU-Central"),
+        177 | 179 | 181 | 186 | 187 | 189..=191 | 200 | 201 => (-23.55, -46.63, "SA-East"),
+        41 | 102 | 105 | 154 | 196 | 197 => (-26.20, 28.04, "AF-South"),
+        3..=13
+        | 15..=24
+        | 32..=35
+        | 38
+        | 40
+        | 44
+        | 45
+        | 47
+        | 50
+        | 52
+        | 54
+        | 63..=76
+        | 96..=100
+        | 104
+        | 107
+        | 108 => {
+            if o[1] < 85 {
+                (37.77, -122.42, "US-West")
+            } else if o[1] < 170 {
+                (39.74, -104.99, "US-Mountain")
+            } else {
+                (39.04, -77.49, "US-East")
+            }
+        }
+        _ => (40.76, -111.89, "NA-West"),
+    };
+    let lat_jitter = ((o[1] as f64 / 255.0) - 0.5) * 3.2;
+    let lng_jitter = ((o[2] as f64 / 255.0) - 0.5) * 4.4;
+    let lat = (((base_lat + lat_jitter).clamp(-70.0, 70.0)) * 100.0).round() / 100.0;
+    let lng = (((base_lng + lng_jitter).clamp(-179.0, 179.0)) * 100.0).round() / 100.0;
+    NodeGeoLocation {
+        public_ip: Some(mask_public_ipv4(ip)),
+        lat,
+        lng,
+        label: format!("{region} ({})", mask_public_ipv4(ip)),
+        source: "public_ip_geo".to_string(),
+        anchor_node: None,
+        cluster_radius_km: 25.0,
+    }
+}
+
+fn parse_ipv4_from_token(raw: &str) -> Option<std::net::Ipv4Addr> {
+    let cleaned = raw
+        .trim()
+        .trim_start_matches("direct-ip:")
+        .trim_start_matches("active:ip:")
+        .trim_start_matches("known:ip:")
+        .trim_start_matches("ip:");
+    if let Ok(sock) = cleaned.parse::<std::net::SocketAddrV4>() {
+        return Some(*sock.ip());
+    }
+    cleaned.parse::<std::net::Ipv4Addr>().ok()
+}
+
+pub fn extract_public_ipv4_from_heartbeat(hb: &DialtoneHeartbeat) -> Option<std::net::Ipv4Addr> {
+    if let Some(ref b) = hb.iroh_transport.bound_non_tailnet_ipv4 {
+        if let Some(ip) = parse_ipv4_from_token(b) {
+            if is_globally_routable_ipv4(ip) {
+                return Some(ip);
+            }
+        }
+    }
+    for s in &hb.iroh_transport.advertised_ip_addrs {
+        if let Some(ip) = parse_ipv4_from_token(s) {
+            if is_globally_routable_ipv4(ip) {
+                return Some(ip);
+            }
+        }
+    }
+    for s in &hb.observed_remote_addrs {
+        if let Some(ip) = parse_ipv4_from_token(s) {
+            if is_globally_routable_ipv4(ip) {
+                return Some(ip);
+            }
+        }
+    }
+    None
+}
+
+fn local_geo_cache() -> &'static Mutex<Option<NodeGeoLocation>> {
+    static CACHE: OnceLock<Mutex<Option<NodeGeoLocation>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+pub fn cached_local_public_ip_geo() -> Option<NodeGeoLocation> {
+    local_geo_cache().lock().ok().and_then(|g| g.clone())
+}
+
+pub fn spawn_background_public_ip_geo_probe() {
+    static STARTED: OnceLock<bool> = OnceLock::new();
+    if STARTED.set(true).is_err() {
+        return;
+    }
+    std::thread::spawn(|| {
+        let curl_bin = if cfg!(target_os = "windows") {
+            "curl.exe"
+        } else {
+            "curl"
+        };
+        if let Some(raw) = crate::run_cmd(
+            curl_bin,
+            &["-fsSL", "--max-time", "3", "https://ipinfo.io/json"],
+        ) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                let loc_str = val.get("loc").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some((lat_s, lng_s)) = loc_str.split_once(',') {
+                    if let (Ok(lat), Ok(lng)) =
+                        (lat_s.trim().parse::<f64>(), lng_s.trim().parse::<f64>())
+                    {
+                        let raw_ip = val.get("ip").and_then(|v| v.as_str()).unwrap_or("");
+                        let masked_ip = raw_ip
+                            .parse::<std::net::Ipv4Addr>()
+                            .map(mask_public_ipv4)
+                            .unwrap_or_else(|_| "public-wan".to_string());
+                        let city = val.get("city").and_then(|v| v.as_str()).unwrap_or("");
+                        let region = val.get("region").and_then(|v| v.as_str()).unwrap_or("");
+                        let country = val.get("country").and_then(|v| v.as_str()).unwrap_or("WAN");
+                        let label = if !city.is_empty() && !region.is_empty() {
+                            format!("{city}, {region}")
+                        } else if !city.is_empty() {
+                            format!("{city}, {country}")
+                        } else {
+                            format!("{country} ({masked_ip})")
+                        };
+                        let geo = NodeGeoLocation {
+                            public_ip: Some(masked_ip),
+                            lat: (lat * 100.0).round() / 100.0,
+                            lng: (lng * 100.0).round() / 100.0,
+                            label,
+                            source: "public_ip_geo".to_string(),
+                            anchor_node: None,
+                            cluster_radius_km: 12.0,
+                        };
+                        if let Ok(mut guard) = local_geo_cache().lock() {
+                            *guard = Some(geo);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn deterministic_node_bearing_rad(node: &str) -> f64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in node.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    ((h % 3600) as f64 / 3600.0) * std::f64::consts::TAU
+}
+
+fn offset_lat_lng_deg(
+    lat_deg: f64,
+    lng_deg: f64,
+    angular_deg: f64,
+    bearing_rad: f64,
+) -> (f64, f64) {
+    let dlat = angular_deg * bearing_rad.cos();
+    let cos_lat = (lat_deg.to_radians().cos()).abs().max(0.25);
+    let dlng = (angular_deg * bearing_rad.sin()) / cos_lat;
+    let new_lat = ((lat_deg + dlat).clamp(-72.0, 72.0) * 100.0).round() / 100.0;
+    let mut new_lng = lng_deg + dlng;
+    while new_lng > 180.0 {
+        new_lng -= 360.0;
+    }
+    while new_lng < -180.0 {
+        new_lng += 360.0;
+    }
+    let new_lng = (new_lng * 100.0).round() / 100.0;
+    (new_lat, new_lng)
+}
+
+pub fn great_circle_deg(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
+    let p1 = lat1.to_radians();
+    let p2 = lat2.to_radians();
+    let dp = (lat2 - lat1).to_radians();
+    let dl = (lng2 - lng1).to_radians();
+    let a = (dp * 0.5).sin().powi(2) + p1.cos() * p2.cos() * (dl * 0.5).sin().powi(2);
+    let c = 2.0 * a.sqrt().min(1.0).asin();
+    c.to_degrees()
+}
+
+fn lookup_pair_rtt_ms(
+    a: &DialtoneHeartbeat,
+    b: &DialtoneHeartbeat,
+    mesh_rtt_ms: &std::collections::BTreeMap<String, f64>,
+) -> Option<f64> {
+    let key = if a.node <= b.node {
+        format!("{}<->{}", a.node, b.node)
+    } else {
+        format!("{}<->{}", b.node, a.node)
+    };
+    if let Some(&v) = mesh_rtt_ms.get(&key) {
+        if v > 0.0 {
+            return Some(v);
+        }
+    }
+    if let Some(&v) = a.peer_rtt_ms.get(&b.node) {
+        if v > 0.0 {
+            return Some(v);
+        }
+    }
+    if let Some(&v) = b.peer_rtt_ms.get(&a.node) {
+        if v > 0.0 {
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// Resolve approximate `(lat, lng)` for every node in `nodes`:
+/// 1. Nodes with a public IP (`geo_location.source == "public_ip_geo"` or a globally routable IPv4 in their transport diagnostics)
+///    are anchored at their approximate public-IP coordinates.
+/// 2. Nodes without a public IP are placed by **latency clustering** relative to anchored peers (or the relay region seed)
+///    with great-circle angular separation proportional to pairwise RTT (`mesh_rtt_ms` / `peer_rtt_ms`) and spherical spring relaxation.
+/// 3. Co-located nodes sharing the same public IP coordinates are arranged in a tight RTT-proportional micro-cluster so every node
+///    occupies a distinct, clickable position on the H3 globe.
+pub fn resolve_fleet_node_locations(
+    nodes: &mut [DialtoneHeartbeat],
+    mesh_rtt_ms: &std::collections::BTreeMap<String, f64>,
+) {
+    if nodes.is_empty() {
+        return;
+    }
+
+    // Step 1: Populate public_ip_geo for any node that has a globally routable IPv4 address.
+    for n in nodes.iter_mut() {
+        let has_public_geo = n
+            .geo_location
+            .as_ref()
+            .map(|g| g.source == "public_ip_geo" && (g.lat != 0.0 || g.lng != 0.0))
+            .unwrap_or(false);
+        if !has_public_geo {
+            if let Some(pub_ip) = extract_public_ipv4_from_heartbeat(n) {
+                n.geo_location = Some(approx_geo_from_public_ipv4(pub_ip));
+            }
+        }
+    }
+
+    let mut is_public_anchor: Vec<bool> = nodes
+        .iter()
+        .map(|n| {
+            n.geo_location
+                .as_ref()
+                .map(|g| g.source == "public_ip_geo")
+                .unwrap_or(false)
+        })
+        .collect();
+
+    // Step 2: If no node has a public IP geo yet, seed the first node at its relay region center as a latency cluster root.
+    if !is_public_anchor.iter().any(|&b| b) {
+        let relay_hint = nodes[0]
+            .iroh_transport
+            .advertised_relay_urls
+            .first()
+            .or_else(|| nodes[0].iroh_transport.relay_urls.first())
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let (seed_lat, seed_lng, seed_label) = if relay_hint.contains("usw") {
+            (37.34, -121.89, "US-West Latency Cluster")
+        } else if relay_hint.contains("use") {
+            (39.04, -77.49, "US-East Latency Cluster")
+        } else if relay_hint.contains("euw") || relay_hint.contains("fra") {
+            (50.11, 8.68, "EU Latency Cluster")
+        } else if relay_hint.contains("aps") || relay_hint.contains("sin") {
+            (1.35, 103.82, "APAC Latency Cluster")
+        } else {
+            (40.76, -111.89, "Mesh Latency Cluster")
+        };
+        nodes[0].geo_location = Some(NodeGeoLocation {
+            public_ip: None,
+            lat: seed_lat,
+            lng: seed_lng,
+            label: seed_label.to_string(),
+            source: "latency_cluster".to_string(),
+            anchor_node: Some(nodes[0].node.clone()),
+            cluster_radius_km: 15.0,
+        });
+        is_public_anchor[0] = true;
+    }
+
+    // Step 3: Place unanchored nodes relative to their lowest-RTT anchored peer.
+    let snapshot = nodes.to_vec();
+    for i in 0..nodes.len() {
+        if is_public_anchor[i] {
+            continue;
+        }
+        let mut best_anchor_idx = 0usize;
+        let mut best_rtt = f64::MAX;
+        for (j, cand) in snapshot.iter().enumerate() {
+            if is_public_anchor[j] {
+                let rtt = lookup_pair_rtt_ms(&snapshot[i], cand, mesh_rtt_ms).unwrap_or(35.0);
+                if rtt < best_rtt {
+                    best_rtt = rtt;
+                    best_anchor_idx = j;
+                }
+            }
+        }
+        if best_rtt == f64::MAX {
+            best_rtt = 35.0;
+        }
+        let anchor_loc = nodes[best_anchor_idx]
+            .geo_location
+            .clone()
+            .unwrap_or_default();
+        let anchor_name = nodes[best_anchor_idx].node.clone();
+        let target_deg = (2.2 + best_rtt * 0.14).clamp(2.2, 75.0);
+        let bearing = deterministic_node_bearing_rad(&nodes[i].node) + (i as f64 * 2.094);
+        let (lat, lng) = offset_lat_lng_deg(anchor_loc.lat, anchor_loc.lng, target_deg, bearing);
+        nodes[i].geo_location = Some(NodeGeoLocation {
+            public_ip: None,
+            lat,
+            lng,
+            label: format!("RTT Cluster (~{best_rtt:.0}ms to {anchor_name})"),
+            source: "latency_cluster".to_string(),
+            anchor_node: Some(anchor_name),
+            cluster_radius_km: (best_rtt * 15.0).round(),
+        });
+    }
+
+    // Step 4: Spherical spring relaxation so latency-clustered nodes (and co-located public-IP nodes)
+    // reflect pairwise RTT distances and maintain distinct positions on the H3 globe.
+    let n_len = nodes.len();
+    if n_len >= 2 {
+        for _iter in 0..24 {
+            for i in 0..n_len {
+                for j in (i + 1)..n_len {
+                    let loc_i = nodes[i].geo_location.clone().unwrap_or_default();
+                    let loc_j = nodes[j].geo_location.clone().unwrap_or_default();
+                    let cur_deg = great_circle_deg(loc_i.lat, loc_i.lng, loc_j.lat, loc_j.lng);
+                    let rtt = lookup_pair_rtt_ms(&nodes[i], &nodes[j], mesh_rtt_ms).unwrap_or(25.0);
+
+                    let both_public =
+                        loc_i.source == "public_ip_geo" && loc_j.source == "public_ip_geo";
+                    if both_public && cur_deg >= 2.2 {
+                        continue;
+                    }
+
+                    let target_deg = if both_public {
+                        // Co-located public IP nodes: micro-cluster separation proportional to RTT
+                        (2.0 + rtt * 0.04).clamp(2.0, 5.5)
+                    } else {
+                        (2.2 + rtt * 0.14).clamp(2.2, 75.0)
+                    };
+
+                    let err = target_deg - cur_deg;
+                    if err.abs() < 0.15 {
+                        continue;
+                    }
+                    let bearing = if cur_deg < 0.05 {
+                        deterministic_node_bearing_rad(&nodes[j].node) + (j as f64 * 2.094)
+                    } else {
+                        let dlat = loc_j.lat - loc_i.lat;
+                        let dlng = (loc_j.lng - loc_i.lng) * loc_i.lat.to_radians().cos().max(0.25);
+                        dlng.atan2(dlat)
+                    };
+
+                    let step = err * 0.28;
+                    if !is_public_anchor[j] || both_public {
+                        let (nlat, nlng) = offset_lat_lng_deg(loc_j.lat, loc_j.lng, step, bearing);
+                        if let Some(ref mut gj) = nodes[j].geo_location {
+                            gj.lat = nlat;
+                            gj.lng = nlng;
+                        }
+                    } else if !is_public_anchor[i] {
+                        let (nlat, nlng) = offset_lat_lng_deg(
+                            loc_i.lat,
+                            loc_i.lng,
+                            step,
+                            bearing + std::f64::consts::PI,
+                        );
+                        if let Some(ref mut gi) = nodes[i].geo_location {
+                            gi.lat = nlat;
+                            gi.lng = nlng;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn default_heartbeat_kind() -> String {
+    "regular".to_string()
+}
+
+fn default_heartbeat_interval_secs() -> u64 {
+    HEARTBEAT_INTERVAL_SECS
+}
+
+fn default_summary_interval_secs() -> u64 {
+    SUMMARY_HEARTBEAT_INTERVAL_SECS
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DialtoneHeartbeat {
     pub schema: String,
@@ -937,6 +1523,24 @@ pub struct DialtoneHeartbeat {
     pub ticket: String,
     pub counter: u64,
     pub updated_at_unix: u64,
+    #[serde(default = "default_heartbeat_kind")]
+    pub heartbeat_kind: String,
+    #[serde(default = "default_heartbeat_interval_secs")]
+    pub heartbeat_interval_secs: u64,
+    #[serde(default = "default_summary_interval_secs")]
+    pub summary_interval_secs: u64,
+    #[serde(default)]
+    pub sent_mono_ms: u64,
+    #[serde(default)]
+    pub rtt_probe_requested: bool,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub peer_echoes: HashMap<String, PeerRttEcho>,
+    #[serde(default)]
+    pub peer_rtt_ms: std::collections::BTreeMap<String, f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_stats: Option<TelemetryWindowSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo_location: Option<NodeGeoLocation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_mac: Option<String>,
     #[serde(default = "default_os")]
@@ -1271,6 +1875,14 @@ pub async fn verify_live_gossip_exchange(
         ticket: ticket_a,
         counter: 1,
         updated_at_unix: now_unix(),
+        heartbeat_kind: "summary".to_string(),
+        heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
+        summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+        sent_mono_ms: monotonic_now_ms(),
+        rtt_probe_requested: true,
+        peer_echoes: HashMap::new(),
+        peer_rtt_ms: std::collections::BTreeMap::new(),
+        summary_stats: None,
         channel_mac: None,
         os: default_os(),
         arch: default_arch(),
@@ -1294,6 +1906,7 @@ pub async fn verify_live_gossip_exchange(
         iroh_transport: build_diagnostics(&config, &addr_a, None, &id_a.to_string()),
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
+        geo_location: None,
     };
     sign_heartbeat_with_keys(&mut hb_a, &keys);
 
@@ -1324,6 +1937,14 @@ pub async fn verify_live_gossip_exchange(
         ticket: ticket_b,
         counter: 1,
         updated_at_unix: now_unix(),
+        heartbeat_kind: "summary".to_string(),
+        heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
+        summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+        sent_mono_ms: monotonic_now_ms(),
+        rtt_probe_requested: false,
+        peer_echoes: HashMap::new(),
+        peer_rtt_ms: std::collections::BTreeMap::new(),
+        summary_stats: None,
         channel_mac: None,
         os: default_os(),
         arch: default_arch(),
@@ -1335,6 +1956,7 @@ pub async fn verify_live_gossip_exchange(
         iroh_transport: build_diagnostics(&config, &addr_b, None, &id_b.to_string()),
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
+        geo_location: None,
     };
     sign_heartbeat_with_keys(&mut hb_b, &keys);
 
@@ -1491,6 +2113,14 @@ mod tests {
             ticket: "iroh-gossip-v1:super-secret-ticket".to_string(),
             counter: 42,
             updated_at_unix: 1_700_000_000,
+            heartbeat_kind: "regular".to_string(),
+            heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+            sent_mono_ms: 1_000,
+            rtt_probe_requested: false,
+            peer_echoes: HashMap::new(),
+            peer_rtt_ms: std::collections::BTreeMap::new(),
+            summary_stats: None,
             channel_mac: None,
             os: default_os(),
             arch: default_arch(),
@@ -1502,6 +2132,7 @@ mod tests {
             iroh_transport: diag,
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
+            geo_location: None,
         };
 
         let wire_bytes = encrypt_heartbeat_for_gossip(&hb, &k1).unwrap();
@@ -1619,6 +2250,14 @@ mod tests {
             ticket: "iroh-gossip-v1:fresh".to_string(),
             counter: 1,
             updated_at_unix: 1_000,
+            heartbeat_kind: "regular".to_string(),
+            heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+            sent_mono_ms: 1_000,
+            rtt_probe_requested: false,
+            peer_echoes: HashMap::new(),
+            peer_rtt_ms: std::collections::BTreeMap::new(),
+            summary_stats: None,
             channel_mac: None,
             os: default_os(),
             arch: default_arch(),
@@ -1630,6 +2269,7 @@ mod tests {
             iroh_transport: diag.clone(),
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
+            geo_location: None,
         };
         let mut stale = fresh.clone();
         stale.node = "stale-peer".to_string();
@@ -1640,6 +2280,75 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].node, "node-alpha");
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rtt_echo_and_mesh_matrix_calculate_pairwise_latency() {
+        assert_eq!(HEARTBEAT_INTERVAL_SECS, 5);
+        assert_eq!(SUMMARY_HEARTBEAT_INTERVAL_SECS, 30);
+        assert_eq!(SUMMARY_HEARTBEAT_EVERY_N_TICKS, 6);
+
+        let echo = PeerRttEcho {
+            echoed_mono_ms: 10_000,
+            hold_time_ms: 120,
+        };
+        let rtt = compute_rtt_ms_from_echo(10_148, &echo).unwrap();
+        assert!((rtt - 28.0).abs() < 0.01);
+
+        let cfg = IrohTransportConfig::local_offline();
+        let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
+        let diag = build_diagnostics(&cfg, &addr, None, "ep-1");
+
+        let mut hb_a = DialtoneHeartbeat {
+            schema: DIALTONE_HEARTBEAT_SCHEMA.to_string(),
+            node: "node-alpha".to_string(),
+            endpoint_id: "ep-1".to_string(),
+            ticket: "iroh-gossip-v1:a".to_string(),
+            counter: 1,
+            updated_at_unix: 1_000,
+            heartbeat_kind: "summary".to_string(),
+            heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+            sent_mono_ms: 1_000,
+            rtt_probe_requested: false,
+            peer_echoes: HashMap::new(),
+            peer_rtt_ms: std::collections::BTreeMap::from([("node-beta".to_string(), 14.2)]),
+            summary_stats: None,
+            channel_mac: None,
+            os: default_os(),
+            arch: default_arch(),
+            role: node_role_for("node-alpha"),
+            capabilities: node_capabilities_for("node-alpha"),
+            host_resources: sample_live_host_resources("node-alpha", None, 1),
+            service_endpoints: Vec::new(),
+            managed_processes: Vec::new(),
+            iroh_transport: diag,
+            observed_remote_addrs: Vec::new(),
+            tailnet_used: false,
+            geo_location: None,
+        };
+        let mut hb_b = hb_a.clone();
+        hb_b.node = "node-beta".to_string();
+        hb_b.peer_rtt_ms = std::collections::BTreeMap::from([("node-alpha".to_string(), 15.8)]);
+        hb_a.peer_rtt_ms.insert("node-gamma".to_string(), 22.4);
+
+        let mut nodes = vec![hb_a, hb_b];
+        let matrix = build_mesh_rtt_matrix(&nodes);
+        assert_eq!(matrix.get("node-alpha<->node-beta"), Some(&15.0));
+        assert_eq!(matrix.get("node-alpha<->node-gamma"), Some(&22.4));
+
+        // Verify public IP geolocation + RTT latency clustering placement
+        nodes[0].observed_remote_addrs = vec!["direct-ip:52.10.20.30:44222".to_string()];
+        resolve_fleet_node_locations(&mut nodes, &matrix);
+        let geo_a = nodes[0].geo_location.as_ref().unwrap();
+        let geo_b = nodes[1].geo_location.as_ref().unwrap();
+        assert_eq!(geo_a.source, "public_ip_geo");
+        assert_eq!(geo_b.source, "latency_cluster");
+        let ang_deg = great_circle_deg(geo_a.lat, geo_a.lng, geo_b.lat, geo_b.lng);
+        assert!(
+            ang_deg > 0.3 && ang_deg < 20.0,
+            "latency-clustered peer should be placed near public IP anchor based on 15ms RTT (got {ang_deg:.2} deg)"
+        );
     }
 
     #[test]

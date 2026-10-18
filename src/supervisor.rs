@@ -472,6 +472,7 @@ impl ManagedProcessSupervisor {
                         spec.status = Some("running".to_string());
                         needs_spawn = false;
                     } else {
+                        spec.restart_count = spec.restart_count.saturating_add(1);
                         self.children.remove(&spec.name);
                     }
                 }
@@ -579,6 +580,7 @@ mod tests {
             startup_grace_secs: None,
             status: None,
             pid: None,
+            restart_count: 0,
             service_unit: Some("rtcore.service".to_string()),
         };
 
@@ -603,17 +605,26 @@ mod tests {
 
     #[test]
     fn supervisor_spawns_and_stops_real_child_process_and_hydrates_sha() {
+        let (sleep_path, sleep_args) = if cfg!(windows) {
+            (
+                r"C:\Windows\System32\ping.exe".to_string(),
+                vec!["-n".to_string(), "6".to_string(), "127.0.0.1".to_string()],
+            )
+        } else {
+            ("/bin/sleep".to_string(), vec!["5".to_string()])
+        };
         let mut specs = vec![ManagedProcessSpec {
             name: "sleep-worker".to_string(),
-            path: "/bin/sleep".to_string(),
+            path: sleep_path,
             sha256: "sha256:unknown".to_string(),
             desired_state: "running".to_string(),
-            args: vec!["5".to_string()],
+            args: sleep_args,
             env: Vec::new(),
             cwd: None,
             startup_grace_secs: None,
             status: None,
             pid: None,
+            restart_count: 0,
             service_unit: None,
         }];
         hydrate_managed_process_hashes(&mut specs, &[], &HashMap::new());
@@ -637,7 +648,11 @@ mod tests {
         let blob_dir = dir.join("blobs");
         fs::create_dir_all(&blob_dir).unwrap();
 
-        let script_bytes = b"#!/bin/sh\nsleep 30\n";
+        let script_bytes: &[u8] = if cfg!(windows) {
+            b"@echo off\r\nping -n 30 127.0.0.1 >NUL\r\n"
+        } else {
+            b"#!/bin/sh\nsleep 30\n"
+        };
         let (sha256, _) = store_verified_blob(&blob_dir, script_bytes, None).unwrap();
         let (verified_sha, staged_path) =
             stage_executable_blob(&blob_dir, "telemetry-blob-worker", &sha256).unwrap();
@@ -655,6 +670,7 @@ mod tests {
             startup_grace_secs: Some(2),
             status: None,
             pid: None,
+            restart_count: 0,
             service_unit: None,
         }];
 
@@ -662,6 +678,7 @@ mod tests {
         sup.reconcile(&mut specs).unwrap();
         let pid1 = specs[0].pid.expect("blob subprocess should have pid");
         assert_eq!(specs[0].status.as_deref(), Some("running"));
+        assert_eq!(specs[0].restart_count, 0);
 
         // Simulate crash/kill of the blob subprocess and verify reconcile automatically respawns it
         assert!(sup.kill_child("telemetry-blob-worker"));
@@ -671,6 +688,7 @@ mod tests {
             .expect("blob subprocess should respawn with a pid");
         assert_eq!(specs[0].status.as_deref(), Some("running"));
         assert_ne!(pid1, pid2, "respawned blob subprocess receives a new pid");
+        assert_eq!(specs[0].restart_count, 1);
 
         // Stop cleanly
         specs[0].desired_state = "stopped".to_string();

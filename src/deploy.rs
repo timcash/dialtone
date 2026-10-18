@@ -514,6 +514,11 @@ pub fn install_persistent_os_daemon(
         );
         fs::write(&plist_path, plist)
             .map_err(|e| format!("write LaunchAgent {}: {e}", plist_path.display()))?;
+        if std::env::var_os("DIALTONE_STATE_DIR").is_none() {
+            let _ = std::process::Command::new("launchctl")
+                .args(["load", "-w", &plist_path.to_string_lossy()])
+                .output();
+        }
         Ok(DaemonInstallReport {
             status: "installed".to_string(),
             os: os_kind.to_string(),
@@ -536,11 +541,15 @@ pub fn install_persistent_os_daemon(
             listen
         );
         let script = format!(
-            "@echo off\r\n{cmd_line} >> \"{}\" 2>&1\r\n",
+            "@echo off\r\n:loop\r\n{cmd_line} >> \"{}\" 2>&1\r\ntimeout /t 2 /nobreak >nul\r\ngoto loop\r\n",
             log_path.display()
         );
         fs::write(&cmd_path, script)
             .map_err(|e| format!("write startup script {}: {e}", cmd_path.display()))?;
+        let headless_tr = format!(
+            "conhost.exe --headless cmd.exe /c \"{}\"",
+            cmd_path.display()
+        );
         let _ = std::process::Command::new("reg")
             .args([
                 "add",
@@ -550,7 +559,7 @@ pub fn install_persistent_os_daemon(
                 "/t",
                 "REG_SZ",
                 "/d",
-                &format!("cmd.exe /c \"{}\"", cmd_path.display()),
+                &headless_tr,
                 "/f",
             ])
             .output();
@@ -563,7 +572,7 @@ pub fn install_persistent_os_daemon(
                 "/TN",
                 "DialtoneDaemon",
                 "/TR",
-                &format!("cmd.exe /c \"{}\"", cmd_path.display()),
+                &headless_tr,
             ])
             .output();
         Ok(DaemonInstallReport {
@@ -575,7 +584,7 @@ pub fn install_persistent_os_daemon(
             service_unit_path: cmd_path.to_string_lossy().to_string(),
             survives_restarts: true,
             instructions: format!(
-                "Windows Startup Registry (HKCU\\...\\Run\\DialtoneDaemon) & Scheduled Task registered via {}",
+                "Windows Startup Registry (HKCU\\...\\Run\\DialtoneDaemon) & Scheduled Task (headless auto-restart loop) registered via {}",
                 cmd_path.display()
             ),
         })

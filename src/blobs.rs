@@ -334,6 +334,214 @@ async fn observe_remote_info(
     (active_modes, known_modes, status.to_string())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedBlobTicketReport {
+    pub status: String,
+    pub sha256: String,
+    pub blake3_hash: String,
+    pub bytes: u64,
+    pub path: String,
+    pub provider_endpoint_id: String,
+    pub ticket_uri: String,
+}
+
+#[derive(Clone)]
+pub struct LiveBlobBridge {
+    pub endpoint: iroh::Endpoint,
+    pub store: MemStore,
+    pub memory_lookup: MemoryLookup,
+    pub transport_config: IrohTransportConfig,
+    pub runtime_handle: tokio::runtime::Handle,
+}
+
+impl std::fmt::Debug for LiveBlobBridge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveBlobBridge")
+            .field("endpoint_id", &self.endpoint.id().to_string())
+            .finish()
+    }
+}
+
+impl LiveBlobBridge {
+    pub fn share_verified_blob(
+        &self,
+        cache_root: &Path,
+        bytes: &[u8],
+        expected_sha256: Option<&str>,
+    ) -> Result<SharedBlobTicketReport, String> {
+        let (sha256, blob_path) = store_verified_blob(cache_root, bytes, expected_sha256)?;
+        let store = self.store.clone();
+        let endpoint = self.endpoint.clone();
+        let transport_config = self.transport_config.clone();
+        let handle = self.runtime_handle.clone();
+        let payload = bytes.to_vec();
+        let sha_clone = sha256.clone();
+
+        let (blake3_hash, provider_endpoint_id, ticket_uri) = std::thread::scope(|s| {
+            s.spawn(move || {
+                handle.block_on(async move {
+                    let tag = store
+                        .blobs()
+                        .add_slice(&payload)
+                        .await
+                        .map_err(|e| format!("import blob into daemon MemStore: {e}"))?;
+                    let adv = crate::identity::advertised_endpoint_addr(
+                        &endpoint.addr(),
+                        &transport_config,
+                    );
+                    let provider_id = endpoint.id().to_string();
+                    let ticket = BlobTicket::new(adv, tag.hash, tag.format);
+                    let uri = format_blob_ticket_uri(&ticket, &sha_clone);
+                    Ok::<(String, String, String), String>((tag.hash.to_string(), provider_id, uri))
+                })
+            })
+            .join()
+            .map_err(|_| "blob bridge share worker panicked".to_string())?
+        })?;
+
+        Ok(SharedBlobTicketReport {
+            status: "shared".to_string(),
+            sha256,
+            blake3_hash,
+            bytes: bytes.len() as u64,
+            path: blob_path.to_string_lossy().to_string(),
+            provider_endpoint_id,
+            ticket_uri,
+        })
+    }
+
+    pub fn pull_verified_blob_ticket(
+        &self,
+        cache_root: &Path,
+        ticket_uri: &str,
+        force_network: bool,
+    ) -> Result<BlobTransportReport, String> {
+        let (parsed_ticket, expected_sha256) = parse_blob_ticket_uri(ticket_uri)?;
+        let provider_id = parsed_ticket.addr().id;
+
+        if !force_network && has_cached_blob(cache_root, &expected_sha256) {
+            let cached_bytes = read_cached_blob(cache_root, &expected_sha256)?;
+            let store = self.store.clone();
+            let handle = self.runtime_handle.clone();
+            let bytes_clone = cached_bytes.clone();
+            let blake3_hash = std::thread::scope(|s| {
+                s.spawn(move || {
+                    handle.block_on(async move {
+                        let tag =
+                            store.blobs().add_slice(&bytes_clone).await.map_err(|e| {
+                                format!("import cached blob into daemon MemStore: {e}")
+                            })?;
+                        Ok::<String, String>(tag.hash.to_string())
+                    })
+                })
+                .join()
+                .map_err(|_| "blob bridge cache worker panicked".to_string())?
+            })?;
+            return Ok(BlobTransportReport {
+                sha256: expected_sha256,
+                blake3_hash,
+                provider_endpoint_id: provider_id.to_string(),
+                ticket_uri: ticket_uri.to_string(),
+                bytes: cached_bytes.len() as u64,
+                transferred_bytes: 0,
+                method: "local-cache".to_string(),
+                fallback_used: false,
+                active_address_modes: vec!["local-cache".to_string()],
+                known_address_modes: vec!["local-cache".to_string()],
+                remote_info_status: "cache-hit".to_string(),
+            });
+        }
+
+        self.memory_lookup
+            .add_endpoint_info(parsed_ticket.addr().clone());
+        let store = self.store.clone();
+        let endpoint = self.endpoint.clone();
+        let transport_config = self.transport_config.clone();
+        let handle = self.runtime_handle.clone();
+        let cache_root_buf = cache_root.to_path_buf();
+        let expected_sha_clone = expected_sha256.clone();
+        let ticket_uri_owned = ticket_uri.to_string();
+
+        std::thread::scope(|s| {
+            s.spawn(move || {
+                handle.block_on(async move {
+                    let is_self = provider_id == endpoint.id();
+                    let tmp_export = std::env::temp_dir().join(format!(
+                        "dialtone-blob-pull-{}-{}.bin",
+                        std::process::id(),
+                        crate::now_unix()
+                    ));
+
+                    let mut fetcher_cfg = if is_self {
+                        IrohTransportConfig::local_offline()
+                    } else {
+                        transport_config.clone()
+                    };
+                    fetcher_cfg.quic_port = None;
+                    fetcher_cfg.exclude_tailnet = transport_config.exclude_tailnet;
+                    let fetcher_ep = build_endpoint_builder(&fetcher_cfg)?
+                        .bind()
+                        .await
+                        .map_err(|e| format!("bind blob fetcher endpoint: {e}"))?;
+                    let mem_lookup = MemoryLookup::new();
+                    if is_self {
+                        mem_lookup.add_endpoint_info(endpoint.addr());
+                    }
+                    mem_lookup.add_endpoint_info(parsed_ticket.addr().clone());
+                    fetcher_ep
+                        .address_lookup()
+                        .map_err(|e| format!("address lookup handle: {e}"))?
+                        .add(mem_lookup);
+                    let tmp_store = MemStore::new();
+                    let downloader = tmp_store.downloader(&fetcher_ep);
+                    tokio::time::timeout(
+                        Duration::from_secs(15),
+                        downloader.download(parsed_ticket.hash(), Some(provider_id)),
+                    )
+                    .await
+                    .map_err(|_| format!("iroh-blobs download from peer {provider_id} timed out"))?
+                    .map_err(|e| {
+                        format!("iroh-blobs download from peer {provider_id} failed: {e}")
+                    })?;
+                    let (active_modes, known_modes, remote_status) =
+                        observe_remote_info(&fetcher_ep, provider_id).await;
+                    tmp_store
+                        .blobs()
+                        .export(parsed_ticket.hash(), &tmp_export)
+                        .await
+                        .map_err(|e| format!("export downloaded blob: {e}"))?;
+                    let downloaded_bytes =
+                        fs::read(&tmp_export).map_err(|e| format!("read exported blob: {e}"))?;
+                    let _ = fs::remove_file(&tmp_export);
+                    let _ = store.blobs().add_slice(&downloaded_bytes).await;
+                    fetcher_ep.close().await;
+
+                    let (verified_sha256, _) = store_verified_blob(
+                        &cache_root_buf,
+                        &downloaded_bytes,
+                        Some(&expected_sha_clone),
+                    )?;
+                    Ok(BlobTransportReport {
+                        sha256: verified_sha256,
+                        blake3_hash: parsed_ticket.hash().to_string(),
+                        provider_endpoint_id: provider_id.to_string(),
+                        ticket_uri: ticket_uri_owned,
+                        bytes: downloaded_bytes.len() as u64,
+                        transferred_bytes: downloaded_bytes.len() as u64,
+                        method: "iroh-blobs-ticket".to_string(),
+                        fallback_used: false,
+                        active_address_modes: active_modes,
+                        known_address_modes: known_modes,
+                        remote_info_status: remote_status,
+                    })
+                })
+            })
+            .join()
+            .map_err(|_| "blob bridge pull worker panicked".to_string())?
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

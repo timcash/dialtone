@@ -2,6 +2,7 @@ pub mod blobs;
 pub mod deploy;
 pub mod evidence;
 pub mod gossip;
+pub mod h3_land;
 pub mod http;
 pub mod identity;
 pub mod metadata;
@@ -49,7 +50,7 @@ pub fn hex_encode(bytes: &[u8]) -> String {
 
 pub fn hex_decode(raw: &str) -> Result<Vec<u8>, String> {
     let s = raw.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err("odd hex length".to_string());
     }
     let mut out = Vec::with_capacity(s.len() / 2);
@@ -396,17 +397,26 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
     execute_verified_rollback(&mut slot)?;
 
     // 5. Daemon-Owned Process Supervision & Intent Convergence
+    let (sleep_path, sleep_args) = if cfg!(windows) {
+        (
+            r"C:\Windows\System32\ping.exe".to_string(),
+            vec!["-n".to_string(), "6".to_string(), "127.0.0.1".to_string()],
+        )
+    } else {
+        ("/bin/sleep".to_string(), vec!["5".to_string()])
+    };
     let mut proc_specs = vec![ManagedProcessSpec {
         name: "self-test-sleep".to_string(),
-        path: "/bin/sleep".to_string(),
+        path: sleep_path,
         sha256: "sha256:unknown".to_string(),
         desired_state: "running".to_string(),
-        args: vec!["5".to_string()],
+        args: sleep_args,
         env: vec!["DIALTONE_SYSTEMD_RECONCILE_INTENT=1".to_string()],
         cwd: None,
         startup_grace_secs: Some(2),
         status: None,
         pid: None,
+        restart_count: 0,
         service_unit: Some("self-test-sleep.service".to_string()),
     }];
     hydrate_managed_process_hashes(&mut proc_specs, &[], &HashMap::new());

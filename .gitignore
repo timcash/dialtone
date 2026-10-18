@@ -11,5 +11,8 @@
 *.secret
 *.local.md
 FLEET.local.md
+goal.local.md
+*.local.sh
+deploy-fleet.local.sh
 .env
 .env.*

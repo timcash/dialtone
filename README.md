@@ -238,6 +238,7 @@ The `"dialtone"` channel (and any custom `--channel <name>`) is **password-prote
     ```bash
     ./dialtone peers list
     ./dialtone peers allow <endpoint_id>
+    ./dialtone peers allow <endpoint_id> --addr 192.168.1.50:19440
     ./dialtone peers revoke <endpoint_id>
     ```
 - **Expiring, Single-Use Invite Tickets (`invite`)**:
@@ -291,13 +292,18 @@ curl -X POST http://127.0.0.1:8788/api/mesh/join \
 
 ### Transport & Discovery Flags
 
+By default, `dialtone` uses **zero public directory publishing** (`dns-pkarr` and `mainline-dht` are disabled unless `--dns` or `--dht` is explicitly passed), so node `EndpointId`s and IP addresses are never published to public DNS or DHT directories.
+
 | Flag | Behavior |
 | :--- | :--- |
 | `--no-tailnet` | **(Default)** Strips Tailscale IPv4 (`100.64.0.0/10`) and IPv6 (`fd7a:115c:a1e0::/48`) addresses from advertised tickets and binds the QUIC socket to the primary physical non-Tailnet IPv4 interface. |
 | `--allow-tailnet` | Permits Tailscale interface addresses in advertised endpoints. |
+| `--private-mesh` | Zero-internet private LAN mesh mode: disables public relays, DNS/Pkarr, and Mainline DHT, and enables mDNS + direct IP:port peer dialing. |
+| `--quic-port <port>` | Binds the Iroh QUIC UDP socket to a deterministic port (e.g. `19440`) for direct LAN peer dialing (`DIALTONE_QUIC_PORT`). |
 | `--lan` / `--local-discovery` | Enables zero-conf mDNS local network discovery (`lan_only` profile). |
-| `--dht` | Enables Mainline BitTorrent DHT address publication and lookup. |
-| `--no-dns` | Disables DNS/Pkarr address lookup. |
+| `--dns` | Explicitly enables public Pkarr DNS address lookup/publishing (`dns.iroh.link`). |
+| `--dht` | Explicitly enables Mainline BitTorrent DHT address publication and lookup. |
+| `--no-dns` | Keeps DNS/Pkarr address lookup disabled (default). |
 | `--no-relay` | Disables Iroh relay servers (direct UDP/QUIC only). |
 | `--relay-only` | Strips direct IP addresses from tickets so traffic routes strictly via relay (`relay_only` profile). |
 | `--relay-url <url>` | Adds a custom Iroh relay server URL (repeatable). |
@@ -365,7 +371,7 @@ curl -s "http://127.0.0.1:8788/api/artifacts/blob?sha256=<64-hex-digest>"
 ### Tiered Blob Fetch Planning (`blob-fetch-report`)
 
 When hydrating an artifact across the mesh, `dialtone` evaluates a 3-tier resolution order:
-1. **`local-cache-hit`** — `0` network bytes transferred if the verified SHA-256 already exists in `~/.dialtone/blobs`.
+1. **`local-cache`** (`status: "cache_hit"`) — `0` network bytes transferred if the verified SHA-256 already exists in `~/.dialtone/blobs`.
 2. **`iroh-blobs-ticket`** — Native peer-to-peer QUIC transfer when the URI is `iroh-blobs://ticket/<ticket>#sha256:<hex>`.
 3. **`http-peer-fallback`** — Guarded HTTP fallback (`http://<peer>/...`) used only when `--http-fallback-enabled` (`http_fallback_enabled: true`) is set.
 
@@ -380,6 +386,19 @@ curl -X POST http://127.0.0.1:8788/api/artifacts/fetch \
   -H "Authorization: Bearer $(cat ~/.dialtone/api-token)" \
   -H "Content-Type: application/json" \
   -d '{"sha256":"sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d","uri":"iroh-blobs://ticket/blob123","provider_node":"node-gamma","expected_bytes":4096}'
+```
+
+### Live Cross-Peer `iroh-blobs` QUIC Share & Pull (`blobs share` / `blobs pull`)
+
+Every running `dialtone` daemon attaches `iroh_blobs::BlobsProtocol` to its live QUIC router so peers can share and pull content-addressed artifacts directly over QUIC:
+
+```bash
+# On Node A: import a file or payload into CAS + live iroh-blobs store and mint an iroh-blob:// ticket URI
+./dialtone blobs share ./worker-script.sh
+# -> returns {"sha256": "...", "ticket_uri": "iroh-blob://<sha256>?peer=<endpoint_id>&relay=...", ...}
+
+# On Node B: pull the blob over live Iroh QUIC from Node A and verify its SHA-256 into ~/.dialtone/blobs
+./dialtone blobs pull "iroh-blob://<sha256>?peer=<endpoint_id>&relay=..." --force
 ```
 
 ---
@@ -472,13 +491,13 @@ Or via HTTP: `GET /api/build-decision?case=peer-local-async` and `POST /api/depl
 
 ### Dual-Slot Verified Rollback (`rollback-plan-fixture`)
 
-Preview or execute a rollback from `slot-b` (`current_bad_sha256`) to `slot-a` (`previous_good_sha256`) with SHA-256 verification before symlink cutover:
+Preview or execute a rollback from `slot-b` (`current_bad_sha256`) to `slot-a` (`previous_good_sha256`) with SHA-256 verification before cutover:
 
 ```bash
 ./dialtone rollback-plan-fixture --node edge-1
 ```
 
-Or via HTTP: `GET /api/rollback-plan?node=edge-1` and `POST /api/rollback-plan`.
+Or via HTTP: `GET /api/rollback-plan?node=edge-1`, `POST /api/rollback-plan`, and `POST /api/deploy/rollback`.
 
 ---
 
@@ -496,11 +515,11 @@ Examples: `dialtone://node-alpha/control/hub-api`, `dialtone://edge-1/rover/rtco
 
 ### Deduplicated Command Journal & `rtcore-udp` Dispatch
 
-Submit command intents with an `idempotency_key` to `POST /api/commands/intent`. Duplicate keys return `"deduplicated": true` without re-executing, while `rtcore-udp` commands encode into deterministic 64-byte binary UDP packets (`magic: "DTN2"`).
+Submit command intents with an `id` to `POST /api/commands/intent`. Terminal or duplicate intents return `"merged": false` without re-executing, while `rtcore-udp` commands encode into deterministic 64-byte binary UDP packets (`RTCORE_ARM_MAGIC: 0x41524d44` / `"ARMD"`, mode-bound v2).
 
 ### Program Catalogs & Named Datasets (`program-catalog-fixture`)
 
-Inspect the built-in row calibration catalog or query named datasets (`rover-wheel-calibration`, `greenhouse-valve-schedule`):
+Inspect the built-in row calibration catalog or query named datasets (`programs`, `jobs`):
 
 ```bash
 ./dialtone program-catalog-fixture
@@ -544,14 +563,16 @@ All `POST` routes require `Authorization: Bearer <token>` (or `X-Dialtone-Token:
 | `POST /api/artifacts/blob` | Store base64 payload in SHA-256 verified CAS (`~/.dialtone/blobs`) |
 | `GET /api/artifacts/blob?sha256=...` | Fetch verified blob bytes & metadata from CAS (`HEAD` also supported) |
 | `POST /api/artifacts/fetch` | Evaluate tiered blob hydration plan (`GET /api/blob-fetch-report`) |
+| `POST /api/blobs/share` | Share a payload or CAS SHA-256 via live `iroh-blobs` and return its `iroh-blob://` ticket URI |
+| `POST /api/blobs/pull` | Pull a remote `iroh-blob://` ticket URI over live QUIC into the local SHA-256 CAS |
 | `GET /api/processes` | List supervised child processes with live PID reconciliation |
-| `POST /api/processes/blob` (`/api/processes`) | Stage a CAS blob and supervise it as a daemon subprocess (`running`/`stopped`) |
+| `POST /api/processes/blob` (`/api/processes`) | Stage a CAS blob (or `ticket_uri`) and supervise it as a daemon subprocess (`running`/`stopped`) |
 | `GET/POST /api/process-intent` | Preview start/stop/restart convergence plan and dependency audit |
 | `GET/POST /api/deploy-plan` | Generate target deployment plan (`target=robot-v4-default`, `dialtone`, etc.) |
 | `POST /api/deploy/gossip-manifest` | Validate a `dialtone.artifact_manifest.v1` payload |
 | `POST /api/deploy/apply-manifest` | Validate and stage a deployment manifest into allowed roots |
 | `POST /api/deploy/build-request` | Evaluate distributed build cache & async peer build (`GET /api/build-decision`) |
-| `GET/POST /api/rollback-plan` | Preview side-effect-free dual-slot SHA-256 rollback plan |
+| `GET/POST /api/rollback-plan` | Preview side-effect-free dual-slot SHA-256 rollback plan (`POST /api/deploy/rollback` to execute) |
 | `GET/POST /api/alert-ack` | Preview side-effect-free alert acknowledgement |
 | `POST /api/commands/intent` | Record deduplicated command intent in the command journal |
 | `GET /api/cursor/jobs` | Paginated Cursor job log (`offset`, `limit`) |
@@ -570,6 +591,7 @@ All `POST` routes require `Authorization: Bearer <token>` (or `X-Dialtone-Token:
 | `DIALTONE_CHANNEL` | `dialtone` | Default gossip channel name when `--channel` is not passed |
 | `DIALTONE_PASSWORD` (`DIALTONE_SECRET_KEY`) | *(unset)* | Password used to derive Argon2id `v2` channel keys on boot |
 | `DIALTONE_NODE` | System hostname | Override default node name when `--node` is not passed |
+| `DIALTONE_QUIC_PORT` | *(OS dynamic)* | Optional deterministic UDP port for the Iroh QUIC endpoint (`--quic-port`) |
 | `DIALTONE_DEPLOY_ALLOWED_ROOTS` | `/opt/dialtone/,/var/lib/dialtone/,/tmp/dialtone-staging/` | Comma-separated allowed filesystem prefixes for manifest staging |
 | `~/.dialtone/config.json` | — | Host-local mesh config (`0600`): Argon2id `derived_keys` (no plaintext password), `seed_peers`, `allowed_endpoint_ids`, `used_invite_nonces`, and supervised process specs |
 | `~/.dialtone/api-token` | — | Auto-generated 256-bit local HTTP control API bearer token (`0600`) |
@@ -578,13 +600,17 @@ All `POST` routes require `Authorization: Bearer <token>` (or `X-Dialtone-Token:
 
 ---
 
-## 12. Self-Test & Local CI Verification
+## 12. Self-Test, Live Fleet Verification & Local CI
 
-Run the built-in 7-capability live verification suite or the full local CI pipeline at any time:
+Run the built-in 7-capability live verification suite, the live multi-node fleet verification command, or the full local CI pipeline at any time:
 
 ```bash
-# Built-in 7-capability live self-test (spawns live Iroh 1.3 gossip & CAS checks)
+# Built-in 7-capability live self-test (spawns ephemeral local Iroh 1.3 gossip & CAS checks)
 ./dialtone self-test
+
+# Verify the running local daemon's security posture, zero public directory exposure,
+# N-peer encrypted gossip convergence, and live QUIC blob transfer
+./dialtone fleet-test --expect-peers 3 --timeout 15s
 
 # Full local CI suite (fmt, cargo test, release build, CLI fixtures, and live blob subprocess crash auto-respawn)
 ./ci.sh

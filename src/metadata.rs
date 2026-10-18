@@ -222,6 +222,8 @@ pub struct ManagedProcessSpec {
     #[serde(default)]
     pub pid: Option<u32>,
     #[serde(default)]
+    pub restart_count: u32,
+    #[serde(default)]
     pub service_unit: Option<String>,
 }
 
@@ -614,8 +616,12 @@ mod tests {
 
     #[test]
     fn telemetry_template_renders_process_status_and_file_probes() {
+        let tmp_dir = env::temp_dir();
         let tmpl = TelemetryTemplate {
-            template: "worker={process:cell-worker.status} bin={process:cell-worker.path} tmp={file:/tmp.exists}".to_string(),
+            template: format!(
+                "worker={{process:cell-worker.status}} bin={{process:cell-worker.path}} tmp={{file:{}.exists}}",
+                tmp_dir.display()
+            ),
         };
         let procs = vec![ManagedProcessSpec {
             name: "cell-worker".to_string(),
@@ -628,6 +634,7 @@ mod tests {
             startup_grace_secs: None,
             status: Some("running".to_string()),
             pid: Some(1234),
+            restart_count: 0,
             service_unit: None,
         }];
         let rendered = tmpl.render(&procs);

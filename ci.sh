@@ -113,12 +113,15 @@ grep -q '"derived_keys"' "$CI_BLOB_DIR/config.json"
 
 # Issue #3 & #6: Verify peers allow/list/revoke CLI and expiring single-use invite tickets
 FAKE_PEER_ID="1111111111111111111111111111111111111111111111111111111111111111"
-DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers allow "$FAKE_PEER_ID" > /tmp/dialtone-ci-peers-allow.json
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers allow "$FAKE_PEER_ID" --addr 127.0.0.1:19440 > /tmp/dialtone-ci-peers-allow.json
 grep -q '"status": "allowed"' /tmp/dialtone-ci-peers-allow.json
+grep -q '"127.0.0.1:19440"' /tmp/dialtone-ci-peers-allow.json
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers list > /tmp/dialtone-ci-peers-list.json
 grep -q "$FAKE_PEER_ID" /tmp/dialtone-ci-peers-list.json
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers revoke "$FAKE_PEER_ID" > /tmp/dialtone-ci-peers-revoke.json
 grep -q '"status": "revoked"' /tmp/dialtone-ci-peers-revoke.json
+# Re-allow peer so fleet-test sees a non-empty allowlist
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers allow "$FAKE_PEER_ID" --addr 127.0.0.1:19440 > /dev/null
 
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" invite --ttl 15m --no-dns --no-relay > /tmp/dialtone-ci-invite.json
 grep -q '"invite_ticket": "dialtone-invite-v1:' /tmp/dialtone-ci-invite.json
@@ -127,8 +130,7 @@ echo "==> [5/5] Verifying live CAS blob subprocess supervision, API bearer auth 
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" up \
   --node ci-blob-sup \
   --listen 127.0.0.1:18794 \
-  --no-dns \
-  --no-relay > "$CI_BLOB_DIR/daemon.log" 2>&1 &
+  --private-mesh > "$CI_BLOB_DIR/daemon.log" 2>&1 &
 CI_DAEMON_PID=$!
 
 for _ in $(seq 1 30); do
@@ -169,7 +171,7 @@ echo "    2. Blob subprocess 'telemetry-blob-worker' spawned & running under dae
 # 3. Kill the blob subprocess (simulate crash) and verify daemon automatically respawns it
 kill -9 "$PID_1" 2>/dev/null || true
 sleep 0.3
-PID_2=$(curl -fsS http://127.0.0.1:18794/api/processes | python3 -c 'import sys,json; procs=[p for p in json.load(sys.stdin)["managed_processes"] if p["name"]=="telemetry-blob-worker"]; assert len(procs)==1; assert procs[0]["status"]=="running"; print(procs[0]["pid"])')
+PID_2=$(curl -fsS http://127.0.0.1:18794/api/processes | python3 -c 'import sys,json; procs=[p for p in json.load(sys.stdin)["managed_processes"] if p["name"]=="telemetry-blob-worker"]; assert len(procs)==1; assert procs[0]["status"]=="running"; assert procs[0]["restart_count"]>=1; print(procs[0]["pid"])')
 if [ "$PID_1" = "$PID_2" ]; then
   echo "ERROR: expected respawned blob subprocess to have a new PID (still $PID_1)" >&2
   exit 1
@@ -183,6 +185,40 @@ STOP_STATUS=$(curl -fsS -X POST http://127.0.0.1:18794/api/processes/blob \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"telemetry-blob-worker\",\"sha256\":\"$BLOB_SHA\",\"desired_state\":\"stopped\"}" | python3 -c 'import sys,json; d=json.load(sys.stdin)["process"]; assert d["pid"] is None; print(d["status"])')
 echo "    4. Cleanly stopped supervised blob subprocess (status=$STOP_STATUS)"
+
+# 5. Verify live iroh-blobs share & pull CLI and fleet-test CLI against running daemon
+SHARE_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blobs share "ci-live-blob-payload" --listen 127.0.0.1:18794)
+TICKET_URI=$(printf '%s' "$SHARE_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["ticket_uri"])')
+PULL_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blobs pull "$TICKET_URI" --force --listen 127.0.0.1:18794)
+printf '%s' "$PULL_JSON" | grep -q '"method": "iroh-blobs-ticket"'
+echo "    5. Verified live iroh-blobs share & pull via CLI ($TICKET_URI)"
+
+FLEET_TEST_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" fleet-test --expect-peers 1 --timeout 5s --listen 127.0.0.1:18794)
+printf '%s' "$FLEET_TEST_JSON" | grep -q '"status": "ok"'
+printf '%s' "$FLEET_TEST_JSON" | grep -q '"public_directory_publishing": false'
+printf '%s' "$FLEET_TEST_JSON" | grep -q '"real_telemetry_verified": true'
+printf '%s' "$FLEET_TEST_JSON" | grep -q '"summary_stats_verified": true'
+echo "    6. Verified dialtone fleet-test --expect-peers 1 passed (real telemetry + summary_stats)"
+
+curl -fsS http://127.0.0.1:18794/api/state | python3 -c '
+import sys, json
+st = json.load(sys.stdin)
+nodes = st["nodes"]
+assert len(nodes) >= 1
+n = nodes[0]
+hb_int = n.get("heartbeat_interval_secs")
+sum_int = n.get("summary_interval_secs")
+assert hb_int == 5, f"expected 5s heartbeat interval, got {hb_int}"
+assert sum_int == 30, f"expected 30s summary interval, got {sum_int}"
+hr = n["host_resources"]
+assert hr["disk_used_bytes"] != 120 * 1024 * 1024 * 1024, "fake 120 GiB disk detected"
+assert abs(hr["disk_percent"] - 23.4) > 0.01, "fake 23.4% disk detected"
+assert n.get("summary_stats") is not None, "missing summary_stats on live heartbeat"
+assert n["summary_stats"]["window_secs"] == 30
+logs_txt = json.dumps(st.get("logs", []))
+assert "nats://" not in logs_txt, "fake seeded NATS log found in live daemon state"
+'
+echo "    7. Verified live /api/state reports real OS telemetry, 5s/30s summary stats, and non-synthetic logs"
 
 kill $CI_DAEMON_PID 2>/dev/null || true
 wait $CI_DAEMON_PID 2>/dev/null || true

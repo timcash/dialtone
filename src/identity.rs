@@ -60,6 +60,8 @@ pub struct IrohTransportConfig {
     pub relay_urls: Vec<String>,
     #[serde(default = "default_true")]
     pub exclude_tailnet: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quic_port: Option<u16>,
 }
 
 fn default_true() -> bool {
@@ -70,12 +72,13 @@ impl Default for IrohTransportConfig {
     fn default() -> Self {
         Self {
             profile: "wan_with_relay".to_string(),
-            dns_lookup: true,
+            dns_lookup: false,
             local_discovery: false,
             dht_lookup: false,
             relay_mode: IrohRelayPolicy::Default,
             relay_urls: Vec::new(),
             exclude_tailnet: true,
+            quic_port: None,
         }
     }
 }
@@ -90,6 +93,7 @@ impl IrohTransportConfig {
             relay_mode: IrohRelayPolicy::Disabled,
             relay_urls: Vec::new(),
             exclude_tailnet: true,
+            quic_port: None,
         }
     }
 
@@ -102,6 +106,20 @@ impl IrohTransportConfig {
             relay_mode: IrohRelayPolicy::Disabled,
             relay_urls: Vec::new(),
             exclude_tailnet: false,
+            quic_port: None,
+        }
+    }
+
+    pub fn private_mesh(quic_port: Option<u16>) -> Self {
+        Self {
+            profile: "private_mesh".to_string(),
+            dns_lookup: false,
+            local_discovery: false,
+            dht_lookup: false,
+            relay_mode: IrohRelayPolicy::Disabled,
+            relay_urls: Vec::new(),
+            exclude_tailnet: true,
+            quic_port,
         }
     }
 
@@ -168,8 +186,10 @@ pub fn default_secret_key_path() -> PathBuf {
             return PathBuf::from(trimmed);
         }
     }
-    let home = env::var("DIALTONE_HOME")
+    let home = env::var("DIALTONE_STATE_DIR")
+        .or_else(|_| env::var("DIALTONE_HOME"))
         .ok()
+        .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from)
         .or_else(|| {
             env::var("HOME")
@@ -243,18 +263,27 @@ pub fn build_endpoint_builder(
         (false, _) => Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Default),
     };
 
+    let bind_port = config.quic_port.unwrap_or(0);
     if config.exclude_tailnet {
         if let Some(v4) = detect_non_tailnet_ipv4() {
             builder = builder
                 .clear_ip_transports()
                 .bind_addr_with_opts(
-                    SocketAddr::new(IpAddr::V4(v4), 0),
+                    SocketAddr::new(IpAddr::V4(v4), bind_port),
                     BindOpts::default()
                         .set_prefix_len(24)
                         .set_is_default_route(true),
                 )
-                .map_err(|err| format!("bind non-tailnet ipv4 {v4}: {err}"))?;
+                .map_err(|err| format!("bind non-tailnet ipv4 {v4}:{bind_port}: {err}"))?;
         }
+    } else if let Some(port) = config.quic_port {
+        builder = builder
+            .clear_ip_transports()
+            .bind_addr_with_opts(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
+                BindOpts::default().set_is_default_route(true),
+            )
+            .map_err(|err| format!("bind ipv4 0.0.0.0:{port}: {err}"))?;
     }
 
     if !config.relay_urls.is_empty() {
