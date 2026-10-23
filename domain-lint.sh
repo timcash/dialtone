@@ -12,16 +12,19 @@ RULES=(
   'telemetry|host_?resources?=stats'
   'fleet|swarm=mesh'
   'artifact=blob'
+  '(^|[^a-z0-9])cas([^a-z0-9]|$)=store'
   'blob_?cache|cache_dir|cache_root=store'
   'sub_?process|managed_?process|supervised_?process|(^|[^a-z])worker=process'
-  'e2e|test[-_]tick|capability[-_ ]tick=probe'
+  '(^|[^0-9a-f])e2e([^0-9a-f]|$)|test[-_]tick|capability[-_ ]tick=probe'
   'dashboard=hud'
   'endpoint_ids?=node_id'
   'seed_peers?|bootstrap=seed / invite'
   'password=secret'
+  'invite[_ ]?tickets?=invite'
 )
 
 status=0
+show="${DOMAIN_LINT_SHOW:-5}"
 files=$(ls src/*.rs | grep -v 'src/h3_land.rs')
 for rule in "${RULES[@]}"; do
   pattern="${rule%=*}"
@@ -30,7 +33,7 @@ for rule in "${RULES[@]}"; do
   if [ -n "$hits" ]; then
     count=$(printf '%s\n' "$hits" | wc -l | tr -d ' ')
     echo "domain-lint: $count line(s) use a banned word; say \"$use\" (pattern: $pattern)"
-    if [ "${DOMAIN_LINT_SHOW:-5}" -gt 0 ]; then printf '%s\n' "$hits" | head -n "$DOMAIN_LINT_SHOW" | cut -c1-160 | sed 's/^/    /'; fi
+    if [ "$show" -gt 0 ]; then printf '%s\n' "$hits" | head -n "$show" | cut -c1-160 | sed 's/^/    /'; fi
     status=1
   fi
 done

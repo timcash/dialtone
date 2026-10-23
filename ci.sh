@@ -3,16 +3,19 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-echo "==> [0/5] Verifying zero hostnames or EndpointIds in git-tracked files and git history"
+echo "==> [0/5] Verifying zero hostnames or NodeIds in git-tracked files and git history"
 FORBIDDEN_RE=$(python3 -c 'import base64; print(base64.b64decode("cm9zaWV8bGVnaW9ufGJ1aWxkLTF8amV0c29ufHN0ZWFtZGVja3w2NDQ2MzczOTc4NzJ8MDAxMmQ5NjdkMTY1fGZiZDViM2I3ZTRlMg==").decode())')
 if git grep -iE "$FORBIDDEN_RE" -- $(git ls-files); then
-  echo "ERROR: Forbidden hostname or EndpointId found in git-tracked files!" >&2
+  echo "ERROR: Forbidden hostname or NodeId found in git-tracked files!" >&2
   exit 1
 fi
 if [ -n "$(git log --all -i -G"$FORBIDDEN_RE" --oneline 2>/dev/null)" ] || [ -n "$(git log --all -i --grep="$FORBIDDEN_RE" --oneline 2>/dev/null)" ]; then
-  echo "ERROR: Forbidden hostname or EndpointId found in git commit history!" >&2
+  echo "ERROR: Forbidden hostname or NodeId found in git commit history!" >&2
   exit 1
 fi
+
+echo "==> [0b/5] Domain-language gate (goal.md vocabulary, banned synonyms in src/)"
+./domain-lint.sh
 
 echo "==> [1/5] Formatting check (cargo fmt --check)"
 cargo fmt --check
@@ -30,8 +33,8 @@ echo "    Staged single binary: $(cat bin/dialtone.sha256)"
 
 BIN="./bin/dialtone"
 CI_BLOB_DIR=$(mktemp -d /tmp/dialtone-ci-blob-sup-XXXXXX)
-# Stop the CI daemon *and* the blob worker subprocesses it supervises: killing the daemon
-# alone re-parents its workers to init, leaving one orphan per CI run.
+# Stop the CI node *and* the processes its supervisor started: killing the node
+# alone re-parents its processes to init, leaving one orphan per CI run.
 ci_cleanup() {
   if [ -n "${CI_DAEMON_PID:-}" ]; then
     kill "$CI_DAEMON_PID" 2>/dev/null || true
@@ -89,54 +92,54 @@ grep -q '"row-05-calibration"' /tmp/dialtone-ci-cat.json
 "$BIN" service --os windows --node node-beta | grep -q 'up --node node-beta'
 
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" node --node node-alpha --no-dns --no-relay --once > /tmp/dialtone-ci-node.json
-grep -q '"schema": "dialtone.iroh.heartbeat.v1"' /tmp/dialtone-ci-node.json
+grep -q '"schema": "dialtone.iroh.beat.v1"' /tmp/dialtone-ci-node.json
 
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" --listen 127.0.0.1:0 --no-dns --no-relay --once > /tmp/dialtone-ci-up.log
 grep -q '\[BOOT 1/5\]' /tmp/dialtone-ci-up.log
 grep -q '\[BOOT 2/5\] Local Web HUD & Config Server' /tmp/dialtone-ci-up.log
 grep -q '\[BOOT 3/5\] Content-Addressed Blob Store' /tmp/dialtone-ci-up.log
 grep -q '\[BOOT 4/5\] Iroh 1.3 QUIC Endpoint' /tmp/dialtone-ci-up.log
-grep -q '\[BOOT 5/5\] Gossip Mesh & Channel Password' /tmp/dialtone-ci-up.log
+grep -q '\[BOOT 5/5\] Gossip Mesh & Channel Secret' /tmp/dialtone-ci-up.log
 
-# Issue #1: Reject weak or default channel passwords, accept CSPRNG gen-password
+# Issue #1: Reject weak or default channel secrets, accept a generated secret
 if DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" join dialtone --listen 127.0.0.1:19999 --once >/dev/null 2>&1; then
-  echo "ERROR: 'dialtone join dialtone' should be rejected (default channel name is not a valid password)"
+  echo "ERROR: 'dialtone join dialtone' should be rejected (default channel name is not a valid secret)"
   exit 1
 fi
 if DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" join shortpass1 --listen 127.0.0.1:19999 --once >/dev/null 2>&1; then
-  echo "ERROR: weak <16 char password should be rejected"
+  echo "ERROR: weak <16 char secret should be rejected"
   exit 1
 fi
 
-GEN_PW=$("$BIN" gen-password)
-echo "$GEN_PW" | grep -q '^dt-'
-DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" join "$GEN_PW" --listen 127.0.0.1:19999 --once > /tmp/dialtone-ci-join.json
+GEN_SECRET=$("$BIN" secret)
+echo "$GEN_SECRET" | grep -q '^dt-'
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" join "$GEN_SECRET" --listen 127.0.0.1:19999 --once > /tmp/dialtone-ci-join.json
 grep -q '"channel": "dialtone"' /tmp/dialtone-ci-join.json
 grep -q '"status": "saved_mesh_config"' /tmp/dialtone-ci-join.json
 
-# Issue #2: Ensure plaintext password is never persisted in config.json (only derived_keys)
-if grep -q "$GEN_PW" "$CI_BLOB_DIR/config.json"; then
-  echo "ERROR: plaintext password was written to config.json!" >&2
+# Issue #2: Ensure the plaintext secret is never persisted in config.json (only derived_keys)
+if grep -q "$GEN_SECRET" "$CI_BLOB_DIR/config.json"; then
+  echo "ERROR: plaintext secret was written to config.json!" >&2
   exit 1
 fi
 grep -q '"derived_keys"' "$CI_BLOB_DIR/config.json"
 
-# Issue #3 & #6: Verify peers allow/list/revoke CLI and expiring single-use invite tickets
+# Issue #3 & #6: Verify allowlist add/list/remove CLI and expiring single-use invites
 FAKE_PEER_ID="1111111111111111111111111111111111111111111111111111111111111111"
-DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers allow "$FAKE_PEER_ID" --addr 127.0.0.1:19440 > /tmp/dialtone-ci-peers-allow.json
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" allowlist add "$FAKE_PEER_ID" --addr 127.0.0.1:19440 > /tmp/dialtone-ci-peers-allow.json
 grep -q '"status": "allowed"' /tmp/dialtone-ci-peers-allow.json
 grep -q '"127.0.0.1:19440"' /tmp/dialtone-ci-peers-allow.json
-DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers list > /tmp/dialtone-ci-peers-list.json
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" allowlist list > /tmp/dialtone-ci-peers-list.json
 grep -q "$FAKE_PEER_ID" /tmp/dialtone-ci-peers-list.json
-DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers revoke "$FAKE_PEER_ID" > /tmp/dialtone-ci-peers-revoke.json
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" allowlist remove "$FAKE_PEER_ID" > /tmp/dialtone-ci-peers-revoke.json
 grep -q '"status": "revoked"' /tmp/dialtone-ci-peers-revoke.json
-# Re-allow peer so fleet-test sees a non-empty allowlist
-DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers allow "$FAKE_PEER_ID" --addr 127.0.0.1:19440 > /dev/null
+# Re-add the peer so mesh-test sees a non-empty allowlist
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" allowlist add "$FAKE_PEER_ID" --addr 127.0.0.1:19440 > /dev/null
 
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" invite --ttl 15m --no-dns --no-relay > /tmp/dialtone-ci-invite.json
-grep -q '"invite_ticket": "dialtone-invite-v1:' /tmp/dialtone-ci-invite.json
+grep -q '"invite": "dialtone-invite-v1:' /tmp/dialtone-ci-invite.json
 
-echo "==> [5/5] Verifying live CAS blob subprocess supervision, API bearer auth & crash auto-respawn"
+echo "==> [5/5] Verifying store, supervisor, API bearer auth & crash restart on a live node"
 DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" up \
   --node ci-blob-sup \
   --listen 127.0.0.1:18794 \
@@ -153,7 +156,7 @@ done
 API_TOKEN=$(tr -d '\r\n' < "$CI_BLOB_DIR/api-token")
 
 # Issue #7: Unauthenticated POST must return HTTP 401 Unauthorized
-UNAUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:18794/api/artifacts/blob \
+UNAUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:18794/api/blob \
   -H "Content-Type: application/json" \
   -d '{"bytes_base64":"ZGlhbHRvbmU="}')
 if [ "$UNAUTH_CODE" != "401" ]; then
@@ -161,54 +164,54 @@ if [ "$UNAUTH_CODE" != "401" ]; then
   exit 1
 fi
 
-# 1. Stage an executable payload into the node's Content-Addressed Blob Store
+# 1. Put a program blob in the node's store
 BLOB_B64=$(printf '#!/bin/sh\nsleep 30\n' | base64 | tr -d '\n')
-BLOB_SHA=$(curl -fsS -X POST http://127.0.0.1:18794/api/artifacts/blob \
+BLOB_DIGEST=$(curl -fsS -X POST http://127.0.0.1:18794/api/blob \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"bytes_base64\":\"$BLOB_B64\"}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["sha256"])')
-echo "    1. Staged executable blob into CAS: $BLOB_SHA"
+  -d "{\"bytes_base64\":\"$BLOB_B64\"}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["digest"])')
+echo "    1. Put program blob in the store: $BLOB_DIGEST"
 
-# 2. Configure the node to keep the blob running as a supervised daemon subprocess
+# 2. Ask the supervisor to keep the program running as a process
 PROC_RESP=$(curl -fsS -X POST http://127.0.0.1:18794/api/processes/blob \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"name\":\"telemetry-blob-worker\",\"sha256\":\"$BLOB_SHA\",\"desired_state\":\"running\",\"env\":[\"WORKER_MODE=live\"]}")
-PID_1=$(printf '%s' "$PROC_RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin)["process"]; assert d["status"]=="running"; assert d["sha256"]=="'"$BLOB_SHA"'"; print(d["pid"])')
+  -d "{\"name\":\"ci-process\",\"digest\":\"$BLOB_DIGEST\",\"desired_state\":\"running\",\"env\":[\"PROCESS_MODE=live\"]}")
+PID_1=$(printf '%s' "$PROC_RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin)["process"]; assert d["status"]=="running"; assert d["digest"]=="'"$BLOB_DIGEST"'"; print(d["pid"])')
 kill -0 "$PID_1"
-echo "    2. Blob subprocess 'telemetry-blob-worker' spawned & running under daemon (PID=$PID_1)"
+echo "    2. Process 'ci-process' started by the supervisor (PID=$PID_1)"
 
-# 3. Kill the blob subprocess (simulate crash) and verify daemon automatically respawns it
+# 3. Kill the process (simulate a crash) and verify the supervisor restarts it
 kill -9 "$PID_1" 2>/dev/null || true
 sleep 0.3
-PID_2=$(curl -fsS http://127.0.0.1:18794/api/processes | python3 -c 'import sys,json; procs=[p for p in json.load(sys.stdin)["managed_processes"] if p["name"]=="telemetry-blob-worker"]; assert len(procs)==1; assert procs[0]["status"]=="running"; assert procs[0]["restart_count"]>=1; print(procs[0]["pid"])')
+PID_2=$(curl -fsS http://127.0.0.1:18794/api/processes | python3 -c 'import sys,json; procs=[p for p in json.load(sys.stdin)["processes"] if p["name"]=="ci-process"]; assert len(procs)==1; assert procs[0]["status"]=="running"; assert procs[0]["restart_count"]>=1; print(procs[0]["pid"])')
 if [ "$PID_1" = "$PID_2" ]; then
-  echo "ERROR: expected respawned blob subprocess to have a new PID (still $PID_1)" >&2
+  echo "ERROR: expected the restarted process to have a new PID (still $PID_1)" >&2
   exit 1
 fi
 kill -0 "$PID_2"
-echo "    3. Simulated crash (kill -9 $PID_1) -> daemon auto-respawned blob subprocess (new PID=$PID_2)"
+echo "    3. Simulated crash (kill -9 $PID_1) -> supervisor restarted the process (new PID=$PID_2)"
 
-# 4. Stop the supervised blob subprocess cleanly
+# 4. Stop the process cleanly
 STOP_STATUS=$(curl -fsS -X POST http://127.0.0.1:18794/api/processes/blob \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"name\":\"telemetry-blob-worker\",\"sha256\":\"$BLOB_SHA\",\"desired_state\":\"stopped\"}" | python3 -c 'import sys,json; d=json.load(sys.stdin)["process"]; assert d["pid"] is None; print(d["status"])')
-echo "    4. Cleanly stopped supervised blob subprocess (status=$STOP_STATUS)"
+  -d "{\"name\":\"ci-process\",\"digest\":\"$BLOB_DIGEST\",\"desired_state\":\"stopped\"}" | python3 -c 'import sys,json; d=json.load(sys.stdin)["process"]; assert d["pid"] is None; print(d["status"])')
+echo "    4. Stopped the process cleanly (status=$STOP_STATUS)"
 
-# 5. Verify live iroh-blobs share & pull CLI and fleet-test CLI against running daemon
-SHARE_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blobs share "ci-live-blob-payload" --listen 127.0.0.1:18794)
+# 5. Verify blob share & pull and mesh-test against the running node
+SHARE_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blob share "ci-live-blob-payload" --listen 127.0.0.1:18794)
 TICKET_URI=$(printf '%s' "$SHARE_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["ticket_uri"])')
-PULL_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blobs pull "$TICKET_URI" --force --listen 127.0.0.1:18794)
+PULL_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blob pull "$TICKET_URI" --force --listen 127.0.0.1:18794)
 printf '%s' "$PULL_JSON" | grep -q '"method": "iroh-blobs-ticket"'
-echo "    5. Verified live iroh-blobs share & pull via CLI ($TICKET_URI)"
+echo "    5. Verified blob share & pull via CLI ($TICKET_URI)"
 
-FLEET_TEST_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" fleet-test --expect-peers 1 --timeout 5s --listen 127.0.0.1:18794)
-printf '%s' "$FLEET_TEST_JSON" | grep -q '"status": "ok"'
-printf '%s' "$FLEET_TEST_JSON" | grep -q '"public_directory_publishing": false'
-printf '%s' "$FLEET_TEST_JSON" | grep -q '"real_telemetry_verified": true'
-printf '%s' "$FLEET_TEST_JSON" | grep -q '"summary_stats_verified": true'
-echo "    6. Verified dialtone fleet-test --expect-peers 1 passed (real telemetry + summary_stats)"
+MESH_TEST_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" mesh-test --expect-peers 1 --timeout 5s --listen 127.0.0.1:18794)
+printf '%s' "$MESH_TEST_JSON" | grep -q '"status": "ok"'
+printf '%s' "$MESH_TEST_JSON" | grep -q '"public_directory_publishing": false'
+printf '%s' "$MESH_TEST_JSON" | grep -q '"real_stats_verified": true'
+printf '%s' "$MESH_TEST_JSON" | grep -q '"summary_stats_verified": true'
+echo "    6. Verified dialtone mesh-test --expect-peers 1 passed (real stats + summary_stats)"
 
 curl -fsS http://127.0.0.1:18794/api/state | python3 -c '
 import sys, json
@@ -216,19 +219,29 @@ st = json.load(sys.stdin)
 nodes = st["nodes"]
 assert len(nodes) >= 1
 n = nodes[0]
-hb_int = n.get("heartbeat_interval_secs")
+beat_int = n.get("beat_interval_secs")
 sum_int = n.get("summary_interval_secs")
-assert hb_int == 5, f"expected 5s heartbeat interval, got {hb_int}"
+assert beat_int == 5, f"expected 5s beat interval, got {beat_int}"
 assert sum_int == 30, f"expected 30s summary interval, got {sum_int}"
-hr = n["host_resources"]
+hr = n["stats"]
 assert hr["disk_used_bytes"] != 120 * 1024 * 1024 * 1024, "fake 120 GiB disk detected"
 assert abs(hr["disk_percent"] - 23.4) > 0.01, "fake 23.4% disk detected"
-assert n.get("summary_stats") is not None, "missing summary_stats on live heartbeat"
+assert n.get("summary_stats") is not None, "missing summary_stats on live beat"
 assert n["summary_stats"]["window_secs"] == 30
 logs_txt = json.dumps(st.get("logs", []))
-assert "nats://" not in logs_txt, "fake seeded NATS log found in live daemon state"
+assert "nats://" not in logs_txt, "fake seeded NATS log found in live node state"
 '
-echo "    7. Verified live /api/state reports real OS telemetry, 5s/30s summary stats, and non-synthetic logs"
+echo "    7. Verified live /api/state reports real stats, 5s/30s summaries, and non-synthetic logs"
+
+# 8. Old names stay accepted for one release (see goal.md "Commands and routes use the words")
+"$BIN" gen-password | grep -q '^dt-'
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers list | grep -q "$FAKE_PEER_ID"
+curl -fsS -X POST http://127.0.0.1:18794/api/artifacts/blob \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"bytes_base64\":\"$BLOB_B64\"}" | python3 -c 'import sys,json; assert json.load(sys.stdin)["digest"]=="'"$BLOB_DIGEST"'"'
+curl -fsS http://127.0.0.1:18794/api/gossip | python3 -c 'import sys,json; assert "nodes" in json.load(sys.stdin)'
+echo "    8. Verified old command and route names still work (gen-password, peers, /api/artifacts/blob, /api/gossip)"
 
 ci_cleanup
 trap - EXIT
