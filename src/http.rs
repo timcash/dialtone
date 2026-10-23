@@ -623,7 +623,6 @@ impl DaemonRuntimeState {
             role: mode.to_string(),
             mesh: "dialtone-iroh-gossip".to_string(),
             subjects: vec!["dialtone.iroh.heartbeat.v1".to_string()],
-            status_probe: None,
         }];
 
         let self_hb = DialtoneHeartbeat {
@@ -802,7 +801,6 @@ impl DaemonRuntimeState {
                 "dialtone/events.>".to_string(),
                 "dialtone/test.>".to_string(),
             ],
-            status_probe: None,
         }];
 
         let mut peer_heartbeats = Vec::new();

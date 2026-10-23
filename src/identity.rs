@@ -84,19 +84,6 @@ impl Default for IrohTransportConfig {
 }
 
 impl IrohTransportConfig {
-    pub fn lan_only() -> Self {
-        Self {
-            profile: "lan_only".to_string(),
-            dns_lookup: false,
-            local_discovery: true,
-            dht_lookup: false,
-            relay_mode: IrohRelayPolicy::Disabled,
-            relay_urls: Vec::new(),
-            exclude_tailnet: true,
-            quic_port: None,
-        }
-    }
-
     pub fn local_offline() -> Self {
         Self {
             profile: "local_offline".to_string(),

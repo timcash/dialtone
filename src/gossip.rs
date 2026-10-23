@@ -291,16 +291,6 @@ pub fn derive_channel_topic_id(channel: &str, password: &str) -> TopicId {
     derive_channel_keys_v2(channel, password).topic_id
 }
 
-/// Derive a 32-byte authentication subkey from `(channel, password)` via Argon2id v2.
-pub fn derive_channel_auth_key(channel: &str, password: &str) -> [u8; 32] {
-    derive_channel_keys_v2(channel, password).auth_key
-}
-
-/// Derive a 32-byte encryption subkey from `(channel, password)` via Argon2id v2.
-pub fn derive_channel_enc_key(channel: &str, password: &str) -> [u8; 32] {
-    derive_channel_keys_v2(channel, password).enc_key
-}
-
 /// Deterministically derive an `iroh-gossip` 32-byte `TopicId` from a password or `<channel>:<password>`.
 pub fn derive_topic_id_from_secret(secret: &str) -> TopicId {
     let trimmed = secret.trim();
@@ -394,22 +384,6 @@ pub fn is_allowed_peer_in_list(
     allowed_ids
         .iter()
         .any(|allowed| allowed.trim().eq_ignore_ascii_case(candidate))
-}
-
-/// Returns `true` if `endpoint_id` is permitted by the host's local `allowed_endpoint_ids`
-/// list in `~/.dialtone/config.json`. **Deny by default** when `allowed_endpoint_ids` is empty (Issue #3).
-pub fn is_allowed_main_fleet_peer(endpoint_id: &str) -> bool {
-    let cfg = load_mesh_config(&default_config_path());
-    is_allowed_peer_in_list(&cfg.allowed_endpoint_ids, endpoint_id, None)
-}
-
-/// Atomically add `endpoint_id` to `allowed_endpoint_ids` (and `seed_peers`) in `config_path` (Issue #3).
-pub fn allow_peer_in_config(
-    config_path: &Path,
-    endpoint_id: &str,
-    relay_url: Option<&str>,
-) -> Result<PersistentMeshConfig, String> {
-    allow_peer_in_config_with_addrs(config_path, endpoint_id, relay_url, &[])
 }
 
 /// Atomically add `endpoint_id` with optional relay URL and direct IP:port addresses to `config_path`.
@@ -656,34 +630,6 @@ pub fn redeem_invite_ticket(
         }
     }
     Ok(addr)
-}
-
-/// Parse a user-supplied channel password, `<channel>:<password>`, `iroh-gossip-v1:...` ticket,
-/// or `<password>@<ticket_or_endpoint_id>` into `(TopicId, channel_fingerprint, extra_peer_addrs)`.
-pub fn parse_secret_or_ticket(input: &str) -> (TopicId, String, Vec<EndpointAddr>) {
-    let trimmed = input.trim();
-    if let Ok(ticket) = GossipTicket::from_str(trimmed) {
-        let hex = crate::hex_encode(ticket.topic.as_bytes());
-        return (ticket.topic, format!("ch-{}", &hex[..12]), ticket.peers);
-    }
-    let mut extra_peers = Vec::new();
-    let secret_part = if let Some((sec, peer_part)) = trimmed.split_once('@') {
-        if let Ok(ticket) = GossipTicket::from_str(peer_part.trim()) {
-            extra_peers.extend(ticket.peers);
-        } else if let Ok(id) = peer_part.trim().parse::<iroh::EndpointId>() {
-            let mut addr = EndpointAddr::new(id);
-            if let Ok(relay_url) = "https://usw1-1.relay.n0.iroh.link./".parse::<iroh::RelayUrl>() {
-                addr = addr.with_relay_url(relay_url);
-            }
-            extra_peers.push(addr);
-        }
-        sec.trim()
-    } else {
-        trimmed
-    };
-    let topic = derive_topic_id_from_secret(secret_part);
-    let fp = secret_channel_fingerprint(secret_part);
-    (topic, fp, extra_peers)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1644,13 +1590,6 @@ pub fn compute_heartbeat_mac_with_key(
     crate::hex_encode(&digest)
 }
 
-/// Compute a 32-byte hex MAC authenticating `(channel, node, endpoint_id, counter, updated_at_unix)`
-/// using the secret `auth_key` derived from `(channel, password)`.
-pub fn compute_heartbeat_mac(hb: &DialtoneHeartbeat, channel: &str, password: &str) -> String {
-    let keys = derive_channel_keys_v2(channel, password);
-    compute_heartbeat_mac_with_key(hb, &keys.channel, &keys.auth_key)
-}
-
 /// Sign `DialtoneHeartbeat` in-place with `DerivedChannelKeys`.
 pub fn sign_heartbeat_with_keys(hb: &mut DialtoneHeartbeat, keys: &DerivedChannelKeys) {
     hb.channel_mac = Some(compute_heartbeat_mac_with_key(
@@ -1660,14 +1599,6 @@ pub fn sign_heartbeat_with_keys(hb: &mut DialtoneHeartbeat, keys: &DerivedChanne
     ));
 }
 
-/// Sign `DialtoneHeartbeat` in-place with the `(channel, password)` MAC.
-pub fn sign_heartbeat_with_password(hb: &mut DialtoneHeartbeat, channel: &str, password: &str) {
-    if !password.trim().is_empty() {
-        let keys = derive_channel_keys_v2(channel, password);
-        sign_heartbeat_with_keys(hb, &keys);
-    }
-}
-
 /// Verify in constant time that `DialtoneHeartbeat` carries a valid MAC for `keys`.
 pub fn verify_heartbeat_with_keys(hb: &DialtoneHeartbeat, keys: &DerivedChannelKeys) -> bool {
     let Some(ref provided_mac) = hb.channel_mac else {
@@ -1675,15 +1606,6 @@ pub fn verify_heartbeat_with_keys(hb: &DialtoneHeartbeat, keys: &DerivedChannelK
     };
     let expected_mac = compute_heartbeat_mac_with_key(hb, &keys.channel, &keys.auth_key);
     constant_time_eq(provided_mac.as_bytes(), expected_mac.as_bytes())
-}
-
-/// Verify in constant time that `DialtoneHeartbeat` carries a valid MAC for `(channel, password)`.
-pub fn verify_heartbeat_password(hb: &DialtoneHeartbeat, channel: &str, password: &str) -> bool {
-    if password.trim().is_empty() {
-        return false;
-    }
-    let keys = derive_channel_keys_v2(channel, password);
-    verify_heartbeat_with_keys(hb, &keys)
 }
 
 /// Encrypt and authenticate a `DialtoneHeartbeat` using **XChaCha20-Poly1305** with a random 24-byte
@@ -1939,7 +1861,6 @@ pub async fn verify_live_gossip_exchange(
             role: "controller".to_string(),
             mesh: "dialtone-iroh-gossip".to_string(),
             subjects: vec!["dialtone/events.>".to_string()],
-            status_probe: None,
         }],
         managed_processes: Vec::new(),
         iroh_transport: build_diagnostics(&config, &addr_a, None, &id_a.to_string()),
@@ -2100,7 +2021,7 @@ mod tests {
             env::temp_dir().join(format!("dialtone-peers-cmd-{}.json", std::process::id()));
         let _ = fs::remove_file(&cfg_path);
 
-        let after_allow = allow_peer_in_config(&cfg_path, &ep_a, None).unwrap();
+        let after_allow = allow_peer_in_config_with_addrs(&cfg_path, &ep_a, None, &[]).unwrap();
         assert!(is_allowed_peer_in_list(
             &after_allow.allowed_endpoint_ids,
             &ep_a,
