@@ -67,13 +67,15 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 ## Current Work
 
-1. **Now — Phase 1 security** (see roadmap): allowlist at the QUIC handshake, beats signed with each node's Key and
-   checked for replay, deploys only from allowlisted signers, no process `env` in beats, HUD XSS / token fixes.
-2. **Done — 2026-10-23: domain language.** Code, CLI, API, HUD, README, `ci.sh` and this file use the words above;
-   `domain-lint.sh` runs as `ci.sh` step 0b. Old CLI / route / env / config / beat names are still accepted (marked
-   `// compat`; `ci.sh` step 8 checks them) and can be dropped after one release.
-3. **Done — 2026-10-23:** cleanup tier A (384 dead lines removed). **2026-10-22:** authentic stats, Rtt, 5s / 30s
-   beats, H3 globe, blob / process FX (see §0).
+1. **Now — Phase 2 reliability** (see roadmap): release the node-state lock before IO, ctrl-c shutdown with process
+   groups / Job Objects, re-subscribe backoff, no `?` in the run loop, loud config parse errors, unknown stats as
+   `None`, peers keyed by NodeId with TTL pruning.
+2. **Done — 2026-10-23: Phase 1 security.** Allowlist enforced at the QUIC handshake (live-reloaded from
+   `config.json`), beats signed by each node's Key with replay protection (envelope v3; the old MAC is gone), no
+   process `env` / `args` in beats, mesh deploy only from allowlisted signers and providers, blob pulls over the
+   node's own endpoint, HUD served with a CSP nonce and no embedded token.
+3. **Done — 2026-10-23:** domain language (glossary above; `domain-lint.sh` in CI) and cleanup tier A.
+   **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
 
@@ -93,13 +95,13 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 ## Code Review (2026-10-23): Findings, Cleanup & Target Iroh Architecture
 
-### Critical findings (fix before anything else)
+### Critical findings (1-5 fixed 2026-10-23 in Phase 1; 6 is Phase 2)
 
-1. **The allowlist trusts a self-reported identity.** Received beats are checked against `rx_beat.node_id`, a field inside the payload (`main.rs` ~1683). iroh-gossip's `delivered_from` is the relaying neighbour, not the author, so any holder of the channel secret can claim an allowlisted node's id. The `Router` also accepts the gossip and blobs ALPNs from *any* `NodeId` (`main.rs` ~1005), and custom channels have no allowlist at all.
-2. **Channel secret ⇒ mesh-wide code execution.** A beat whose `processes[].env` contains `DIALTONE_MESH_DEPLOY=1` + `DIALTONE_BLOB_TICKET=…` makes every receiver pull, stage and run that binary (`main.rs` ~1800-1937). Combined with (1), the secret is the only security boundary. The guard `!already_running || insert(..)` is also inverted, so a non-running deploy is re-pulled on a new OS thread + new endpoint on *every* beat.
-3. **Beats broadcast every process `env`** (incl. blob tickets and any secret a process is given) to all peers.
-4. **HUD token theft via XSS.** The bearer token is templated into the unauthenticated `GET /` page, state JSON is injected into `<script>` without `<` escaping, and peer-supplied node names go into `innerHTML`. A channel member can name a node with markup and steal the token.
-5. **No replay protection.** `counter` is never checked and `updated_at_unix` is overwritten with local time, so captured frames replay as fresh.
+1. **The allowlist trusts a self-reported identity.** Received beats are checked against `rx_beat.node_id`, a field inside the payload (`main.rs` ~1683). iroh-gossip's `delivered_from` is the relaying neighbour, not the author, so any holder of the channel secret can claim an allowlisted node's id. The `Router` also accepts the gossip and blobs ALPNs from *any* `NodeId` (`main.rs` ~1005), and custom channels have no allowlist at all. — **Fixed:** an iroh `after_handshake` hook (`node::AllowlistHook`) closes any connection from a NodeId not on the live allowlist, for every protocol and channel; beats are signed with the sender's Key and verified against the `node_id` they claim.
+2. **Channel secret ⇒ mesh-wide code execution.** A beat whose `processes[].env` contains `DIALTONE_MESH_DEPLOY=1` + `DIALTONE_BLOB_TICKET=…` makes every receiver pull, stage and run that binary (`main.rs` ~1800-1937). Combined with (1), the secret is the only security boundary. The guard `!already_running || insert(..)` is also inverted, so a non-running deploy is re-pulled on a new OS thread + new endpoint on *every* beat. — **Fixed:** mesh deploy now needs a signed beat from an allowlisted node, an explicit `deploy_ticket` whose provider is allowlisted, never a peer's probe program, and pulls each (peer, digest) once.
+3. **Beats broadcast every process `env`** (incl. blob tickets and any secret a process is given) to all peers. — **Fixed:** `seal_beat` sends `mesh::process_advert` (no `env`, no `args`).
+4. **HUD token theft via XSS.** The bearer token is templated into the unauthenticated `GET /` page, state JSON is injected into `<script>` without `<` escaping, and peer-supplied node names go into `innerHTML`. A channel member can name a node with markup and steal the token. — **Fixed:** the page carries no token; a per-response CSP nonce lets only its own scripts run; embedded JSON is `<`-escaped; peer strings are scrubbed of markup characters; peer node names must be plain names.
+5. **No replay protection.** `counter` is never checked and `updated_at_unix` is overwritten with local time, so captured frames replay as fresh. — **Fixed:** every beat carries a strictly increasing `sent_unix_ms`; `mesh::ReplayGuard` drops anything not newer than the last beat from that node or more than 5 min from local time.
 6. **The mesh stalls behind HTTP.** One `std::sync::Mutex<NodeState>` is held while rendering/writing HTTP responses (2s write timeout), spawning processes, and pulling blobs (up to 15s); the gossip loop blocks on the same lock.
 
 ### Per-feature findings
@@ -147,7 +149,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 ### Roadmap
 
-1. **Phase 1 — Security (critical 1-5):** handshake allowlist hook + live allowlist, Ed25519-signed payloads with counter check, remove env-flag auto-deploy (gate behind signed `Deploy`), stop gossiping `env`, HUD escaping / `textContent` / no templated token.
+1. **Phase 1 — Security (critical 1-5) — done 2026-10-23:** handshake allowlist hook + live allowlist, Ed25519-signed payloads with counter check, remove env-flag auto-deploy (gate behind signed `Deploy`), stop gossiping `env`, HUD escaping / `textContent` / no templated token.
 2. **Phase 2 — Reliability:** release the state lock before IO, ctrl-c shutdown + child process groups, re-subscribe backoff, no `?` in the loop, config parse errors fail loudly, stats unknowns as `None`, peers keyed by `NodeId` with TTL pruning.
 3. **Phase 3 — Cleanup:** tiers A → B → C, fix or remove the HUD `/api/channel/*` buttons.
 4. **Phase 4 — Architecture:** actor split of `run_node`, FsStore + downloader, typed message enum + inventory-on-change, hyper/httparse server, HUD as static files with vendored JS.

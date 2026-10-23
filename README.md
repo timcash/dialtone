@@ -306,6 +306,14 @@ Or open **`http://127.0.0.1:8788`** in your browser to view the live 3D topology
 
 ## 4. Channel Security, Peer Allowlist & Control API Reference
 
+**How the mesh is protected**
+
+- **Allowlist at the handshake.** Every QUIC connection (gossip and blobs, in and out) is closed right after the TLS handshake unless the remote NodeId is on the allowlist. `dialtone allowlist add/remove` edits `~/.dialtone/config.json`; a running node picks the change up within 5 seconds, no restart.
+- **Signed beats.** Each beat is signed with the sender's Key and encrypted with the channel keys. A node drops beats whose signature does not match the NodeId they claim, beats from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
+- **No process secrets on the wire.** Beats list each process without its `env` or `args`.
+- **Deploys only from the allowlist.** A process offered for mesh deploy is pulled only from an allowlisted signer and an allowlisted blob provider, never a peer's probe program, and only once per (peer, digest). Blob pulls use the node's own endpoint, so the provider's allowlist decides.
+- **HUD.** The page carries no API token; a per-response Content-Security-Policy nonce lets only its own scripts run.
+
 ### Unlock & Join the `"dialtone"` Channel (`join` & `secret`)
 
 The `"dialtone"` channel (and any custom `--channel <name>`) is **secret-protected and end-to-end encrypted**:
