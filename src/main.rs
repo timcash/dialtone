@@ -821,6 +821,8 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     };
 
     let shared_state: Option<Arc<Mutex<DaemonRuntimeState>>> = if serve_http {
+        // Persist the requested address, not an auto-fallback port that was only free this boot.
+        let requested_listen = opts.listen.clone();
         let listener = bind_local_web_listener(&opts.listen, opts.listen_explicit)?;
         let bound_addr = listener.local_addr().map_err(|e| e.to_string())?;
         opts.listen = bound_addr.to_string();
@@ -862,13 +864,16 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
             format!("{active_channel}:locked-standby")
         };
         saved_cfg.node_name = Some(opts.node.clone());
-        saved_cfg.listen_addr = Some(opts.listen.clone());
+        saved_cfg.listen_addr = Some(requested_listen);
         saved_cfg.channel = active_channel.clone();
         saved_cfg.configured = has_mesh_credentials;
         saved_cfg.channel_fingerprint = fp;
         saved_cfg.bootstrap_tickets = opts.bootstrap_tickets.clone();
         saved_cfg.updated_at_unix = now_unix();
-        let _ = save_mesh_config(&config_path, &saved_cfg);
+        // `index` is a read-only dashboard preview: never overwrite the daemon's saved config.
+        if opts.action != "index" {
+            let _ = save_mesh_config(&config_path, &saved_cfg);
+        }
         runtime_state.mesh_config = saved_cfg.clone();
 
         for mut saved_proc in saved_cfg.managed_processes.clone() {
