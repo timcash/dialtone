@@ -1541,6 +1541,15 @@ pub struct NodeE2eTestReport {
     pub mesh_peers_seen: usize,
 }
 
+/// Per-node SHA-256 CAS blob store counters, gossiped so every HUD can see blob downloads land on peers.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeBlobStoreStats {
+    pub sha_blob_keys: u64,
+    pub sha_blob_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_sha256: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DialtoneHeartbeat {
     pub schema: String,
@@ -1569,6 +1578,8 @@ pub struct DialtoneHeartbeat {
     pub geo_location: Option<NodeGeoLocation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub e2e_test: Option<NodeE2eTestReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob_store: Option<NodeBlobStoreStats>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_mac: Option<String>,
     #[serde(default = "default_os")]
@@ -1936,6 +1947,7 @@ pub async fn verify_live_gossip_exchange(
         tailnet_used: false,
         geo_location: None,
         e2e_test: None,
+        blob_store: None,
     };
     sign_heartbeat_with_keys(&mut hb_a, &keys);
 
@@ -1987,6 +1999,7 @@ pub async fn verify_live_gossip_exchange(
         tailnet_used: false,
         geo_location: None,
         e2e_test: None,
+        blob_store: None,
     };
     sign_heartbeat_with_keys(&mut hb_b, &keys);
 
@@ -2164,6 +2177,7 @@ mod tests {
             tailnet_used: false,
             geo_location: None,
             e2e_test: None,
+            blob_store: None,
         };
 
         let wire_bytes = encrypt_heartbeat_for_gossip(&hb, &k1).unwrap();
@@ -2302,6 +2316,7 @@ mod tests {
             tailnet_used: false,
             geo_location: None,
             e2e_test: None,
+            blob_store: None,
         };
         let mut stale = fresh.clone();
         stale.node = "stale-peer".to_string();
@@ -2359,6 +2374,7 @@ mod tests {
             tailnet_used: false,
             geo_location: None,
             e2e_test: None,
+            blob_store: None,
         };
         let mut hb_b = hb_a.clone();
         hb_b.node = "node-beta".to_string();

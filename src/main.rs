@@ -26,13 +26,13 @@ use dialtone::gossip::{
     observe_peer_remote_addrs, parse_duration_secs, redeem_invite_ticket,
     resolve_fleet_node_locations, revoke_peer_in_config, save_mesh_config,
     sign_heartbeat_with_keys, spawn_background_public_ip_geo_probe, validate_channel_password,
-    DerivedChannelKeys, DialtoneHeartbeat, GossipTicket, MeshControlCommand, PeerRttEcho,
-    DEFAULT_CHANNEL_NAME, DIALTONE_HEARTBEAT_SCHEMA, HEARTBEAT_INTERVAL_SECS, INVITE_TICKET_PREFIX,
-    SUMMARY_HEARTBEAT_EVERY_N_TICKS, SUMMARY_HEARTBEAT_INTERVAL_SECS,
+    DerivedChannelKeys, DialtoneHeartbeat, GossipTicket, MeshControlCommand, NodeBlobStoreStats,
+    PeerRttEcho, DEFAULT_CHANNEL_NAME, DIALTONE_HEARTBEAT_SCHEMA, HEARTBEAT_INTERVAL_SECS,
+    INVITE_TICKET_PREFIX, SUMMARY_HEARTBEAT_EVERY_N_TICKS, SUMMARY_HEARTBEAT_INTERVAL_SECS,
 };
 use dialtone::http::{
-    default_boot_stages, load_or_create_api_token, serve_http_blocking,
-    validate_listen_addr_security, DaemonRuntimeState,
+    count_blob_cache_stats, default_boot_stages, latest_blob_sha256, load_or_create_api_token,
+    serve_http_blocking, validate_listen_addr_security, DaemonRuntimeState,
 };
 use dialtone::identity::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
@@ -567,6 +567,8 @@ fn build_self_heartbeat(
 ) -> DialtoneHeartbeat {
     let resources =
         sample_live_host_resources(node, diag.bound_non_tailnet_ipv4.as_deref(), counter);
+    let blob_dir = default_blob_cache_dir();
+    let (sha_blob_keys, sha_blob_bytes) = count_blob_cache_stats(&blob_dir);
     DialtoneHeartbeat {
         schema: DIALTONE_HEARTBEAT_SCHEMA.to_string(),
         node: node.to_string(),
@@ -594,6 +596,11 @@ fn build_self_heartbeat(
         tailnet_used: false,
         geo_location: cached_local_public_ip_geo(),
         e2e_test: None,
+        blob_store: Some(NodeBlobStoreStats {
+            sha_blob_keys: sha_blob_keys as u64,
+            sha_blob_bytes,
+            latest_sha256: latest_blob_sha256(&blob_dir),
+        }),
         channel_mac: None,
     }
 }

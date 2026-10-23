@@ -654,6 +654,7 @@ impl DaemonRuntimeState {
             tailnet_used: false,
             geo_location: cached_local_public_ip_geo(),
             e2e_test: None,
+            blob_store: None,
         };
 
         let mut installed_binaries = Vec::new();
@@ -842,6 +843,7 @@ impl DaemonRuntimeState {
                 tailnet_used: false,
                 geo_location: None,
                 e2e_test: None,
+                blob_store: None,
             });
         }
         let seeded_rtt = build_mesh_rtt_matrix(&peer_heartbeats);
@@ -2012,7 +2014,7 @@ fn handle_websocket_upgrade(
     stream.write_all(&frame).map_err(|e| e.to_string())
 }
 
-fn count_blob_cache_stats(blob_dir: &std::path::Path) -> (usize, u64) {
+pub fn count_blob_cache_stats(blob_dir: &std::path::Path) -> (usize, u64) {
     let mut keys = 0usize;
     let mut bytes = 0u64;
     if let Ok(top_entries) = fs::read_dir(blob_dir) {
@@ -2039,6 +2041,37 @@ fn count_blob_cache_stats(blob_dir: &std::path::Path) -> (usize, u64) {
         }
     }
     (keys, bytes)
+}
+
+/// SHA-256 digest (the CAS file name) of the most recently written blob in `blob_dir`, if any.
+pub fn latest_blob_sha256(blob_dir: &std::path::Path) -> Option<String> {
+    let is_digest = |name: &str| name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit());
+    let mut newest: Option<(std::time::SystemTime, String)> = None;
+    let mut consider = |entry: &fs::DirEntry| {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !is_digest(&name) {
+            return;
+        }
+        if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
+            if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
+                newest = Some((modified, name));
+            }
+        }
+    };
+    if let Ok(top_entries) = fs::read_dir(blob_dir) {
+        for entry in top_entries.flatten() {
+            match entry.file_type() {
+                Ok(ft) if ft.is_dir() => {
+                    if let Ok(sub_entries) = fs::read_dir(entry.path()) {
+                        sub_entries.flatten().for_each(|sub| consider(&sub));
+                    }
+                }
+                Ok(ft) if ft.is_file() => consider(&entry),
+                _ => {}
+            }
+        }
+    }
+    newest.map(|(_, name)| format!("sha256:{name}"))
 }
 
 fn render_dashboard_html(state: &DaemonRuntimeState, selected_peer: Option<&str>) -> String {
@@ -2101,6 +2134,7 @@ fn render_dashboard_html(state: &DaemonRuntimeState, selected_peer: Option<&str>
     --accent: #141414;
     --warn: #756f58;
     --red: #d42a20;
+    --blue: #1366d6;
     --panel-bg: rgba(245, 245, 245, 0.90);
     --menu-bg: rgba(235, 235, 235, 0.94);
     --sans: "Saira Variable", "Titillium Web", "Segoe UI", Arial, sans-serif;
@@ -2124,6 +2158,7 @@ fn render_dashboard_html(state: &DaemonRuntimeState, selected_peer: Option<&str>
     --accent: #f5f5f5;
     --warn: #b5ae92;
     --red: #ef4136;
+    --blue: #3d9bff;
     --panel-bg: rgba(17, 17, 17, 0.88);
     --menu-bg: rgba(17, 17, 17, 0.94);
   }
@@ -2785,6 +2820,7 @@ function readThemePalette() {
     accentHex: tok("--accent", "#f5f5f5"),
     warnHex: tok("--warn", "#b5ae92"),
     redHex: tok("--red", "#ef4136"),
+    blueHex: tok("--blue", "#3d9bff"),
     ground: new THREE.Color(tok("--ground", "#111111")),
     ink: new THREE.Color(tok("--ink", "#ececec")),
     ink2: new THREE.Color(tok("--ink-2", "#9c9c9c")),
@@ -2792,7 +2828,8 @@ function readThemePalette() {
     line2: new THREE.Color(tok("--line-2", "#2e2e2e")),
     accent: new THREE.Color(tok("--accent", "#f5f5f5")),
     warn: new THREE.Color(tok("--warn", "#b5ae92")),
-    red: new THREE.Color(tok("--red", "#ef4136"))
+    red: new THREE.Color(tok("--red", "#ef4136")),
+    blue: new THREE.Color(tok("--blue", "#3d9bff"))
   };
 }
 let palette = readThemePalette();
@@ -4051,6 +4088,390 @@ function rebuildGlobeNodesAndArcs(force = false) {
 }
 
 // ---------------------------------------------------------------------------
+// 6b. Live Event FX: SHA-256 blob downloads (ink particle stream into the node)
+//     & subprocess starts (blue H3 cell highlight + blue particle burst).
+//     Fired only from real state changes between gossip polls, or replayed from the
+//     focused node's real worker blob/PID during the BLB / PRC tour steps.
+// ---------------------------------------------------------------------------
+const fxGroup = new THREE.Group();
+globeSurface.add(fxGroup);
+const FX_MAX_ACTIVE = 24;
+const FX_MIN_GAP_MS = 1200;
+let activeFx = [];
+let fxLastFiredMs = new Map(); // `${kind}:${node}` -> ms
+let prevNodeFxState = null;    // node -> { blobKeys, shas, procs }
+let lastTourFxKey = "";
+let fxDotTexture = null;
+
+function getFxDotTexture() {
+  if (fxDotTexture) return fxDotTexture;
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = 64;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.35, "rgba(255,255,255,0.85)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  fxDotTexture = new THREE.CanvasTexture(c);
+  return fxDotTexture;
+}
+
+function fxBlending() {
+  return document.documentElement.dataset.theme === "light" ? THREE.NormalBlending : THREE.AdditiveBlending;
+}
+
+function shortSha(sha) {
+  return "sha256:" + String(sha || "").replace("sha256:", "").slice(0, 10);
+}
+
+// Tangent frame at a node: local +Y is the surface normal, so effects rise "up" off the globe
+function createNodeFxFrame(geo) {
+  const surface = latLngToSurfaceVector(geo.lat, geo.lng, GLOBE_RADIUS * 1.004);
+  const normal = surface.clone().normalize();
+  let east = new THREE.Vector3(0, 1, 0).cross(normal);
+  if (east.lengthSq() < 1e-4) east = new THREE.Vector3(1, 0, 0);
+  east.normalize();
+  const south = east.clone().cross(normal).normalize();
+  const frame = new THREE.Group();
+  frame.position.copy(surface);
+  frame.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, normal, south));
+  return frame;
+}
+
+function createFxPoints(count, color, sizePx) {
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  const mat = new THREE.PointsMaterial({
+    color,
+    size: sizePx,
+    sizeAttenuation: false,
+    map: getFxDotTexture(),
+    transparent: true,
+    depthWrite: false,
+    blending: fxBlending()
+  });
+  const pts = new THREE.Points(geom, mat);
+  pts.frustumCulled = false;
+  return pts;
+}
+
+function createFxRing(radius, segments, color) {
+  const pts = [];
+  for (let i = 0; i <= segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    pts.push(new THREE.Vector3(Math.cos(a) * radius, 0.004, Math.sin(a) * radius));
+  }
+  return new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false })
+  );
+}
+
+function createFxBeam(height, color) {
+  return new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, height, 0)]),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false })
+  );
+}
+
+// Event tag sized to its text (createMicroTagSprite's fixed canvas clips long process names)
+function createFxTag(text, colorHex) {
+  const font = "700 32px 'B612 Mono', 'JetBrains Mono', ui-monospace, monospace";
+  const canvas = document.createElement("canvas");
+  const measure = canvas.getContext("2d");
+  measure.font = font;
+  canvas.width = Math.ceil(measure.measureText(text).width) + 32;
+  canvas.height = 72;
+  const ctx = canvas.getContext("2d");
+  ctx.shadowColor = "rgba(0, 0, 0, 0.96)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = colorHex;
+  ctx.font = font;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.fillText(text, canvas.width / 2, 36);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false }));
+  const h = 0.11;
+  tag.scale.set(h * canvas.width / canvas.height, h, 1);
+  tag.renderOrder = 19;
+  return tag;
+}
+
+function disposeFxObject(obj) {
+  obj.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) {
+      if (o.material.map && o.material.map !== fxDotTexture) o.material.map.dispose();
+      o.material.dispose();
+    }
+  });
+}
+
+function canFireFx(kind, node, nowMs) {
+  const key = `${kind}:${node}`;
+  if (nowMs - (fxLastFiredMs.get(key) || 0) < FX_MIN_GAP_MS) return false;
+  fxLastFiredMs.set(key, nowMs);
+  return true;
+}
+
+function pushFx(fx) {
+  console.info(`[dialtone fx] ${fx.kind} @ ${fx.node}: ${fx.label}`);
+  while (activeFx.length >= FX_MAX_ACTIVE) {
+    const old = activeFx.shift();
+    old.objects.forEach(o => { fxGroup.remove(o); disposeFxObject(o); });
+  }
+  fx.objects.forEach(o => fxGroup.add(o));
+  activeFx.push(fx);
+}
+
+// Blob download into the node's SHA-256 CAS: ink particles stream down and converge into the node,
+// a hexagonal "hash lock" ring closes on it, and a BLB tag names the stored digest.
+function spawnBlobDownloadFx(nodeName, label, nowMs = performance.now()) {
+  const sv = siteVisuals.find(s => s.node === nodeName);
+  if (!sv || !canFireFx("blob", nodeName, nowMs)) return;
+  const inkCol = palette.accent.clone();
+  const frame = createNodeFxFrame(sv.geo);
+
+  const N = 84;
+  const seeds = [];
+  for (let i = 0; i < N; i++) {
+    seeds.push({
+      h0: 0.5 + Math.random() * 0.55,
+      r0: 0.1 + Math.random() * 0.32,
+      a: Math.random() * Math.PI * 2,
+      delay: Math.random() * 1.1,
+      fall: 0.65 + Math.random() * 0.45
+    });
+  }
+  const stream = createFxPoints(N, inkCol, 5);
+  const hexRing = createFxRing(0.45, 6, inkCol);
+  const beam = createFxBeam(1.05, inkCol);
+  const tag = createFxTag(`BLB ↓ ${label}`, palette.accentHex);
+  // Offset toward screen-north (-south) so the tag stays readable from the overhead tour camera
+  tag.position.set(0, 0.5, -0.62);
+  frame.add(stream, hexRing, beam, tag);
+
+  const dur = 3.4;
+  pushFx({
+    kind: "blob",
+    node: nodeName,
+    label: `BLB ${label}`,
+    startMs: nowMs,
+    dur,
+    frame,
+    objects: [frame],
+    update(t) {
+      const pos = stream.geometry.attributes.position.array;
+      for (let i = 0; i < N; i++) {
+        const s = seeds[i];
+        const p = clamp01((t - s.delay) / s.fall);
+        const e = p * p; // accelerate into the node like a payload landing
+        const r = s.r0 * (1 - e);
+        pos[i * 3] = Math.cos(s.a + p * 1.4) * r;
+        pos[i * 3 + 1] = t < s.delay ? -10 : s.h0 * (1 - e);
+        pos[i * 3 + 2] = Math.sin(s.a + p * 1.4) * r;
+      }
+      stream.geometry.attributes.position.needsUpdate = true;
+      const fadeOut = 1 - clamp01((t - (dur - 0.7)) / 0.7);
+      stream.material.opacity = 0.95 * fadeOut;
+      beam.material.opacity = 0.35 * clamp01(t / 0.25) * fadeOut;
+      const lockP = clamp01((t - 0.9) / 1.3);
+      const ringS = 1.0 - 0.72 * easeInOutCubic(lockP);
+      hexRing.scale.set(ringS, 1, ringS);
+      hexRing.rotation.y = lockP * Math.PI / 3;
+      hexRing.material.opacity = 0.9 * clamp01(t / 0.3) * fadeOut;
+      tag.material.opacity = clamp01(t / 0.3) * fadeOut;
+    }
+  });
+}
+
+// Subprocess start: the node's H3 cell lights up blue, a blue particle burst erupts from the node,
+// two rings ripple outward, and a PRC tag names the process and its PID.
+function spawnSubprocessStartFx(nodeName, procName, pid, nowMs = performance.now()) {
+  const sv = siteVisuals.find(s => s.node === nodeName);
+  if (!sv || !canFireFx("spawn", nodeName, nowMs)) return;
+  const blue = palette.blue.clone();
+  const frame = createNodeFxFrame(sv.geo);
+  const objects = [frame];
+
+  // Blue highlight of the node's H3 cell plus a fainter 2-ring disk so it reads at globe zoom
+  let cellFill = null;
+  let cellOutline = null;
+  let ringFill = null;
+  let ringOutline = null;
+  try {
+    const center = latLngToCell(sv.geo.lat, sv.geo.lng, 3);
+    const cellGeom = createLandGeometry(GLOBE_RADIUS * 1.0036, [center]);
+    const ringGeom = createLandGeometry(GLOBE_RADIUS * 1.0034, gridDisk(center, 2).filter(c => c !== center));
+    cellFill = new THREE.Mesh(
+      cellGeom.surface,
+      new THREE.MeshBasicMaterial({ color: blue, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false })
+    );
+    cellOutline = new THREE.LineSegments(
+      cellGeom.outlines,
+      new THREE.LineBasicMaterial({ color: blue, transparent: true, opacity: 0, depthWrite: false })
+    );
+    ringFill = new THREE.Mesh(
+      ringGeom.surface,
+      new THREE.MeshBasicMaterial({ color: blue, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false })
+    );
+    ringOutline = new THREE.LineSegments(
+      ringGeom.outlines,
+      new THREE.LineBasicMaterial({ color: blue, transparent: true, opacity: 0, depthWrite: false })
+    );
+    objects.push(ringFill, ringOutline, cellFill, cellOutline);
+  } catch (_) {}
+
+  const N = 110;
+  const seeds = [];
+  for (let i = 0; i < N; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const spread = 0.25 + Math.random() * 0.75;
+    const v = new THREE.Vector3(Math.cos(a) * spread, 0.55 + Math.random() * 1.0, Math.sin(a) * spread)
+      .normalize()
+      .multiplyScalar(0.45 + Math.random() * 0.75);
+    seeds.push({ v, delay: Math.random() * 0.35, life: 1.4 + Math.random() * 1.1 });
+  }
+  const burst = createFxPoints(N, blue, 5);
+  const ringA = createFxRing(0.06, 48, blue);
+  const ringB = createFxRing(0.06, 48, blue);
+  const beam = createFxBeam(0.85, blue);
+  const tag = createFxTag(`PRC ▶ ${procName} PID ${pid}`, palette.blueHex);
+  tag.position.set(0, 0.4, -0.62);
+  frame.add(burst, ringA, ringB, beam, tag);
+
+  const dur = 4.2;
+  const drag = 2.2;
+  pushFx({
+    kind: "spawn",
+    node: nodeName,
+    label: `${procName} PID ${pid}`,
+    startMs: nowMs,
+    dur,
+    frame,
+    objects,
+    update(t) {
+      const pos = burst.geometry.attributes.position.array;
+      for (let i = 0; i < N; i++) {
+        const s = seeds[i];
+        const lt = t - s.delay;
+        if (lt < 0 || lt > s.life) {
+          pos[i * 3 + 1] = -10;
+          continue;
+        }
+        const travel = (1 - Math.exp(-drag * lt)) / drag; // decelerating sparks
+        pos[i * 3] = s.v.x * travel;
+        pos[i * 3 + 1] = s.v.y * travel;
+        pos[i * 3 + 2] = s.v.z * travel;
+      }
+      burst.geometry.attributes.position.needsUpdate = true;
+      const fadeOut = 1 - clamp01((t - (dur - 0.9)) / 0.9);
+      burst.material.opacity = fadeOut;
+      [[ringA, 0.0], [ringB, 0.38]].forEach(([ring, off]) => {
+        const p = clamp01((t - off) / 1.5);
+        const s = 1 + p * 9;
+        ring.scale.set(s, 1, s);
+        ring.material.opacity = t < off ? 0 : 0.9 * (1 - p);
+      });
+      beam.material.opacity = 0.8 * (1 - clamp01(t / 1.2));
+      tag.material.opacity = clamp01(t / 0.3) * fadeOut;
+      if (cellFill) {
+        const pulse = 0.65 + 0.35 * Math.cos(t * 6.0);
+        const fadeIn = clamp01(t / 0.2);
+        cellFill.material.opacity = 0.55 * pulse * fadeOut * fadeIn;
+        cellOutline.material.opacity = 0.95 * fadeOut * fadeIn;
+        // Surrounding disk lights up as the ripple passes over it
+        const ringIn = clamp01((t - 0.15) / 0.4) * fadeOut;
+        ringFill.material.opacity = 0.28 * ringIn;
+        ringOutline.material.opacity = 0.7 * ringIn;
+      }
+    }
+  });
+}
+
+function updateLiveFx(nowMs, fxScale) {
+  activeFx = activeFx.filter(fx => {
+    const t = (nowMs - fx.startMs) / 1000;
+    if (t > fx.dur) {
+      fx.objects.forEach(o => { fxGroup.remove(o); disposeFxObject(o); });
+      return false;
+    }
+    fx.frame.scale.setScalar(fxScale);
+    fx.update(t);
+    return true;
+  });
+}
+
+function snapshotNodeFxState(n) {
+  const procs = new Map();
+  const shas = new Set();
+  for (const p of (n.managed_processes || n.supervised_processes || [])) {
+    if (!p || !p.name) continue;
+    if (p.sha256) shas.add(p.sha256);
+    procs.set(p.name, { pid: p.pid || null, status: p.status || "" });
+  }
+  const e2e = n.e2e_test || {};
+  if (e2e.worker_sha256) shas.add(e2e.worker_sha256);
+  const bs = n.blob_store || {};
+  return {
+    blobKeys: Number.isFinite(bs.sha_blob_keys) ? bs.sha_blob_keys : null,
+    latestSha: bs.latest_sha256 || "",
+    shas,
+    procs
+  };
+}
+
+// Diff consecutive gossip snapshots per node and fire FX for real blob downloads & subprocess starts
+function detectNodeFxEvents(nodes, fire = true) {
+  const next = new Map();
+  for (const n of nodes) next.set(n.node, snapshotNodeFxState(n));
+  if (prevNodeFxState && fire) {
+    for (const n of nodes) {
+      const cur = next.get(n.node);
+      const prev = prevNodeFxState.get(n.node);
+      if (!prev) continue; // first sighting of this node: nothing to diff against yet
+      const newShas = [...cur.shas].filter(s => !prev.shas.has(s));
+      const keyDelta = cur.blobKeys != null && prev.blobKeys != null ? cur.blobKeys - prev.blobKeys : 0;
+      const latestChanged = cur.latestSha && cur.latestSha !== prev.latestSha;
+      if (newShas.length > 0 || keyDelta > 0) {
+        const label = newShas.length > 0
+          ? shortSha(newShas[0])
+          : (latestChanged ? shortSha(cur.latestSha) : `+${keyDelta} BLOB${keyDelta === 1 ? "" : "S"}`);
+        spawnBlobDownloadFx(n.node, label);
+      }
+      for (const [name, p] of cur.procs) {
+        const before = prev.procs.get(name);
+        if (p.status === "running" && p.pid && (!before || before.pid !== p.pid)) {
+          spawnSubprocessStartFx(n.node, name, p.pid);
+        }
+      }
+    }
+  }
+  prevNodeFxState = next;
+}
+
+// BLB / PRC tour steps replay the focused node's real worker blob digest and running PID
+function replayTourStepFx(stepIdx, nodeName) {
+  const n = (meshState.nodes || []).find(x => x.node === nodeName);
+  if (!n) return;
+  const procs = n.managed_processes || n.supervised_processes || [];
+  const e2e = n.e2e_test || {};
+  const running = procs.find(p => p && p.status === "running" && p.pid) || null;
+  if (stepIdx === 1) {
+    const sha = e2e.worker_sha256 || (running && running.sha256) || "";
+    if (sha) spawnBlobDownloadFx(nodeName, shortSha(sha));
+  } else if (stepIdx === 2 && running) {
+    spawnSubprocessStartFx(nodeName, running.name, running.pid);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 7. Overhead Geospatial Camera & Endless Tour Loop
 // ---------------------------------------------------------------------------
 const raycaster = new THREE.Raycaster();
@@ -5074,6 +5495,15 @@ function renderFrame(nowMs) {
     }
   });
 
+  // Replay real blob / subprocess FX for the focused node whenever the tour lands on BLB or PRC
+  const tourFxKey = `${activeTourStep}|${selectedNode}|${lastTourSwitchMs}`;
+  if (tourFxKey !== lastTourFxKey) {
+    lastTourFxKey = tourFxKey;
+    replayTourStepFx(activeTourStep, selectedNode);
+  }
+  // Live event FX keep a roughly constant on-screen size across zoom layers
+  updateLiveFx(nowMs, Math.max(0.3, Math.min(1.15, surfaceDist / 5.0)));
+
   // Animate QUIC packets along great-circle arcs (scaled by zoomInvariantDotScale so they are always small in every zoom)
   for (const av of arcVisuals) {
     const baseSpeed = Math.max(0.22, Math.min(1.1, 14.0 / Math.max(4.0, av.rtt))) * cfgPacketSpeed;
@@ -5106,6 +5536,7 @@ async function pollGossipState() {
         syncMenuControls();
       }
     }
+    detectNodeFxEvents(meshState.nodes || []);
   } catch (_) {}
 }
 
@@ -5117,6 +5548,7 @@ if (tourStops.length > 0) {
 } else {
   renderTopShellTelemetry();
 }
+detectNodeFxEvents(meshState.nodes || [], false);
 requestAnimationFrame(renderFrame);
 setInterval(pollGossipState, 1500);
 </script>
@@ -5286,6 +5718,37 @@ mod tests {
     use iroh::{EndpointAddr, SecretKey};
     use std::env;
     use std::thread;
+
+    #[test]
+    fn latest_blob_sha256_picks_newest_digest_and_ignores_non_digest_files() {
+        let dir = env::temp_dir().join(format!("dialtone-latest-blob-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(latest_blob_sha256(&dir), None);
+
+        let older = "a".repeat(64);
+        let newer = "b".repeat(64);
+        fs::create_dir_all(dir.join("aa")).unwrap();
+        fs::create_dir_all(dir.join("bb")).unwrap();
+        fs::write(dir.join("aa").join(&older), b"old").unwrap();
+        fs::write(dir.join("bb").join(&newer), b"new").unwrap();
+        fs::write(dir.join("notes.txt"), b"not a blob").unwrap();
+
+        let base = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let set_mtime = |path: std::path::PathBuf, t: std::time::SystemTime| {
+            fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(t)
+                .unwrap();
+        };
+        set_mtime(dir.join("aa").join(&older), base);
+        set_mtime(dir.join("bb").join(&newer), base + Duration::from_secs(60));
+        set_mtime(dir.join("notes.txt"), base + Duration::from_secs(120));
+
+        assert_eq!(latest_blob_sha256(&dir), Some(format!("sha256:{newer}")));
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn http_and_websocket_server_serves_ui_state_blobs_catalogs_and_ws_upgrade() {
