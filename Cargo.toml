@@ -28,4 +28,11 @@ iroh-mdns-address-lookup = { version = "0.6.0", default-features = false }
 serde = { version = "1", default-features = false, features = ["std", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 sha2 = { version = "0.11", default-features = false }
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "time", "net", "io-util", "signal"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2.190", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+

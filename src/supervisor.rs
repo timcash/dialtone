@@ -501,16 +501,192 @@ pub fn ensure_probe_program(
     Ok(spec)
 }
 
+/// A running process and, on Windows, the Job Object that owns its whole process tree.
 #[derive(Debug)]
 struct SupervisedChild {
     child: Child,
     path: String,
     digest: String,
+    #[cfg(windows)]
+    job: Option<tree::Job>,
+}
+
+/// OS process-tree control. Every process runs as the root of its own tree so the supervisor
+/// can stop it *with* everything it started:
+/// - Unix: the process leads a new process group; stopping signals the whole group
+///   (SIGTERM, then SIGKILL after a grace period).
+/// - Windows: the process is put in its own Job Object with kill-on-close; stopping
+///   terminates the job, and if the node dies the OS closes the handle and kills the tree.
+mod tree {
+    use std::process::{Child, Command};
+    use std::time::{Duration, Instant};
+
+    pub const STOP_GRACE: Duration = Duration::from_millis(1500);
+
+    #[cfg(unix)]
+    pub fn isolate(cmd: &mut Command) {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
+    #[cfg(not(unix))]
+    pub fn isolate(_cmd: &mut Command) {}
+
+    #[cfg(unix)]
+    pub fn signal_group(pgid: u32, sig: libc::c_int) {
+        // SAFETY: killpg only sends a signal; an already-gone group returns ESRCH.
+        unsafe {
+            libc::killpg(pgid as libc::pid_t, sig);
+        }
+    }
+
+    fn wait_up_to(child: &mut Child, limit: Duration) -> bool {
+        let started = Instant::now();
+        while started.elapsed() < limit {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        false
+    }
+
+    /// Stop a process and every process it started, then reap it.
+    #[cfg(unix)]
+    pub fn stop(child: &mut Child) {
+        let pgid = child.id();
+        signal_group(pgid, libc::SIGTERM);
+        wait_up_to(child, STOP_GRACE);
+        // Anything still in the group (including grandchildren) is killed outright.
+        signal_group(pgid, libc::SIGKILL);
+        let _ = child.wait();
+    }
+
+    #[cfg(windows)]
+    pub fn stop(child: &mut Child, job: Option<&Job>) {
+        match job {
+            Some(job) => job.terminate(),
+            None => {
+                let _ = child.kill();
+            }
+        }
+        wait_up_to(child, STOP_GRACE);
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(windows)]
+    #[derive(Debug)]
+    pub struct Job(windows_sys::Win32::Foundation::HANDLE);
+
+    // SAFETY: a Job Object handle may be used and closed from any thread.
+    #[cfg(windows)]
+    unsafe impl Send for Job {}
+
+    #[cfg(windows)]
+    impl Job {
+        /// Create a kill-on-close job and put `child` in it.
+        pub fn adopt(child: &Child) -> Option<Job> {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::System::JobObjects::{
+                AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+                SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            };
+            // SAFETY: plain Win32 calls with valid arguments; the handle is owned by `Job`.
+            unsafe {
+                let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if handle.is_null() {
+                    return None;
+                }
+                let job = Job(handle);
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                let ok = SetInformationJobObject(
+                    job.0,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const core::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                );
+                if ok == 0 || AssignProcessToJobObject(job.0, child.as_raw_handle() as _) == 0 {
+                    return None;
+                }
+                Some(job)
+            }
+        }
+
+        pub fn terminate(&self) {
+            // SAFETY: the handle is a live job handle owned by self.
+            unsafe {
+                windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1);
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for Job {
+        fn drop(&mut self) {
+            // SAFETY: closing the handle we own; kill-on-close then ends any remaining tree.
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.0);
+            }
+        }
+    }
+}
+
+/// File in a node's `run/` directory listing the process groups it started, so a node that
+/// was killed without a chance to stop them can clean them up at its next boot (Unix).
+const CHILDREN_FILE: &str = "children.json";
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ChildRecord {
+    name: String,
+    pid: u32,
+    path: String,
+}
+
+fn run_dir_of(spec_path: &str) -> Option<PathBuf> {
+    Path::new(spec_path).parent().map(Path::to_path_buf)
+}
+
+/// Kill process trees left behind by a previous run of this node (it was SIGKILLed or crashed
+/// before it could stop them). Only processes whose command still runs a program from
+/// `run_dir` are touched, so a recycled PID is never signalled. Returns how many were stopped.
+#[cfg(unix)]
+pub fn reap_stale_processes(run_dir: &Path) -> usize {
+    let file = run_dir.join(CHILDREN_FILE);
+    let Ok(raw) = fs::read_to_string(&file) else {
+        return 0;
+    };
+    let records: Vec<ChildRecord> = serde_json::from_str(&raw).unwrap_or_default();
+    let run_dir_str = run_dir.to_string_lossy().to_string();
+    let mut stopped = 0;
+    for rec in records {
+        let cmd = Command::new("ps")
+            .args(["-o", "command=", "-p", &rec.pid.to_string()])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        if !cmd.trim().is_empty() && cmd.contains(&run_dir_str) {
+            tree::signal_group(rec.pid, libc::SIGKILL);
+            stopped += 1;
+        }
+    }
+    let _ = fs::remove_file(&file);
+    stopped
+}
+
+/// Windows needs no reaping: each process tree is in a kill-on-close Job Object.
+#[cfg(not(unix))]
+pub fn reap_stale_processes(_run_dir: &Path) -> usize {
+    0
 }
 
 #[derive(Debug)]
 pub struct Supervisor {
     children: HashMap<String, SupervisedChild>,
+    /// Every `run/` directory a process was started from (where `children.json` lives).
+    run_dirs: std::collections::HashSet<PathBuf>,
 }
 
 impl Default for Supervisor {
@@ -523,83 +699,86 @@ impl Supervisor {
     pub fn new() -> Self {
         Self {
             children: HashMap::new(),
+            run_dirs: std::collections::HashSet::new(),
         }
     }
 
+    fn stop_entry(entry: &mut SupervisedChild) {
+        #[cfg(unix)]
+        tree::stop(&mut entry.child);
+        #[cfg(windows)]
+        tree::stop(&mut entry.child, entry.job.as_ref());
+    }
+
+    /// Record the running process trees in each `run/` directory (see `reap_stale_processes`).
+    fn write_children_files(&self) {
+        let mut by_dir: HashMap<PathBuf, Vec<ChildRecord>> = self
+            .run_dirs
+            .iter()
+            .map(|d| (d.clone(), Vec::new()))
+            .collect();
+        for (name, entry) in &self.children {
+            if let Some(dir) = run_dir_of(&entry.path) {
+                by_dir.entry(dir).or_default().push(ChildRecord {
+                    name: name.clone(),
+                    pid: entry.child.id(),
+                    path: entry.path.clone(),
+                });
+            }
+        }
+        for (dir, records) in by_dir {
+            let file = dir.join(CHILDREN_FILE);
+            if records.is_empty() {
+                let _ = fs::remove_file(file);
+            } else if let Ok(json) = serde_json::to_vec_pretty(&records) {
+                let _ = fs::write(file, json);
+            }
+        }
+    }
+
+    /// Bring every process to its desired state. A process that fails to start is marked
+    /// `failed: <reason>` and the others are still reconciled.
     pub fn reconcile(&mut self, specs: &mut [ProcessSpec]) -> Result<(), String> {
+        let before: Vec<u32> = self.children.values().map(|c| c.child.id()).collect();
+        let mut failures = Vec::new();
         for spec in specs.iter_mut() {
             if spec.desired_state == "running" {
                 let mut needs_spawn = true;
                 if let Some(entry) = self.children.get_mut(&spec.name) {
                     if entry.path != spec.path || entry.digest != spec.digest {
-                        let _ = entry.child.kill();
-                        let _ = entry.child.wait();
+                        Self::stop_entry(entry);
                         self.children.remove(&spec.name);
-                    } else if entry.child.try_wait().map_err(|e| e.to_string())?.is_none() {
+                    } else if matches!(entry.child.try_wait(), Ok(None)) {
                         spec.pid = Some(entry.child.id());
                         spec.status = Some("running".to_string());
                         needs_spawn = false;
                     } else {
                         spec.restart_count = spec.restart_count.saturating_add(1);
-                        self.children.remove(&spec.name);
+                        if let Some(mut gone) = self.children.remove(&spec.name) {
+                            // The process exited; take down anything it left in its tree.
+                            Self::stop_entry(&mut gone);
+                        }
                     }
                 }
                 if needs_spawn {
-                    #[cfg(unix)]
-                    let mut cmd = {
-                        let header = fs::read(&spec.path).unwrap_or_default();
-                        if header.starts_with(b":;") {
-                            let mut c = Command::new("/bin/sh");
-                            c.arg(&spec.path).args(&spec.args);
-                            c
-                        } else {
-                            let mut c = Command::new(&spec.path);
-                            c.args(&spec.args);
-                            c
+                    match Self::spawn(spec) {
+                        Ok(entry) => {
+                            if let Some(dir) = run_dir_of(&entry.path) {
+                                self.run_dirs.insert(dir);
+                            }
+                            spec.pid = Some(entry.child.id());
+                            spec.status = Some("running".to_string());
+                            self.children.insert(spec.name.clone(), entry);
                         }
-                    };
-                    #[cfg(not(unix))]
-                    let mut cmd = {
-                        let mut c = Command::new(&spec.path);
-                        c.args(&spec.args);
-                        c
-                    };
-                    cmd.stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null());
-                    if let Ok(exe_path) = std::env::current_exe() {
-                        cmd.env("APP_BIN", exe_path);
-                    }
-                    for kv in &spec.env {
-                        if kv.starts_with("DIALTONE_") || kv.starts_with("DAEMON_V1_") {
-                            continue;
-                        }
-                        if let Some((k, v)) = kv.split_once('=') {
-                            cmd.env(k.trim(), v);
+                        Err(err) => {
+                            spec.pid = None;
+                            spec.status = Some(format!("failed: {err}"));
+                            failures.push(err);
                         }
                     }
-                    if let Some(ref cwd) = spec.cwd {
-                        if !cwd.trim().is_empty() {
-                            cmd.current_dir(cwd);
-                        }
-                    }
-                    let child = cmd
-                        .spawn()
-                        .map_err(|e| format!("spawn process {}: {e}", spec.name))?;
-                    spec.pid = Some(child.id());
-                    spec.status = Some("running".to_string());
-                    self.children.insert(
-                        spec.name.clone(),
-                        SupervisedChild {
-                            child,
-                            path: spec.path.clone(),
-                            digest: spec.digest.clone(),
-                        },
-                    );
                 }
             } else if let Some(mut entry) = self.children.remove(&spec.name) {
-                let _ = entry.child.kill();
-                let _ = entry.child.wait();
+                Self::stop_entry(&mut entry);
                 spec.pid = None;
                 spec.status = Some("stopped".to_string());
             } else {
@@ -607,24 +786,86 @@ impl Supervisor {
                 spec.status = Some("stopped".to_string());
             }
         }
-        Ok(())
+        let after: Vec<u32> = self.children.values().map(|c| c.child.id()).collect();
+        if before != after {
+            self.write_children_files();
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
+    }
+
+    fn spawn(spec: &ProcessSpec) -> Result<SupervisedChild, String> {
+        #[cfg(unix)]
+        let mut cmd = {
+            let header = fs::read(&spec.path).unwrap_or_default();
+            if header.starts_with(b":;") {
+                let mut c = Command::new("/bin/sh");
+                c.arg(&spec.path).args(&spec.args);
+                c
+            } else {
+                let mut c = Command::new(&spec.path);
+                c.args(&spec.args);
+                c
+            }
+        };
+        #[cfg(not(unix))]
+        let mut cmd = {
+            let mut c = Command::new(&spec.path);
+            c.args(&spec.args);
+            c
+        };
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        tree::isolate(&mut cmd);
+        if let Ok(exe_path) = std::env::current_exe() {
+            cmd.env("APP_BIN", exe_path);
+        }
+        for kv in &spec.env {
+            if kv.starts_with("DIALTONE_") || kv.starts_with("DAEMON_V1_") {
+                continue;
+            }
+            if let Some((k, v)) = kv.split_once('=') {
+                cmd.env(k.trim(), v);
+            }
+        }
+        if let Some(ref cwd) = spec.cwd {
+            if !cwd.trim().is_empty() {
+                cmd.current_dir(cwd);
+            }
+        }
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("spawn process {}: {e}", spec.name))?;
+        #[cfg(windows)]
+        let job = tree::Job::adopt(&child);
+        Ok(SupervisedChild {
+            child,
+            path: spec.path.clone(),
+            digest: spec.digest.clone(),
+            #[cfg(windows)]
+            job,
+        })
     }
 
     pub fn kill_child(&mut self, name: &str) -> bool {
         if let Some(entry) = self.children.get_mut(name) {
-            let _ = entry.child.kill();
-            let _ = entry.child.wait();
+            Self::stop_entry(entry);
             true
         } else {
             false
         }
     }
 
+    /// Stop every process tree (node shutdown).
     pub fn shutdown_all(&mut self) {
         for (_, mut entry) in self.children.drain() {
-            let _ = entry.child.kill();
-            let _ = entry.child.wait();
+            Self::stop_entry(&mut entry);
         }
+        self.write_children_files();
     }
 }
 
@@ -639,6 +880,98 @@ mod tests {
     use super::*;
     use crate::blob::put_blob;
     use std::env;
+
+    /// Writes a shell program into `dir/run/` that starts a background grandchild, records its
+    /// pid in `dir/grandchild.pid`, and waits.
+    #[cfg(unix)]
+    fn tree_spec(dir: &Path, name: &str) -> ProcessSpec {
+        let run = dir.join("run");
+        fs::create_dir_all(&run).unwrap();
+        let path = run.join(format!("{name}.sh"));
+        let pid_file = dir.join("grandchild.pid");
+        fs::write(
+            &path,
+            format!(":; sleep 60 & echo $! > {}; wait\n", pid_file.display()),
+        )
+        .unwrap();
+        ProcessSpec {
+            name: name.to_string(),
+            path: path.to_string_lossy().to_string(),
+            digest: "sha256:test".to_string(),
+            desired_state: "running".to_string(),
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+            startup_grace_secs: None,
+            status: None,
+            pid: None,
+            restart_count: 0,
+            service_unit: None,
+            deploy_ticket: None,
+        }
+    }
+
+    #[cfg(unix)]
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 only checks that the process exists.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[cfg(unix)]
+    fn wait_for_grandchild(dir: &Path) -> i32 {
+        for _ in 0..100 {
+            if let Ok(raw) = fs::read_to_string(dir.join("grandchild.pid")) {
+                if let Ok(pid) = raw.trim().parse() {
+                    return pid;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("grandchild never started");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_a_process_stops_everything_it_started() {
+        let dir = env::temp_dir().join(format!("dialtone-tree-stop-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut spec = tree_spec(&dir, "tree");
+        let mut sup = Supervisor::new();
+        sup.reconcile(std::slice::from_mut(&mut spec)).unwrap();
+        let grandchild = wait_for_grandchild(&dir);
+        assert!(alive(grandchild));
+
+        spec.desired_state = "stopped".to_string();
+        sup.reconcile(std::slice::from_mut(&mut spec)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!alive(grandchild), "grandchild survived its parent's stop");
+        assert!(!dir.join("run").join(CHILDREN_FILE).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trees_left_by_a_killed_node_are_reaped_at_the_next_boot() {
+        let dir = env::temp_dir().join(format!("dialtone-tree-reap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut spec = tree_spec(&dir, "orphan");
+        let mut sup = Supervisor::new();
+        sup.reconcile(std::slice::from_mut(&mut spec)).unwrap();
+        let grandchild = wait_for_grandchild(&dir);
+        let child = spec.pid.unwrap() as i32;
+        // Simulate SIGKILL of the node: the supervisor never gets to stop its processes.
+        std::mem::forget(sup);
+        assert!(alive(child) && alive(grandchild));
+
+        assert_eq!(reap_stale_processes(&dir.join("run")), 1);
+        std::thread::sleep(Duration::from_millis(100));
+        // The child is a zombie of this test process until reaped; its group is gone.
+        unsafe {
+            libc::waitpid(child, std::ptr::null_mut(), 0);
+        }
+        assert!(!alive(child) && !alive(grandchild));
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn systemd_drop_in_repairs_drift_removes_retired_overrides_and_bounds_stop_timeout() {

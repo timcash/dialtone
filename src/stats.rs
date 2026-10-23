@@ -94,8 +94,8 @@ pub fn compute_metric_variability(values: &[f64]) -> MetricVariabilityStats {
 #[derive(Clone, Debug)]
 struct WindowSamplePoint {
     timestamp_unix: u64,
-    cpu_percent: f64,
-    mem_percent: f64,
+    cpu_percent: Option<f64>,
+    mem_percent: Option<f64>,
     net_combined_kbps: f64,
     avg_rtt_ms: Option<f64>,
     total_process_restarts: u32,
@@ -165,8 +165,9 @@ impl StatsWindow {
     }
 
     pub fn summarize(&self, now_unix: u64) -> StatsSummary {
-        let cpu_vals: Vec<f64> = self.samples.iter().map(|s| s.cpu_percent).collect();
-        let mem_vals: Vec<f64> = self.samples.iter().map(|s| s.mem_percent).collect();
+        // Spread is computed over the samples that were actually measured.
+        let cpu_vals: Vec<f64> = self.samples.iter().filter_map(|s| s.cpu_percent).collect();
+        let mem_vals: Vec<f64> = self.samples.iter().filter_map(|s| s.mem_percent).collect();
         let net_vals: Vec<f64> = self.samples.iter().map(|s| s.net_combined_kbps).collect();
         let rtt_vals: Vec<f64> = self.samples.iter().filter_map(|s| s.avg_rtt_ms).collect();
 
@@ -259,33 +260,82 @@ impl StatsWindow {
     }
 }
 
-fn default_cpu_cores() -> u32 {
+fn cpu_cores() -> Option<u32> {
     std::thread::available_parallelism()
+        .ok()
         .map(|n| n.get() as u32)
-        .unwrap_or(8)
+}
+
+/// `12.3%`, or `?` when the value is unknown.
+pub fn pct_or_unknown(v: Option<f64>) -> String {
+    v.map(|p| format!("{p:.1}%"))
+        .unwrap_or_else(|| "?".to_string())
+}
+
+fn stats_line(
+    node: &str,
+    cores: Option<u32>,
+    cpu: Option<f64>,
+    mem: Option<f64>,
+    disk: Option<f64>,
+    ip: &str,
+) -> String {
+    let cores = cores
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "?".to_string());
+    format!(
+        "node={node} cores={cores} cpu={} mem={} disk={} ip={ip}",
+        pct_or_unknown(cpu),
+        pct_or_unknown(mem),
+        pct_or_unknown(disk)
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A node's measured numbers. Every value a sampler could not measure is `None` (sent as
+/// `null`), never a guessed or placeholder number.
 pub struct Stats {
-    #[serde(default = "default_cpu_cores")]
-    pub cpu_cores: u32,
-    pub cpu_percent: f64,
-    pub mem_used_bytes: u64,
-    pub mem_total_bytes: u64,
-    pub mem_percent: f64,
-    pub disk_used_bytes: u64,
-    pub disk_total_bytes: u64,
-    pub disk_percent: f64,
+    #[serde(default)]
+    pub cpu_cores: Option<u32>,
+    #[serde(default)]
+    pub cpu_percent: Option<f64>,
+    #[serde(default)]
+    pub mem_used_bytes: Option<u64>,
+    #[serde(default)]
+    pub mem_total_bytes: Option<u64>,
+    #[serde(default)]
+    pub mem_percent: Option<f64>,
+    #[serde(default)]
+    pub disk_used_bytes: Option<u64>,
+    #[serde(default)]
+    pub disk_total_bytes: Option<u64>,
+    #[serde(default)]
+    pub disk_percent: Option<f64>,
+    #[serde(default)]
     pub interfaces: Vec<NetStats>,
-    #[serde(alias = "telemetry_summary")] // compat
+    #[serde(default, alias = "telemetry_summary")] // compat
     pub stats_line: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_stats: Option<StatsSummary>,
 }
 
+/// Nothing measured. (This used to sample *this* machine, so a peer beat without stats
+/// showed the local node's numbers.)
 impl Default for Stats {
     fn default() -> Self {
-        sample_stats("local", None, 0)
+        Self {
+            cpu_cores: None,
+            cpu_percent: None,
+            mem_used_bytes: None,
+            mem_total_bytes: None,
+            mem_percent: None,
+            disk_used_bytes: None,
+            disk_total_bytes: None,
+            disk_percent: None,
+            interfaces: Vec::new(),
+            stats_line: String::new(),
+            summary_stats: None,
+        }
     }
 }
 
@@ -351,11 +401,8 @@ fn read_macos_cpu_ticks() -> Option<[u32; 4]> {
 }
 
 #[cfg(target_os = "macos")]
-fn sample_macos_cpu_percent(state: &mut StatsSampler) -> f64 {
-    let first = match read_macos_cpu_ticks() {
-        Some(t) => t,
-        None => return 0.0,
-    };
+fn sample_macos_cpu_percent(state: &mut StatsSampler) -> Option<f64> {
+    let first = read_macos_cpu_ticks()?;
     let prev = match state.prev_macos_cpu_ticks {
         Some(p) => p,
         None => {
@@ -369,9 +416,9 @@ fn sample_macos_cpu_percent(state: &mut StatsSampler) -> f64 {
             let busy = d_user + d_sys + d_nice;
             let total = busy + d_idle;
             if total == 0 {
-                return 0.0;
+                return None;
             }
-            return round_tenth(((busy as f64) / (total as f64)) * 100.0);
+            return Some(round_tenth(((busy as f64) / (total as f64)) * 100.0));
         }
     };
     let d_user = first[0].wrapping_sub(prev[0]) as u64;
@@ -384,20 +431,18 @@ fn sample_macos_cpu_percent(state: &mut StatsSampler) -> f64 {
         if let Some((_, ref cached)) = state.last_cached {
             return cached.cpu_percent;
         }
-        return 0.0;
+        return None;
     }
     state.prev_macos_cpu_ticks = Some(first);
-    round_tenth(((busy as f64) / (total as f64)) * 100.0)
+    Some(round_tenth(((busy as f64) / (total as f64)) * 100.0))
 }
 
 #[cfg(target_os = "macos")]
-fn sample_macos_memory() -> (u64, u64, f64) {
-    static TOTAL_MEM: OnceLock<u64> = OnceLock::new();
-    let total_bytes = *TOTAL_MEM.get_or_init(|| {
-        crate::run_cmd("sysctl", &["-n", "hw.memsize"])
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .unwrap_or(16 * 1024 * 1024 * 1024)
-    });
+fn sample_macos_memory() -> Option<(u64, u64, f64)> {
+    static TOTAL_MEM: OnceLock<Option<u64>> = OnceLock::new();
+    let total_bytes = (*TOTAL_MEM.get_or_init(|| {
+        crate::run_cmd("sysctl", &["-n", "hw.memsize"]).and_then(|s| s.trim().parse::<u64>().ok())
+    }))?;
 
     if let Some(vm_out) = crate::run_cmd("vm_stat", &[]) {
         let mut page_size = 16384u64;
@@ -433,14 +478,14 @@ fn sample_macos_memory() -> (u64, u64, f64) {
             .min(total_bytes);
         if used_bytes > 0 && total_bytes > 0 {
             let pct = round_tenth(((used_bytes as f64) / (total_bytes as f64)) * 100.0);
-            return (used_bytes, total_bytes, pct);
+            return Some((used_bytes, total_bytes, pct));
         }
     }
-    (0, total_bytes, 0.0)
+    None
 }
 
 #[cfg(unix)]
-fn sample_unix_disk() -> (u64, u64, f64) {
+fn sample_unix_disk() -> Option<(u64, u64, f64)> {
     let target_dir = std::env::var("DIALTONE_STATE_DIR")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
@@ -465,12 +510,12 @@ fn sample_unix_disk() -> (u64, u64, f64) {
                     };
                     let used_bytes = effective_used_kb.saturating_mul(1024).min(total_bytes);
                     let pct = round_tenth(((used_bytes as f64) / (total_bytes as f64)) * 100.0);
-                    return (used_bytes, total_bytes, pct);
+                    return Some((used_bytes, total_bytes, pct));
                 }
             }
         }
     }
-    (0, 1, 0.0)
+    None
 }
 
 #[cfg(target_os = "macos")]
@@ -547,7 +592,7 @@ fn sample_macos_network(state: &mut StatsSampler, bound_ip: Option<&str>) -> Net
         tx_bytes_per_sec: tx_rate,
         rx_total_bytes: best_rx,
         tx_total_bytes: best_tx,
-        link_speed_mbps: Some(1000),
+        link_speed_mbps: None,
     }
 }
 
@@ -610,11 +655,8 @@ fn read_windows_cpu_ticks() -> Option<(u64, u64, u64)> {
 }
 
 #[cfg(target_os = "windows")]
-fn sample_windows_cpu_percent(state: &mut StatsSampler) -> f64 {
-    let first = match read_windows_cpu_ticks() {
-        Some(t) => t,
-        None => return 0.0,
-    };
+fn sample_windows_cpu_percent(state: &mut StatsSampler) -> Option<f64> {
+    let first = read_windows_cpu_ticks()?;
     let prev = match state.prev_win_cpu_ticks {
         Some(p) => p,
         None => {
@@ -627,9 +669,9 @@ fn sample_windows_cpu_percent(state: &mut StatsSampler) -> f64 {
             let total = d_kernel.saturating_add(d_user);
             let busy = total.saturating_sub(d_idle);
             if total == 0 {
-                return 0.0;
+                return None;
             }
-            return round_tenth(((busy as f64) / (total as f64)) * 100.0);
+            return Some(round_tenth(((busy as f64) / (total as f64)) * 100.0));
         }
     };
     let d_idle = first.0.saturating_sub(prev.0);
@@ -640,15 +682,15 @@ fn sample_windows_cpu_percent(state: &mut StatsSampler) -> f64 {
         if let Some((_, ref cached)) = state.last_cached {
             return cached.cpu_percent;
         }
-        return 0.0;
+        return None;
     }
     state.prev_win_cpu_ticks = Some(first);
     let busy = total.saturating_sub(d_idle);
-    round_tenth(((busy as f64) / (total as f64)) * 100.0)
+    Some(round_tenth(((busy as f64) / (total as f64)) * 100.0))
 }
 
 #[cfg(target_os = "windows")]
-fn sample_windows_memory() -> (u64, u64, f64) {
+fn sample_windows_memory() -> Option<(u64, u64, f64)> {
     let mut mem = win_os::MEMORYSTATUSEX {
         dw_length: std::mem::size_of::<win_os::MEMORYSTATUSEX>() as u32,
         dw_memory_load: 0,
@@ -665,14 +707,14 @@ fn sample_windows_memory() -> (u64, u64, f64) {
         let total = mem.ull_total_phys;
         let used = total.saturating_sub(mem.ull_avail_phys);
         let pct = round_tenth(((used as f64) / (total as f64)) * 100.0);
-        (used, total, pct)
+        Some((used, total, pct))
     } else {
-        (0, 1, 0.0)
+        None
     }
 }
 
 #[cfg(target_os = "windows")]
-fn sample_windows_disk() -> (u64, u64, f64) {
+fn sample_windows_disk() -> Option<(u64, u64, f64)> {
     use std::os::windows::ffi::OsStrExt;
     let root_str =
         std::env::var_os("USERPROFILE").unwrap_or_else(|| std::ffi::OsString::from(r"C:\"));
@@ -692,9 +734,9 @@ fn sample_windows_disk() -> (u64, u64, f64) {
     if ok != 0 && total_bytes > 0 {
         let used = total_bytes.saturating_sub(total_free);
         let pct = round_tenth(((used as f64) / (total_bytes as f64)) * 100.0);
-        (used, total_bytes, pct)
+        Some((used, total_bytes, pct))
     } else {
-        (0, 1, 0.0)
+        None
     }
 }
 
@@ -773,7 +815,7 @@ fn sample_windows_network(state: &mut StatsSampler, bound_ip: Option<&str>) -> N
         tx_bytes_per_sec: tx_rate,
         rx_total_bytes: total_rx,
         tx_total_bytes: total_tx,
-        link_speed_mbps: Some(1000),
+        link_speed_mbps: None,
     }
 }
 
@@ -803,11 +845,8 @@ fn read_linux_cpu_ticks() -> Option<(u64, u64)> {
 }
 
 #[cfg(target_os = "linux")]
-fn sample_linux_cpu_percent(state: &mut StatsSampler) -> f64 {
-    let first = match read_linux_cpu_ticks() {
-        Some(t) => t,
-        None => return 0.0,
-    };
+fn sample_linux_cpu_percent(state: &mut StatsSampler) -> Option<f64> {
+    let first = read_linux_cpu_ticks()?;
     let prev = match state.prev_linux_cpu_ticks {
         Some(p) => p,
         None => {
@@ -817,9 +856,9 @@ fn sample_linux_cpu_percent(state: &mut StatsSampler) -> f64 {
             let d_busy = second.0.saturating_sub(first.0);
             let d_total = second.1.saturating_sub(first.1);
             if d_total == 0 {
-                return 0.0;
+                return None;
             }
-            return round_tenth(((d_busy as f64) / (d_total as f64)) * 100.0);
+            return Some(round_tenth(((d_busy as f64) / (d_total as f64)) * 100.0));
         }
     };
     let d_busy = first.0.saturating_sub(prev.0);
@@ -828,14 +867,14 @@ fn sample_linux_cpu_percent(state: &mut StatsSampler) -> f64 {
         if let Some((_, ref cached)) = state.last_cached {
             return cached.cpu_percent;
         }
-        return 0.0;
+        return None;
     }
     state.prev_linux_cpu_ticks = Some(first);
-    round_tenth(((d_busy as f64) / (d_total as f64)) * 100.0)
+    Some(round_tenth(((d_busy as f64) / (d_total as f64)) * 100.0))
 }
 
 #[cfg(target_os = "linux")]
-fn sample_linux_memory() -> (u64, u64, f64) {
+fn sample_linux_memory() -> Option<(u64, u64, f64)> {
     if let Ok(raw) = std::fs::read_to_string("/proc/meminfo") {
         let mut total_kb = 0u64;
         let mut avail_kb = 0u64;
@@ -857,10 +896,10 @@ fn sample_linux_memory() -> (u64, u64, f64) {
             let total_bytes = total_kb * 1024;
             let used_bytes = total_kb.saturating_sub(avail_kb) * 1024;
             let pct = round_tenth(((used_bytes as f64) / (total_bytes as f64)) * 100.0);
-            return (used_bytes, total_bytes, pct);
+            return Some((used_bytes, total_bytes, pct));
         }
     }
-    (0, 1, 0.0)
+    None
 }
 
 #[cfg(target_os = "linux")]
@@ -920,12 +959,12 @@ fn sample_linux_network(state: &mut StatsSampler, bound_ip: Option<&str>) -> Net
         tx_bytes_per_sec: tx_rate,
         rx_total_bytes: best_rx,
         tx_total_bytes: best_tx,
-        link_speed_mbps: Some(1000),
+        link_speed_mbps: None,
     }
 }
 
 pub fn sample_stats(node: &str, bound_ip: Option<&str>, _counter: u64) -> Stats {
-    let cores = default_cpu_cores();
+    let cores = cpu_cores();
     let ip_label = bound_ip.unwrap_or("physical-lan");
 
     if let Ok(mut guard) = sampler_state().lock() {
@@ -936,21 +975,20 @@ pub fn sample_stats(node: &str, bound_ip: Option<&str>, _counter: u64) -> Stats 
                     let base_nic = nic.name.split_whitespace().next().unwrap_or("nic0");
                     nic.name = format!("{base_nic} ({ip_label})");
                 }
-                out.stats_line = format!(
-                    "node={node} cores={cores} cpu={:.1}% mem={:.1}% disk={:.1}% ip={ip_label} tailnet=off",
-                    out.cpu_percent, out.mem_percent, out.disk_percent
+                out.stats_line = stats_line(
+                    node,
+                    cores,
+                    out.cpu_percent,
+                    out.mem_percent,
+                    out.disk_percent,
+                    ip_label,
                 );
                 return out;
             }
         }
 
         #[cfg(target_os = "macos")]
-        let (
-            cpu_percent,
-            (mem_used_bytes, mem_total_bytes, mem_percent),
-            (disk_used_bytes, disk_total_bytes, disk_percent),
-            nic,
-        ) = {
+        let (cpu_percent, mem, disk, nic) = {
             let cpu = sample_macos_cpu_percent(&mut guard);
             let mem = sample_macos_memory();
             let disk = sample_unix_disk();
@@ -959,12 +997,7 @@ pub fn sample_stats(node: &str, bound_ip: Option<&str>, _counter: u64) -> Stats 
         };
 
         #[cfg(target_os = "windows")]
-        let (
-            cpu_percent,
-            (mem_used_bytes, mem_total_bytes, mem_percent),
-            (disk_used_bytes, disk_total_bytes, disk_percent),
-            nic,
-        ) = {
+        let (cpu_percent, mem, disk, nic) = {
             let cpu = sample_windows_cpu_percent(&mut guard);
             let mem = sample_windows_memory();
             let disk = sample_windows_disk();
@@ -973,12 +1006,7 @@ pub fn sample_stats(node: &str, bound_ip: Option<&str>, _counter: u64) -> Stats 
         };
 
         #[cfg(target_os = "linux")]
-        let (
-            cpu_percent,
-            (mem_used_bytes, mem_total_bytes, mem_percent),
-            (disk_used_bytes, disk_total_bytes, disk_percent),
-            nic,
-        ) = {
+        let (cpu_percent, mem, disk, nic) = {
             let cpu = sample_linux_cpu_percent(&mut guard);
             let mem = sample_linux_memory();
             let disk = sample_unix_disk();
@@ -989,15 +1017,20 @@ pub fn sample_stats(node: &str, bound_ip: Option<&str>, _counter: u64) -> Stats 
         let sample = Stats {
             cpu_cores: cores,
             cpu_percent,
-            mem_used_bytes,
-            mem_total_bytes,
-            mem_percent,
-            disk_used_bytes,
-            disk_total_bytes,
-            disk_percent,
+            mem_used_bytes: mem.map(|m| m.0),
+            mem_total_bytes: mem.map(|m| m.1),
+            mem_percent: mem.map(|m| m.2),
+            disk_used_bytes: disk.map(|d| d.0),
+            disk_total_bytes: disk.map(|d| d.1),
+            disk_percent: disk.map(|d| d.2),
             interfaces: vec![nic],
-            stats_line: format!(
-                "node={node} cores={cores} cpu={cpu_percent:.1}% mem={mem_percent:.1}% disk={disk_percent:.1}% ip={ip_label} tailnet=off"
+            stats_line: stats_line(
+                node,
+                cores,
+                cpu_percent,
+                mem.map(|m| m.2),
+                disk.map(|d| d.2),
+                ip_label,
             ),
             summary_stats: None,
         };
@@ -1007,16 +1040,8 @@ pub fn sample_stats(node: &str, bound_ip: Option<&str>, _counter: u64) -> Stats 
 
     Stats {
         cpu_cores: cores,
-        cpu_percent: 0.0,
-        mem_used_bytes: 0,
-        mem_total_bytes: 1,
-        mem_percent: 0.0,
-        disk_used_bytes: 0,
-        disk_total_bytes: 1,
-        disk_percent: 0.0,
-        interfaces: Vec::new(),
-        stats_line: format!("node={node} cores={cores} ip={ip_label} tailnet=off"),
-        summary_stats: None,
+        stats_line: stats_line(node, cores, None, None, None, ip_label),
+        ..Stats::default()
     }
 }
 
@@ -1027,17 +1052,37 @@ mod tests {
     #[test]
     fn live_stats_reports_real_os_metrics_not_synthetic_defaults() {
         let res = sample_stats("node-alpha", Some("127.0.0.1"), 1);
-        assert!(res.cpu_cores >= 1);
-        assert!((0.0..=100.0).contains(&res.cpu_percent));
-        assert!(res.mem_total_bytes > 1024 * 1024 * 100);
-        assert!(res.mem_used_bytes > 0 && res.mem_used_bytes <= res.mem_total_bytes);
-        assert!(res.disk_total_bytes > 1024 * 1024 * 100);
-        assert!(res.disk_used_bytes > 0 && res.disk_used_bytes <= res.disk_total_bytes);
+        assert!(res.cpu_cores.unwrap() >= 1);
+        // CPU needs two tick readings some time apart; right after another sample it is unknown.
+        if let Some(cpu) = res.cpu_percent {
+            assert!((0.0..=100.0).contains(&cpu));
+        }
+        let (mem_used, mem_total) = (res.mem_used_bytes.unwrap(), res.mem_total_bytes.unwrap());
+        assert!(mem_total > 1024 * 1024 * 100);
+        assert!(mem_used > 0 && mem_used <= mem_total);
+        let (disk_used, disk_total) = (res.disk_used_bytes.unwrap(), res.disk_total_bytes.unwrap());
+        assert!(disk_total > 1024 * 1024 * 100);
+        assert!(disk_used > 0 && disk_used <= disk_total);
         // Must not be the old hardcoded 120 GiB / 512 GiB (23.4%) fake disk numbers
         assert_ne!(
-            (res.disk_used_bytes, res.disk_total_bytes),
+            (disk_used, disk_total),
             (120 * 1024 * 1024 * 1024, 512 * 1024 * 1024 * 1024)
         );
+        // No invented values: no link speed is measured, and no tailnet claim is made.
+        assert!(res.interfaces.iter().all(|i| i.link_speed_mbps.is_none()));
+        assert!(!res.stats_line.contains("tailnet"));
+    }
+
+    /// A peer beat without stats must show "unknown", not this machine's numbers.
+    #[test]
+    fn default_stats_are_unknown_not_sampled_locally() {
+        let d = Stats::default();
+        assert_eq!(d.cpu_percent, None);
+        assert_eq!(d.mem_total_bytes, None);
+        assert_eq!(d.disk_percent, None);
+        assert_eq!(d.cpu_cores, None);
+        let from_peer: Stats = serde_json::from_str("{}").unwrap();
+        assert_eq!(from_peer, Stats::default());
     }
 
     #[test]
@@ -1051,14 +1096,14 @@ mod tests {
             .enumerate()
         {
             let host = Stats {
-                cpu_cores: 8,
-                cpu_percent: cpu,
-                mem_used_bytes: 4_000_000_000,
-                mem_total_bytes: 10_000_000_000,
-                mem_percent: mem,
-                disk_used_bytes: 50_000_000_000,
-                disk_total_bytes: 100_000_000_000,
-                disk_percent: 50.0,
+                cpu_cores: Some(8),
+                cpu_percent: Some(cpu),
+                mem_used_bytes: Some(4_000_000_000),
+                mem_total_bytes: Some(10_000_000_000),
+                mem_percent: Some(mem),
+                disk_used_bytes: Some(50_000_000_000),
+                disk_total_bytes: Some(100_000_000_000),
+                disk_percent: Some(50.0),
                 interfaces: vec![NetStats {
                     name: "en0".to_string(),
                     up: true,
@@ -1066,7 +1111,7 @@ mod tests {
                     tx_bytes_per_sec: 50_000,
                     rx_total_bytes: 1_000_000,
                     tx_total_bytes: 500_000,
-                    link_speed_mbps: Some(1000),
+                    link_speed_mbps: None,
                 }],
                 stats_line: String::new(),
                 summary_stats: None,

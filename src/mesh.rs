@@ -769,13 +769,17 @@ pub fn migrate_and_scrub_legacy_config(config_path: &Path, legacy_path: &Path) -
     true
 }
 
-pub fn load_mesh_config(path: &Path) -> MeshConfig {
+/// Load `config.json`. A missing file is an empty config; a file that is not valid config
+/// JSON is an error, never an empty config (saving that would wipe the keys and allowlist).
+pub fn try_load_mesh_config(path: &Path) -> Result<MeshConfig, String> {
     if let Some(legacy_path) = legacy_config_path_for(path) {
         let _ = migrate_and_scrub_legacy_config(path, &legacy_path);
     }
     let mut cfg: MeshConfig = match fs::read_to_string(path) {
-        Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
-        Err(_) => return MeshConfig::default(),
+        Ok(raw) => serde_json::from_str(&raw)
+            .map_err(|e| format!("{} is not valid dialtone config JSON: {e}", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(MeshConfig::default()),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
     // Auto-migrate any legacy plaintext `secret_key` into `derived_keys` and scrub disk file immediately (Issue #2).
     if let Some(raw_pass) = cfg.secret_key.take() {
@@ -785,7 +789,23 @@ pub fn load_mesh_config(path: &Path) -> MeshConfig {
             let _ = save_mesh_config(path, &cfg);
         }
     }
-    cfg
+    Ok(cfg)
+}
+
+/// Load `config.json`, stopping the process loudly if it is unreadable or corrupt: running on
+/// with an empty config would drop the channel keys and allowlist at the next save.
+pub fn load_mesh_config(path: &Path) -> MeshConfig {
+    match try_load_mesh_config(path) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            eprintln!(
+                "dialtone: FATAL: {err}\n\
+                 dialtone: refusing to continue so the channel keys and allowlist in it are not overwritten.\n\
+                 dialtone: fix the file, or move it aside to start with an empty config."
+            );
+            std::process::exit(78); // EX_CONFIG
+        }
+    }
 }
 
 pub fn save_mesh_config(path: &Path, cfg: &MeshConfig) -> Result<(), String> {
@@ -1851,6 +1871,34 @@ pub async fn observe_peer_remote_addrs(
 pub use crate::now_unix;
 
 /// Prune peer beat entries older than `ttl_secs`.
+/// Insert or update a node's latest beat. Nodes are identified by NodeId (names can collide).
+pub fn merge_beat(nodes: &mut Vec<Beat>, mut beat: Beat) {
+    if let Some(existing) = nodes.iter_mut().find(|n| n.node_id == beat.node_id) {
+        if beat.summary_stats.is_none() {
+            beat.summary_stats = existing.summary_stats.clone();
+        }
+        if beat.geo_location.is_none() {
+            beat.geo_location = existing.geo_location.clone();
+        }
+        if beat.probe.is_none() {
+            beat.probe = existing.probe.clone();
+        }
+        // A beat carries the sender's full Rtt map; only echo replies arrive without one.
+        if beat.peer_rtt_ms.is_empty() {
+            beat.peer_rtt_ms = existing.peer_rtt_ms.clone();
+        }
+        if beat.kind == "rtt_echo" {
+            beat.kind = existing.kind.clone();
+        }
+        *existing = beat;
+    } else {
+        if beat.kind == "rtt_echo" {
+            beat.kind = "regular".to_string();
+        }
+        nodes.push(beat);
+    }
+}
+
 pub fn prune_stale_peers(peers: &mut Vec<Beat>, now: u64, ttl_secs: u64) -> usize {
     let before = peers.len();
     peers.retain(|p| now.saturating_sub(p.updated_at_unix) <= ttl_secs);
@@ -2401,6 +2449,59 @@ mod tests {
         assert!(is_valid_node_name("edge-1.lab_2"));
         assert!(!is_valid_node_name("<img src=x onerror=alert(1)>"));
         assert!(!is_valid_node_name(""));
+    }
+
+    #[test]
+    fn config_files_that_do_not_parse_are_errors_not_empty_configs() {
+        let dir = env::temp_dir().join(format!("dialtone-cfg-parse-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        assert_eq!(
+            try_load_mesh_config(&path).unwrap().allowlist,
+            Vec::<String>::new()
+        );
+        fs::write(&path, "{\"allowlist\": [\"x\"], oops").unwrap();
+        let err = try_load_mesh_config(&path).unwrap_err();
+        assert!(err.contains("not valid dialtone config JSON"), "{err}");
+        assert!(
+            fs::read_to_string(&path).unwrap().contains("oops"),
+            "file left untouched"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nodes_are_keyed_by_node_id_and_rtt_maps_are_replaced() {
+        let a = test_beat(&iroh::SecretKey::generate());
+        let mut impostor = test_beat(&iroh::SecretKey::generate());
+        impostor.node = a.node.clone(); // same name, different NodeId
+        let mut nodes = Vec::new();
+        merge_beat(&mut nodes, a.clone());
+        merge_beat(&mut nodes, impostor.clone());
+        assert_eq!(
+            nodes.len(),
+            2,
+            "a name collision must not overwrite another node"
+        );
+
+        let mut a2 = a.clone();
+        a2.peer_rtt_ms.insert("node-beta".to_string(), 12.0);
+        merge_beat(&mut nodes, a2);
+        let mut a3 = a.clone();
+        a3.peer_rtt_ms.insert("node-gamma".to_string(), 30.0);
+        merge_beat(&mut nodes, a3);
+        let entry = nodes.iter().find(|n| n.node_id == a.node_id).unwrap();
+        assert_eq!(
+            entry.peer_rtt_ms.len(),
+            1,
+            "old Rtt entries are not kept forever"
+        );
+        assert!(entry.peer_rtt_ms.contains_key("node-gamma"));
+        // An echo reply without a map keeps the last one.
+        merge_beat(&mut nodes, a.clone());
+        let entry = nodes.iter().find(|n| n.node_id == a.node_id).unwrap();
+        assert!(entry.peer_rtt_ms.contains_key("node-gamma"));
     }
 
     /// Beats from peers and config files written before the domain-language rename use the

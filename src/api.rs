@@ -38,7 +38,7 @@ use crate::service::Service;
 use crate::service::{
     CatalogPolicy, DialtoneMetadata, InstalledProgram, KeyLeaseStatus, ProcessSpec,
 };
-use crate::stats::{sample_stats, Stats};
+use crate::stats::{pct_or_unknown, sample_stats, Stats};
 use crate::supervisor::{
     ensure_probe_program, plan_process_intent, probe_program_bytes, stage_program, Supervisor,
     PROBE_PROGRAM_NAME,
@@ -207,6 +207,19 @@ pub struct NodeState {
 }
 
 impl NodeState {
+    /// This node's own entry in `nodes`, found by NodeId (a peer may reuse our name).
+    pub fn self_entry_mut(&mut self) -> Option<&mut Beat> {
+        let id = self.iroh_runtime.node_id.clone();
+        let name = self.node.clone();
+        self.nodes.iter_mut().find(|n| {
+            if id.is_empty() {
+                n.node == name
+            } else {
+                n.node_id == id
+            }
+        })
+    }
+
     pub fn record_log(
         &mut self,
         service: &str,
@@ -272,49 +285,40 @@ impl NodeState {
                     });
                 }
             }
-            if peer.stats.disk_percent >= 85.0 {
+            if let Some(pct) = peer.stats.disk_percent.filter(|p| *p >= 85.0) {
                 live_alerts.push(AlertRecord {
                     id: format!("alert-{}-disk", peer.node),
                     target_node: peer.node.clone(),
                     status: "active".to_string(),
                     severity: "warning".to_string(),
                     source: "stats".to_string(),
-                    summary: format!(
-                        "Node {} disk usage high ({:.1}%)",
-                        peer.node, peer.stats.disk_percent
-                    ),
+                    summary: format!("Node {} disk usage high ({:.1}%)", peer.node, pct),
                     stats_ref: format!("dialtone://{}/stats/disk", peer.node),
                     last_seen_unix: now,
                     acknowledged_by: None,
                 });
             }
-            if peer.stats.cpu_percent >= 85.0 {
+            if let Some(pct) = peer.stats.cpu_percent.filter(|p| *p >= 85.0) {
                 live_alerts.push(AlertRecord {
                     id: format!("alert-{}-cpu", peer.node),
                     target_node: peer.node.clone(),
                     status: "active".to_string(),
                     severity: "warning".to_string(),
                     source: "stats".to_string(),
-                    summary: format!(
-                        "Node {} CPU usage high ({:.1}%)",
-                        peer.node, peer.stats.cpu_percent
-                    ),
+                    summary: format!("Node {} CPU usage high ({:.1}%)", peer.node, pct),
                     stats_ref: format!("dialtone://{}/stats/cpu", peer.node),
                     last_seen_unix: now,
                     acknowledged_by: None,
                 });
             }
-            if peer.stats.mem_percent >= 85.0 {
+            if let Some(pct) = peer.stats.mem_percent.filter(|p| *p >= 85.0) {
                 live_alerts.push(AlertRecord {
                     id: format!("alert-{}-mem", peer.node),
                     target_node: peer.node.clone(),
                     status: "active".to_string(),
                     severity: "warning".to_string(),
                     source: "stats".to_string(),
-                    summary: format!(
-                        "Node {} memory usage high ({:.1}%)",
-                        peer.node, peer.stats.mem_percent
-                    ),
+                    summary: format!("Node {} memory usage high ({:.1}%)", peer.node, pct),
                     stats_ref: format!("dialtone://{}/stats/mem", peer.node),
                     last_seen_unix: now,
                     acknowledged_by: None,
@@ -329,11 +333,11 @@ impl NodeState {
                 severity: "info".to_string(),
                 source: "stats".to_string(),
                 summary: format!(
-                    "Node {} stats nominal (CPU {:.1}%, MEM {:.1}%, DISK {:.1}%)",
+                    "Node {} stats nominal (CPU {}, MEM {}, DISK {})",
                     self.node,
-                    self.stats.cpu_percent,
-                    self.stats.mem_percent,
-                    self.stats.disk_percent
+                    pct_or_unknown(self.stats.cpu_percent),
+                    pct_or_unknown(self.stats.mem_percent),
+                    pct_or_unknown(self.stats.disk_percent)
                 ),
                 stats_ref: format!("dialtone://{}/stats", self.node),
                 last_seen_unix: now,
@@ -383,10 +387,9 @@ impl NodeState {
         for (svc, msg) in started_logs {
             self.record_log(&svc, "INFO", "supervisor", msg);
         }
-        let self_node = self.node.clone();
         let procs_snapshot = self.processes.clone();
         let probe_snapshot = self.probe.clone();
-        if let Some(self_beat) = self.nodes.iter_mut().find(|n| n.node == self_node) {
+        if let Some(self_beat) = self.self_entry_mut() {
             self_beat.processes = procs_snapshot;
             if probe_snapshot.is_some() {
                 self_beat.probe = probe_snapshot;
@@ -594,8 +597,7 @@ impl NodeState {
             mesh_peers_seen,
         };
         self.probe = Some(report.clone());
-        let self_node = self.node.clone();
-        if let Some(self_beat) = self.nodes.iter_mut().find(|n| n.node == self_node) {
+        if let Some(self_beat) = self.self_entry_mut() {
             self_beat.probe = Some(report.clone());
         }
         report
@@ -745,13 +747,16 @@ impl NodeState {
             "mesh.boot",
             "info",
             format!(
-                "dialtone live mesh daemon initialized on {} ({}/{}, {} cores, {:.1}% mem, {:.1}% disk)",
+                "dialtone live mesh daemon initialized on {} ({}/{}, {} cores, {} mem, {} disk)",
                 node,
                 default_os(),
                 default_arch(),
-                stats.cpu_cores,
-                stats.mem_percent,
-                stats.disk_percent
+                stats
+                    .cpu_cores
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "?".to_string()),
+                pct_or_unknown(stats.mem_percent),
+                pct_or_unknown(stats.disk_percent)
             ),
         );
         st.record_log(
@@ -759,13 +764,13 @@ impl NodeState {
             "INFO",
             "stdout",
             format!(
-                "started live stats & gossip runtime on http://{} (beat={}s, summary={}s, cpu={:.1}%, mem={:.1}%, disk={:.1}%)",
+                "started live stats & gossip runtime on http://{} (beat={}s, summary={}s, cpu={}, mem={}, disk={})",
                 listen,
                 BEAT_INTERVAL_SECS,
                 SUMMARY_INTERVAL_SECS,
-                stats.cpu_percent,
-                stats.mem_percent,
-                stats.disk_percent
+                pct_or_unknown(stats.cpu_percent),
+                pct_or_unknown(stats.mem_percent),
+                pct_or_unknown(stats.disk_percent)
             ),
         );
         place_nodes(&mut st.nodes, &st.mesh_rtt_ms);
@@ -1155,15 +1160,32 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
         }
     }
 
+    // Routes write their response into a buffer while they hold the node-state lock; the
+    // socket write happens after the lock is released, so a slow client never stalls the mesh.
+    let mut out = Vec::new();
+    let routed = route_request(&mut out, method, path, &query, &headers, body_part, state);
+    stream.write_all(&out).map_err(|e| e.to_string())?;
+    routed
+}
+
+#[allow(clippy::too_many_arguments)]
+fn route_request(
+    mut stream: &mut Vec<u8>,
+    method: &str,
+    path: &str,
+    query: &HashMap<String, String>,
+    headers: &HashMap<String, String>,
+    body_part: &str,
+    state: &Arc<Mutex<NodeState>>,
+) -> Result<(), String> {
     let mut st = state.lock().map_err(|_| "state poisoned".to_string())?;
     if method.eq_ignore_ascii_case("POST") {
-        if let Err(err) = validate_bearer_token(&headers, &st.api_token) {
+        if let Err(err) = validate_bearer_token(headers, &st.api_token) {
             return write_json(&mut stream, 401, &json!({ "error": err }));
         }
     }
     let now = now_unix();
-    let self_name = st.node.clone();
-    if let Some(self_beat) = st.nodes.iter_mut().find(|n| n.node == self_name) {
+    if let Some(self_beat) = st.self_entry_mut() {
         self_beat.updated_at_unix = now;
     }
     prune_stale_peers(&mut st.nodes, now, DEFAULT_PEER_TTL_SECS);
@@ -1713,6 +1735,17 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 .filter(|s| !s.is_empty())
                 .map(String::from);
 
+            // Blob work (disk and network) runs without the node-state lock held.
+            let bridge = st.store.clone();
+            let store_dir = st.store_dir.clone();
+            let known_digest = st
+                .processes
+                .iter()
+                .find(|p| p.name == name)
+                .map(|p| p.digest.clone());
+            drop(st);
+            let mut pulled = None;
+
             let mut digest = parsed
                 .get("digest")
                 .or_else(|| parsed.get("sha256")) // compat
@@ -1741,8 +1774,8 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 } else {
                     Some(digest.as_str())
                 };
-                if let Some(ref bridge) = st.store {
-                    match bridge.share_blob(&st.store_dir, &raw, exp) {
+                if let Some(ref bridge) = bridge {
+                    match bridge.share_blob(&store_dir, &raw, exp) {
                         Ok(rep) => {
                             digest = rep.digest;
                             resolved_ticket_uri = Some(rep.ticket_uri);
@@ -1750,7 +1783,7 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                         Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
                     }
                 } else {
-                    match put_blob(&st.store_dir, &raw, exp) {
+                    match put_blob(&store_dir, &raw, exp) {
                         Ok((verified_sha, _)) => digest = verified_sha,
                         Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
                     }
@@ -1758,12 +1791,12 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
             }
 
             if let Some(ref t_uri) = resolved_ticket_uri {
-                if digest.is_empty() || !has_blob(&st.store_dir, &digest) {
-                    if let Some(ref bridge) = st.store {
-                        match bridge.pull_blob(&st.store_dir, t_uri, false) {
+                if digest.is_empty() || !has_blob(&store_dir, &digest) {
+                    if let Some(ref bridge) = bridge {
+                        match bridge.pull_blob(&store_dir, t_uri, false) {
                             Ok(rep) => {
                                 digest = rep.digest.clone();
-                                st.blob_fetches.push(rep);
+                                pulled = Some(rep);
                             }
                             Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
                         }
@@ -1772,8 +1805,8 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
             }
 
             if digest.is_empty() {
-                if let Some(existing) = st.processes.iter().find(|p| p.name == name) {
-                    digest = existing.digest.clone();
+                if let Some(known) = known_digest {
+                    digest = known;
                 }
             }
             if digest.is_empty() {
@@ -1785,10 +1818,9 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
             }
 
             if deploy_to_mesh && resolved_ticket_uri.is_none() {
-                if let (Some(ref bridge), Ok(cached_bytes)) =
-                    (&st.store, read_blob(&st.store_dir, &digest))
+                if let (Some(ref bridge), Ok(cached_bytes)) = (&bridge, read_blob(&store_dir, &digest))
                 {
-                    if let Ok(rep) = bridge.share_blob(&st.store_dir, &cached_bytes, Some(&digest))
+                    if let Ok(rep) = bridge.share_blob(&store_dir, &cached_bytes, Some(&digest))
                     {
                         resolved_ticket_uri = Some(rep.ticket_uri);
                     }
@@ -1802,7 +1834,11 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 env_vars.push(format!("DIALTONE_BLOB_TICKET={t_uri}"));
             }
 
-            let (verified_sha, staged_path) = match stage_program(&st.store_dir, &name, &digest) {
+            let mut st = state.lock().map_err(|_| "state poisoned".to_string())?;
+            if let Some(rep) = pulled {
+                st.blob_fetches.push(rep);
+            }
+            let (verified_sha, staged_path) = match stage_program(&store_dir, &name, &digest) {
                 Ok(v) => v,
                 Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
             };
@@ -1854,9 +1890,8 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
             st.mesh_config.updated_at_unix = now_unix();
             let _ = save_mesh_config(&default_config_path(), &st.mesh_config);
 
-            let self_node = st.node.clone();
             let procs_snapshot = st.processes.clone();
-            if let Some(self_beat) = st.nodes.iter_mut().find(|n| n.node == self_node) {
+            if let Some(self_beat) = st.self_entry_mut() {
                 self_beat.processes = procs_snapshot;
             }
 
@@ -2191,7 +2226,11 @@ fn parse_query(query: &str) -> HashMap<String, String> {
     map
 }
 
-fn write_json<T: Serialize>(stream: &mut TcpStream, status: u16, value: &T) -> Result<(), String> {
+fn write_json<W: Write, T: Serialize>(
+    stream: &mut W,
+    status: u16,
+    value: &T,
+) -> Result<(), String> {
     let body = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     write_response(stream, status, "application/json", &body, false)
 }
@@ -2210,8 +2249,8 @@ fn hud_security_headers(nonce: &str) -> String {
     )
 }
 
-fn write_response(
-    stream: &mut TcpStream,
+fn write_response<W: Write>(
+    stream: &mut W,
     status: u16,
     content_type: &str,
     body: &[u8],
@@ -2221,8 +2260,8 @@ fn write_response(
 }
 
 /// `extra_headers` is a block of complete `Name: value\r\n` lines.
-fn write_response_with_headers(
-    stream: &mut TcpStream,
+fn write_response_with_headers<W: Write>(
+    stream: &mut W,
     status: u16,
     content_type: &str,
     extra_headers: &str,
