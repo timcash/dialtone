@@ -249,7 +249,7 @@ impl Default for DeployPolicyConfig {
         Self {
             manifest_schemas: vec![
                 "dialtone.blob_manifest.v1".to_string(),
-                "daemon.v1.artifact_manifest.v1".to_string(),
+                "daemon.v1.artifact_manifest.v1".to_string(), // compat
             ],
             source_bundle_schemas: vec![
                 "dialtone.component_source_bundle.v1".to_string(),

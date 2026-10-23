@@ -651,7 +651,7 @@ pub(crate) fn render_hud(state: &NodeState, selected_peer: Option<&str>) -> Stri
         </div>
         <div class="btn-row">
           <button id="btn-init-mesh" class="ctrl-btn is-focus" type="button">INIT NEW PRIVATE MESH</button>
-          <button id="btn-invite-mesh" class="ctrl-btn" type="button">GENERATE INVITE TICKET</button>
+          <button id="btn-invite-mesh" class="ctrl-btn" type="button">GENERATE INVITE</button>
         </div>
         <div class="mesh-form-row">
           <input id="input-join-ticket" class="mesh-input" type="text" placeholder="Paste iroh-gossip://invite/... ticket URI to join mesh">
@@ -2862,7 +2862,7 @@ function renderTourClosedCaptions(ctx) {
   const tprobe = target.probe || {};
   const tProcs = target.processes || target.processes || [];
   const activeProc = tProcs.find(p => p && p.status === "running") || tProcs[0] || {};
-  const programName = tprobe.program_name || activeProc.name || "mesh-blob-worker";
+  const programName = tprobe.program_name || activeProc.name || "probe";
   const programDigest = tprobe.program_digest || activeProc.digest || "sha256:181091cbf978";
   const shortSha = String(programDigest).replace("sha256:", "").slice(0, 12);
   const processPid = tprobe.pid || activeProc.pid || "LIVE";
@@ -3459,7 +3459,7 @@ function renderFrame(nowMs) {
 
 async function pollGossipState() {
   try {
-    const resp = await fetch("/api/gossip", { cache: "no-store" });
+    const resp = await fetch("/api/mesh", { cache: "no-store" });
     if (!resp.ok) return;
     const data = await resp.json();
     meshState = data;

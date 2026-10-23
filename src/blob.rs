@@ -637,7 +637,7 @@ mod tests {
             &dir,
             &TieredBlobFetchRequest {
                 digest: uncached_sha.to_string(),
-                uri: "http://node-beta:8787/api/artifacts/blob".to_string(),
+                uri: "http://node-beta:8787/api/blob".to_string(),
                 provider_node: "node-beta".to_string(),
                 expected_bytes: 4096,
                 http_fallback_enabled: false,
@@ -650,7 +650,7 @@ mod tests {
             &dir,
             &TieredBlobFetchRequest {
                 digest: uncached_sha.to_string(),
-                uri: "http://node-beta:8787/api/artifacts/blob".to_string(),
+                uri: "http://node-beta:8787/api/blob".to_string(),
                 provider_node: "node-beta".to_string(),
                 expected_bytes: 4096,
                 http_fallback_enabled: true,

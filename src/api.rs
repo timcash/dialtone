@@ -1243,13 +1243,13 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
             let fp = keys.fingerprint();
             let topic_id = keys.topic_id;
 
-            if raw_ticket.starts_with(crate::mesh::INVITE_TICKET_PREFIX) {
+            if raw_ticket.starts_with(crate::mesh::INVITE_PREFIX) {
                 let parsed_invite = match raw_ticket.parse::<crate::mesh::Invite>() {
                     Ok(inv) => inv,
                     Err(err) => return write_json(&mut stream, 400, &json!({ "error": err })),
                 };
                 let self_ep = st.iroh_runtime.node_id.clone();
-                if let Err(err) = crate::mesh::redeem_invite_ticket(
+                if let Err(err) = crate::mesh::redeem_invite(
                     &parsed_invite,
                     &keys,
                     &self_ep,
@@ -1372,7 +1372,8 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
-        ("GET", "/api/mesh") | ("GET", "/api/gossip") => {
+        ("GET", "/api/mesh") | ("GET", "/api/gossip") => { // compat
+            // compat| ("GET", "/api/gossip") => {
             st.reconcile_processes();
             let (blob_keys, blob_bytes) = count_store(&st.store_dir);
             let body = json!({
@@ -1411,16 +1412,26 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
             });
             write_json(&mut stream, 200, &body)
         }
-        ("HEAD", "/api/artifacts/blob") => {
-            let sha = query.get("digest").cloned().unwrap_or_default();
+        ("HEAD", "/api/blob") | ("HEAD", "/api/artifacts/blob") => { // compat
+            // compat
+            let sha = query
+                .get("digest")
+                .or_else(|| query.get("sha256")) // compat
+                .cloned()
+                .unwrap_or_default();
             if has_blob(&st.store_dir, &sha) {
                 write_response(&mut stream, 200, "application/octet-stream", b"", true)
             } else {
                 write_response(&mut stream, 404, "application/octet-stream", b"", true)
             }
         }
-        ("GET", "/api/artifacts/blob") => {
-            let sha = query.get("digest").cloned().unwrap_or_default();
+        ("GET", "/api/blob") | ("GET", "/api/artifacts/blob") => { // compat
+            // compat
+            let sha = query
+                .get("digest")
+                .or_else(|| query.get("sha256")) // compat
+                .cloned()
+                .unwrap_or_default();
             match read_blob(&st.store_dir, &sha) {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes, false)
@@ -1428,7 +1439,11 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 Err(err) => write_json(&mut stream, 404, &json!({ "error": err })),
             }
         }
-        ("POST", "/api/artifacts/blob") | ("POST", "/api/blobs/share") => {
+        ("POST", "/api/blob")
+        | ("POST", "/api/blob/share")
+        | ("POST", "/api/artifacts/blob") // compat
+        | ("POST", "/api/blobs/share") => { // compat
+            // compat
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
             let b64 = parsed
                 .get("bytes_base64")
@@ -1436,6 +1451,7 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 .unwrap_or_default();
             let expected_sha = parsed
                 .get("digest")
+                .or_else(|| parsed.get("sha256")) // compat
                 .and_then(Value::as_str)
                 .map(String::from);
             match crate::base64_decode(b64) {
@@ -1476,7 +1492,7 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err.to_string() })),
             }
         }
-        ("POST", "/api/blobs/pull") => {
+        ("POST", "/api/blob/pull") | ("POST", "/api/blobs/pull") => {
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
             let ticket_uri = parsed
                 .get("ticket_uri")
@@ -1516,12 +1532,17 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
-        ("POST", "/api/artifacts/fetch") | ("GET", "/api/blob-fetch-report") => {
+        ("GET", "/api/blob-fetch-report") | ("POST", "/api/artifacts/fetch") => { // compat
+            // compat
             let req = if method == "POST" {
                 serde_json::from_str::<TieredBlobFetchRequest>(body_part).map_err(|e| e.to_string())
             } else {
                 Ok(TieredBlobFetchRequest {
-                    digest: query.get("digest").cloned().unwrap_or_default(),
+                    digest: query
+                        .get("digest")
+                        .or_else(|| query.get("sha256")) // compat
+                        .cloned()
+                        .unwrap_or_default(),
                     uri: query.get("uri").cloned().unwrap_or_default(),
                     provider_node: query
                         .get("provider")
@@ -1686,6 +1707,7 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
 
             let mut digest = parsed
                 .get("digest")
+                .or_else(|| parsed.get("sha256")) // compat
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .trim()
@@ -1862,7 +1884,11 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 write_json(&mut stream, 404, &json!({ "error": "no process" }))
             }
         }
-        ("POST", "/api/e2e/tick") | ("GET", "/api/e2e/status") => {
+        ("POST", "/api/probe")
+        | ("GET", "/api/probe")
+        | ("POST", "/api/e2e/tick") // compat
+        | ("GET", "/api/e2e/status") => { // compat
+            // compat
             let report = if method == "POST" || st.probe.is_none() {
                 st.run_probe()
             } else {
@@ -2338,21 +2364,21 @@ mod tests {
         // 1. POST without token -> 401 Unauthorized
         let resp_unauth = raw_http_request(
             addr,
-            "POST /api/artifacts/blob HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 27\r\n\r\n{\"bytes_base64\":\"ZGlhbHRvbmU=\"}",
+            "POST /api/blob HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 27\r\n\r\n{\"bytes_base64\":\"ZGlhbHRvbmU=\"}",
         );
         assert!(resp_unauth.contains("401 Unauthorized"));
 
         // 2. POST with wrong token -> 401 Unauthorized
         let resp_wrong = raw_http_request(
             addr,
-            "POST /api/artifacts/blob HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer wrong-token\r\nContent-Type: application/json\r\nContent-Length: 27\r\n\r\n{\"bytes_base64\":\"ZGlhbHRvbmU=\"}",
+            "POST /api/blob HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer wrong-token\r\nContent-Type: application/json\r\nContent-Length: 27\r\n\r\n{\"bytes_base64\":\"ZGlhbHRvbmU=\"}",
         );
         assert!(resp_wrong.contains("401 Unauthorized"));
 
         // 3. POST with valid Bearer token -> 200 OK
         let body = "{\"bytes_base64\":\"ZGlhbHRvbmU=\"}";
         let req_ok = format!(
-            "POST /api/artifacts/blob HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer dtk-test-token-1234567890abcdef\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            "POST /api/blob HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer dtk-test-token-1234567890abcdef\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
             body
         );
@@ -2412,7 +2438,7 @@ mod tests {
     }
 
     #[test]
-    fn probe_capability_tick_verifies_all_five_capabilities_and_flips_ab_slot() {
+    fn probe_runs_all_five_checks_and_flips_ab_slot() {
         let tmp_dir = env::temp_dir().join(format!("dialtone-probe-tick-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let cfg = IrohTransportConfig::local_offline();

@@ -430,13 +430,15 @@ pub fn stage_program(
     Ok((normalized_sha, target_path))
 }
 
-pub const PROBE_PROGRAM_NAME: &str = "mesh-blob-worker";
+pub const PROBE_PROGRAM_NAME: &str = "probe";
+/// Name the probe program had before the domain-language rename; dropped from specs at boot.
+const OLD_PROBE_PROGRAM_NAME: &str = "mesh-blob-worker"; // compat
 
 /// Canonical cross-platform polyglot probe test process blob (`sh` on macOS/Linux, `cmd.exe` on Windows)
 /// sharing an identical SHA-256 digest across all OS/arch nodes in the mesh.
 /// Continuously exercises SHA-256 blobs, Key-Value store, Process supervision, Mesh connectivity, and A/B rollback.
 pub fn probe_program_bytes() -> &'static [u8] {
-    b":; while true; do if [ -n \"$APP_LISTEN\" ]; then \"$APP_BIN\" test-tick --listen \"$APP_LISTEN\"; fi; sleep 5; done; exit 0;\r\n@echo off\r\n:dialtone_blob_loop\r\nif defined APP_LISTEN \"%APP_BIN%\" test-tick --listen \"%APP_LISTEN%\"\r\nping -n 6 127.0.0.1 >NUL\r\ngoto dialtone_blob_loop\r\n"
+    b":; while true; do if [ -n \"$APP_LISTEN\" ]; then \"$APP_BIN\" probe --listen \"$APP_LISTEN\"; fi; sleep 5; done; exit 0;\r\n@echo off\r\n:dialtone_probe_loop\r\nif defined APP_LISTEN \"%APP_BIN%\" probe --listen \"%APP_LISTEN%\"\r\nping -n 6 127.0.0.1 >NUL\r\ngoto dialtone_probe_loop\r\n"
 }
 
 /// Automatically store, verify, and stage the default cross-platform process blob in `store_dir`
@@ -446,13 +448,14 @@ pub fn ensure_probe_program(
     specs: &mut Vec<ProcessSpec>,
     ticket_uri: Option<&str>,
 ) -> Result<ProcessSpec, String> {
+    specs.retain(|p| p.name != OLD_PROBE_PROGRAM_NAME);
     let payload = probe_program_bytes();
     let (digest, _) = crate::blob::put_blob(store_dir, payload, None)?;
     let (verified_sha, staged_path) = stage_program(store_dir, PROBE_PROGRAM_NAME, &digest)?;
 
     let mut env_vars = vec![
         "DIALTONE_MESH_DEPLOY=1".to_string(),
-        "PROCESS_ROLE=mesh-blob-worker".to_string(),
+        format!("PROCESS_ROLE={PROBE_PROGRAM_NAME}"),
     ];
     if let Some(t_uri) = ticket_uri.map(str::trim).filter(|s| !s.is_empty()) {
         env_vars.push(format!("DIALTONE_BLOB_TICKET={t_uri}"));

@@ -32,7 +32,7 @@ use crate::stats::{sample_stats, Stats, StatsSummary};
 pub const BEAT_SCHEMA: &str = "dialtone.iroh.beat.v1";
 pub const DIALTONE_ENVELOPE_SCHEMA_V2: &str = "dialtone.iroh.envelope.v2";
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
-pub const INVITE_TICKET_PREFIX: &str = "dialtone-invite-v1:";
+pub const INVITE_PREFIX: &str = "dialtone-invite-v1:";
 pub const DEFAULT_CHANNEL_NAME: &str = "dialtone";
 pub const DEFAULT_PEER_TTL_SECS: u64 = 300;
 pub const BEAT_INTERVAL_SECS: u64 = 5;
@@ -90,13 +90,13 @@ pub fn new_secret() -> String {
 }
 
 /// Estimate secret character-set entropy in bits and enforce minimum strength (Issue #1).
-/// Rejects empty strings, `"dialtone"`, `"default"`, `"dialtone2"`, `"password123"`, dictionary words,
+/// Rejects empty strings, `"dialtone"`, `"default"`, `"dialtone2"`, `"password123"`, dictionary words, // compat
 /// and strings with fewer than 16 characters or insufficient entropy.
 pub fn validate_secret(secret: &str) -> Result<String, String> {
     let trimmed = secret.trim();
     if trimmed.is_empty() {
         return Err(
-            "a channel secret is required to join the channel (run `dialtone gen-password` to generate one)"
+            "a channel secret is required to join the channel (run `dialtone secret` to generate one)"
                 .to_string(),
         );
     }
@@ -114,13 +114,13 @@ pub fn validate_secret(secret: &str) -> Result<String, String> {
     ];
     if FORBIDDEN_SUBSTRINGS.iter().any(|w| lower.contains(w)) {
         return Err(
-            "channel secret is too weak or contains a forbidden dictionary word (e.g. 'dialtone', 'default'); run `dialtone gen-password`"
+            "channel secret is too weak or contains a forbidden dictionary word (e.g. 'dialtone', 'default'); run `dialtone secret`"
                 .to_string(),
         );
     }
     if trimmed.len() < 16 {
         return Err(format!(
-            "channel secret must be at least 16 characters long (got {}); run `dialtone gen-password`",
+            "channel secret must be at least 16 characters long (got {}); run `dialtone secret`",
             trimmed.len()
         ));
     }
@@ -147,7 +147,7 @@ pub fn validate_secret(secret: &str) -> Result<String, String> {
         (has_lower as u8) + (has_upper as u8) + (has_digit as u8) + (has_symbol as u8);
     if unique_chars.len() < 8 || class_count < 2 {
         return Err(
-            "channel secret has insufficient entropy (must contain at least 2 character classes and 8+ unique characters); run `dialtone gen-password`"
+            "channel secret has insufficient entropy (must contain at least 2 character classes and 8+ unique characters); run `dialtone secret`"
                 .to_string(),
         );
     }
@@ -253,8 +253,8 @@ pub fn derive_channel_keys_v2(channel: &str, secret: &str) -> ChannelKeys {
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut master_key = [0u8; 32];
     argon2
-        .hash_password_into(clean_pass.as_bytes(), salt, &mut master_key)
-        .expect("Argon2id hash_password_into");
+        .hash_password_into(clean_pass.as_bytes(), salt, &mut master_key) // compat
+        .expect("Argon2id hash_password_into"); // compat
 
     // 3. Domain-separated v2 subkey expansion (HKDF-Expand equivalent over 256-bit PRK)
     let expand_subkey = |label: &[u8]| -> [u8; 32] {
@@ -462,7 +462,7 @@ pub fn revoke_peer_in_config(config_path: &Path, node_id: &str) -> Result<MeshCo
     Ok(cfg)
 }
 
-/// Expiring, single-use seed invite ticket signed with the channel's `auth_key` (Issue #6).
+/// Expiring, single-use invite signed with the channel's `auth_key` (Issue #6).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Invite {
     pub schema: String,
@@ -523,12 +523,12 @@ impl FromStr for Invite {
             .strip_prefix("dialtone-invite-v1:")
             .ok_or("not a dialtone-invite-v1 ticket")?;
         let bytes = crate::base64_decode(encoded)?;
-        serde_json::from_slice(&bytes).map_err(|e| format!("invalid invite ticket payload: {e}"))
+        serde_json::from_slice(&bytes).map_err(|e| format!("invalid invite payload: {e}"))
     }
 }
 
-/// Create a signed, expiring, single-use invite ticket (Issue #6).
-pub fn create_invite_ticket(
+/// Create a signed, expiring, single-use invite (Issue #6).
+pub fn new_invite(
     issuer_node_id: &str,
     relay_url: Option<&str>,
     keys: &ChannelKeys,
@@ -562,7 +562,7 @@ pub fn create_invite_ticket(
 /// Verify and redeem a single-use `Invite` (Issue #6).
 /// Checks signature, expiry, optional `bound_node_id`, and single-use `nonce`, records the used
 /// nonce in `cfg.used_invite_nonces`, and adds the issuer and redeemer to `cfg.allowlist`.
-pub fn redeem_invite_ticket(
+pub fn redeem_invite(
     ticket: &Invite,
     keys: &ChannelKeys,
     redeemer_node_id: &str,
@@ -575,27 +575,27 @@ pub fn redeem_invite_ticket(
     let expected_sig = ticket.compute_signature(&keys.auth_key);
     if !constant_time_eq(ticket.signature.as_bytes(), expected_sig.as_bytes()) {
         return Err(
-            "invite ticket signature verification failed (wrong channel secret or tampered ticket)"
+            "invite signature verification failed (wrong channel secret or tampered invite)"
                 .to_string(),
         );
     }
     if now_unix > ticket.expires_at_unix {
         return Err(format!(
-            "invite ticket has expired (expired_at={}, now={})",
+            "invite has expired (expired_at={}, now={})",
             ticket.expires_at_unix, now_unix
         ));
     }
     if let Some(ref bound) = ticket.bound_node_id {
         if !bound.trim().eq_ignore_ascii_case(redeemer_node_id.trim()) {
             return Err(format!(
-                "invite ticket is bound to node_id '{}' (cannot be redeemed by '{}')",
+                "invite is bound to node_id '{}' (cannot be redeemed by '{}')",
                 bound, redeemer_node_id
             ));
         }
     }
     if cfg.used_invite_nonces.iter().any(|n| n == &ticket.nonce) {
         return Err(format!(
-            "invite ticket nonce '{}' has already been used (single-use only)",
+            "invite nonce '{}' has already been used (single-use only)",
             ticket.nonce
         ));
     }
@@ -1936,7 +1936,7 @@ mod tests {
         assert!(validate_secret("   ").is_err());
         assert!(validate_secret("dialtone").is_err());
         assert!(validate_secret("dialtone2").is_err());
-        assert!(validate_secret("password123").is_err());
+        assert!(validate_secret("password123").is_err()); // compat
         assert!(validate_secret("default").is_err());
         assert!(validate_secret("short-pass-1").is_err());
         assert!(validate_secret("aaaaaaaaaaaaaaaaaaaa").is_err());
@@ -2223,13 +2223,13 @@ mod tests {
     }
 
     #[test]
-    fn issue_6_expiring_single_use_invite_tickets_reject_expired_or_reused_and_allow_peer() {
-        let keys = derive_channel_keys_v2("dialtone", "dt-InviteTicket_Test_Key_2026!");
+    fn issue_6_expiring_single_use_invites_reject_expired_or_reused_and_allow_peer() {
+        let keys = derive_channel_keys_v2("dialtone", "dt-InviteTicket_Test_Key_2026!"); // compat: test secret literal
         let issuer_id = iroh::SecretKey::generate().public().to_string();
         let redeemer_id = iroh::SecretKey::generate().public().to_string();
         let now = 10_000;
 
-        let invite = create_invite_ticket(
+        let invite = new_invite(
             &issuer_id,
             Some("https://usw1-1.relay.n0.iroh.link./"),
             &keys,
@@ -2245,22 +2245,22 @@ mod tests {
 
         // 1. Expired invite is rejected
         let expired_err =
-            redeem_invite_ticket(&parsed, &keys, &redeemer_id, now + 901, &mut cfg).unwrap_err();
+            redeem_invite(&parsed, &keys, &redeemer_id, now + 901, &mut cfg).unwrap_err();
         assert!(expired_err.contains("expired"));
 
         // 2. Wrong bound node_id is rejected
         let wrong_peer_err =
-            redeem_invite_ticket(&parsed, &keys, "wrong-endpoint", now + 10, &mut cfg).unwrap_err();
+            redeem_invite(&parsed, &keys, "wrong-endpoint", now + 10, &mut cfg).unwrap_err();
         assert!(wrong_peer_err.contains("bound to node_id"));
 
         // 3. Valid redemption succeeds and adds issuer & redeemer to allowlist
-        let _addr = redeem_invite_ticket(&parsed, &keys, &redeemer_id, now + 10, &mut cfg).unwrap();
+        let _addr = redeem_invite(&parsed, &keys, &redeemer_id, now + 10, &mut cfg).unwrap();
         assert!(cfg.allowlist.contains(&issuer_id));
         assert!(cfg.allowlist.contains(&redeemer_id));
 
-        // 4. Reusing the same invite ticket is rejected
+        // 4. Reusing the same invite is rejected
         let replay_err =
-            redeem_invite_ticket(&parsed, &keys, &redeemer_id, now + 20, &mut cfg).unwrap_err();
+            redeem_invite(&parsed, &keys, &redeemer_id, now + 20, &mut cfg).unwrap_err();
         assert!(replay_err.contains("already been used"));
     }
 
@@ -2297,7 +2297,7 @@ mod tests {
         assert_ne!(standby_a.as_bytes(), &legacy_public_bytes);
         assert_ne!(standby_b.as_bytes(), &legacy_public_bytes);
 
-        let keys = derive_channel_keys_v2("dialtone", "dt-StrongTestPassword_2026_Argon2id!");
+        let keys = derive_channel_keys_v2("dialtone", "dt-StrongTestPassword_2026_Argon2id!"); // compat
         assert_ne!(keys.topic_id.as_bytes(), &legacy_public_bytes);
     }
 

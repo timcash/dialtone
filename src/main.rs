@@ -17,15 +17,14 @@ use dialtone::deploy::{
 };
 use dialtone::mesh::{
     allow_peer_in_config_with_addrs, build_mesh_rtt_matrix, cached_local_public_ip_geo,
-    compute_rtt_ms_from_echo, create_invite_ticket, default_arch, default_config_path, default_os,
-    default_seeds, default_store_dir, derive_standby_topic_id, detect_default_node_name,
-    is_allowed_peer_in_list, load_mesh_config, monotonic_now_ms, new_secret, node_capabilities_for,
+    compute_rtt_ms_from_echo, default_arch, default_config_path, default_os, default_seeds,
+    default_store_dir, derive_standby_topic_id, detect_default_node_name, is_allowed_peer_in_list,
+    load_mesh_config, monotonic_now_ms, new_invite, new_secret, node_capabilities_for,
     node_role_for, normalize_channel_name, now_unix, observe_peer_remote_addrs, open_beat,
-    parse_duration_secs, place_nodes, redeem_invite_ticket, revoke_peer_in_config,
-    save_mesh_config, seal_beat, sign_beat, spawn_background_public_ip_geo_probe, validate_secret,
-    Beat, ChannelKeys, MeshControlCommand, PeerRttEcho, SeedList, StoreStats, BEAT_INTERVAL_SECS,
-    BEAT_SCHEMA, DEFAULT_CHANNEL_NAME, INVITE_TICKET_PREFIX, SUMMARY_EVERY_N_BEATS,
-    SUMMARY_INTERVAL_SECS,
+    parse_duration_secs, place_nodes, redeem_invite, revoke_peer_in_config, save_mesh_config,
+    seal_beat, sign_beat, spawn_background_public_ip_geo_probe, validate_secret, Beat, ChannelKeys,
+    MeshControlCommand, PeerRttEcho, SeedList, StoreStats, BEAT_INTERVAL_SECS, BEAT_SCHEMA,
+    DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
@@ -50,18 +49,18 @@ fn print_usage() {
          Single-binary Iroh 1.3 + Rust mesh control plane, 3D tactical HUD, blob store & daemon.\n\
          Running `dialtone` with no arguments boots in dependency order and prints the local Web HUD URL.\n\n\
          actions:\n\
-         \x20 up | start | hub         Boot in dependency order: Local Web HUD -> Blob Store -> Iroh QUIC -> Gossip Mesh\n\
-         \x20 join <secret>          Unlock & join the 'dialtone' gossip channel with a secret (live or persistent)\n\
-         \x20 gen-password             Generate a CSPRNG high-entropy channel secret (dt-...)\n\
-         \x20 peers [allow|revoke|list] [<node_id>] Manage the local peer allowlist in ~/.dialtone/config.json\n\
-         \x20 blobs [share|pull] <arg> Share a local file/payload or pull an iroh-blobs://ticket/... via the running daemon\n\
-         \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use seed invite ticket\n\
-         \x20 daemon [install|status]  Install or inspect persistent OS background daemon (survives restarts)\n\
-         \x20 test-tick                Execute one 5-capability probe verification tick (BLB, KVS, PRC, MSH, A/B) on local daemon\n\
-         \x20 fleet-test               Verify live daemon security posture, multi-node convergence & QUIC blob transfer\n\
-         \x20 index                    Run HTTP hud, registration, and state API server\n\
-         \x20 node                     Run headless Iroh 1.3 gossip + blob mesh peer node\n\
-         \x20 status                   Bind persistent Iroh 1.3 endpoint and print transport JSON\n\
+         \x20 up                       Start the node: HUD -> store -> Iroh QUIC -> mesh\n\
+         \x20 join <secret>            Unlock and join a channel with its secret\n\
+         \x20 secret                   Generate a new channel secret (dt-...)\n\
+         \x20 allowlist [list|add|remove] [<node_id>] Manage the allowlist in ~/.dialtone/config.json\n\
+         \x20 blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket\n\
+         \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use invite\n\
+         \x20 daemon [install|status]  Install or inspect the daemon that starts the node at login\n\
+         \x20 probe                    Run one probe on the local node (BLB, KVS, PRC, MSH, A/B)\n\
+         \x20 mesh-test                Check the running node's security, mesh convergence and blob transfer\n\
+         \x20 hud                      Serve the HUD and API only (no mesh)\n\
+         \x20 node                     Run the node without the HUD or API\n\
+         \x20 status                   Print this node's NodeId and transport report\n\
          \x20 self-test | ci           Run full 7-capability live verification suite\n\
          \x20 state-fixture            Print representative daemon state JSON\n\
          \x20 mesh-fixture             Print global mesh peer index JSON\n\
@@ -77,19 +76,19 @@ fn print_usage() {
          \x20 service                  Render OS login service unit (macos | linux | windows)\n\
          \x20 help                     Show this help\n\n\
          flags:\n\
-         \x20 --node <name>            Peer name (default: auto-detected hostname or saved config)\n\
-         \x20 --listen <addr>          Local Web HUD listen address (default: 127.0.0.1:8788)\n\
+         \x20 --node <name>            Node name (default: saved config or hostname)\n\
+         \x20 --listen <addr>          HUD and API listen address (default: 127.0.0.1:8788)\n\
          \x20 --api-token <token>      Explicit API bearer token for POST routes (default: ~/.dialtone/api-token)\n\
-         \x20 --channel <name>         Gossip channel name (default: dialtone)\n\
-         \x20 --password <pass>        Secret required to unlock & authenticate the gossip channel\n\
-         \x20 --bootstrap-ticket <t>   Seed Iroh gossip or invite ticket (repeatable)\n\
+         \x20 --channel <name>         Channel name (default: dialtone)\n\
+         \x20 --secret <secret>        Channel secret (or set DIALTONE_SECRET)\n\
+         \x20 --invite <invite>        Invite to redeem when joining (repeatable)\n\
          \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 300s; default: 15m)\n\
-         \x20 --peer <node_id>     Optional target EndpointId for 'dialtone invite' or 'dialtone peers'\n\
-         \x20 --addr <ip:port>         Static direct peer SocketAddr for 'dialtone peers allow' (repeatable)\n\
-         \x20 --expect-peers <count>   Expected converged peer count for 'dialtone fleet-test'\n\
-         \x20 --timeout <duration>     Timeout for 'dialtone fleet-test' (default: 15s)\n\
-         \x20 --force                  Force QUIC network transfer on 'dialtone blobs pull' even if cached\n\
-         \x20 --install-daemon         Register persistent OS service so dialtone survives restarts\n\
+         \x20 --peer <node_id>         Target NodeId for 'dialtone invite' or 'dialtone allowlist'\n\
+         \x20 --addr <ip:port>         Direct address for 'dialtone allowlist add' (repeatable)\n\
+         \x20 --expect-peers <count>   Expected peer count for 'dialtone mesh-test'\n\
+         \x20 --timeout <duration>     Timeout for 'dialtone mesh-test' (default: 15s)\n\
+         \x20 --force                  Pull over QUIC even if the blob is already in the store\n\
+         \x20 --install-daemon         Install the daemon so the node starts at login\n\
          \x20 --no-tailnet             Exclude Tailscale (100.64.0.0/10 & fd7a:115c:a1e0::/48) and bind physical IPv4\n\
          \x20 --allow-tailnet          Allow Tailscale interface addresses\n\
          \x20 --private-mesh           Disable relays, Pkarr DNS, and Mainline DHT (direct static peer QUIC only)\n\
@@ -127,11 +126,11 @@ struct CliOptions {
     secret_key: Option<String>,
     install_daemon: bool,
     daemon_subcmd: String,
-    peers_subcmd: String,
+    allowlist_subcmd: String,
     peer_target: Option<String>,
     peer_addrs: Vec<String>,
-    blobs_subcmd: String,
-    blobs_target: Option<String>,
+    blob_subcmd: String,
+    blob_target: Option<String>,
     force: bool,
     expect_peers: Option<usize>,
     timeout_secs: u64,
@@ -167,8 +166,9 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| normalize_channel_name(Some(&saved.channel)));
-    let env_secret = env::var("DIALTONE_PASSWORD")
-        .or_else(|_| env::var("DIALTONE_CHANNEL_PASSWORD"))
+    let env_secret = env::var("DIALTONE_SECRET")
+        .or_else(|_| env::var("DIALTONE_PASSWORD")) // compat
+        .or_else(|_| env::var("DIALTONE_CHANNEL_PASSWORD")) // compat
         .or_else(|_| env::var("DIALTONE_SECRET_KEY"))
         .ok()
         .filter(|s| !s.trim().is_empty());
@@ -186,11 +186,11 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         secret_key: env_secret.or(saved.secret_key),
         install_daemon: false,
         daemon_subcmd: "install".to_string(),
-        peers_subcmd: "list".to_string(),
+        allowlist_subcmd: "list".to_string(),
         peer_target: None,
         peer_addrs: Vec::new(),
-        blobs_subcmd: "share".to_string(),
-        blobs_target: None,
+        blob_subcmd: "share".to_string(),
+        blob_target: None,
         force: false,
         expect_peers: None,
         timeout_secs: 15,
@@ -230,39 +230,39 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.action = "self-test".to_string();
                 action_set = true;
             }
-            "fleet-test" | "mesh-test" if !action_set => {
-                opts.action = "fleet-test".to_string();
+            "mesh-test" | "fleet-test" /* compat */ if !action_set => { // compat
+                opts.action = "mesh-test".to_string();
                 action_set = true;
             }
-            "gen-password" | "generate-secret" if !action_set => {
-                opts.action = "gen-password".to_string();
+            "secret" | "generate-secret" | "gen-password" /* compat */ if !action_set => { // compat
+                opts.action = "secret".to_string();
                 action_set = true;
             }
-            "blobs" | "blob" if !action_set => {
-                opts.action = "blobs".to_string();
+            "blob" | "blobs" if !action_set => {
+                opts.action = "blob".to_string();
                 action_set = true;
                 if let Some(sub) = args.get(idx + 1) {
                     if !sub.starts_with('-') {
                         idx += 1;
-                        opts.blobs_subcmd = sub.clone();
+                        opts.blob_subcmd = sub.clone();
                         if let Some(target) = args.get(idx + 1) {
                             if !target.starts_with('-') {
                                 idx += 1;
-                                opts.blobs_target = Some(target.clone());
+                                opts.blob_target = Some(target.clone());
                             }
                         }
                     }
                 }
             }
-            "peers" | "peer" if !action_set => {
-                opts.action = "peers".to_string();
+            "allowlist" | "peers" | "peer" if !action_set => {
+                opts.action = "allowlist".to_string();
                 action_set = true;
                 if let Some(sub) = args.get(idx + 1) {
                     if !sub.starts_with('-') {
                         idx += 1;
-                        opts.peers_subcmd = sub.clone();
+                        opts.allowlist_subcmd = sub.clone();
                         if matches!(
-                            opts.peers_subcmd.as_str(),
+                            opts.allowlist_subcmd.as_str(),
                             "allow" | "add" | "revoke" | "remove" | "rm"
                         ) {
                             if let Some(target) = args.get(idx + 1) {
@@ -279,7 +279,15 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.action = "invite".to_string();
                 action_set = true;
             }
-            "up" | "start" if !action_set => {
+            "index" if !action_set => {
+                opts.action = "hud".to_string();
+                action_set = true;
+            }
+            "test-tick" if !action_set => { // compat
+                opts.action = "probe".to_string();
+                action_set = true;
+            }
+            "up" | "start" | "hub" if !action_set => {
                 opts.action = "up".to_string();
                 action_set = true;
             }
@@ -294,7 +302,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                                 && !pass.trim().is_empty()
                                 && !next_arg.starts_with("iroh-gossip-v1:")
                                 && !next_arg.starts_with("dialtone-gossip-v1:")
-                                && !next_arg.starts_with(INVITE_TICKET_PREFIX)
+                                && !next_arg.starts_with(INVITE_PREFIX)
                             {
                                 opts.channel = normalize_channel_name(Some(ch));
                                 opts.secret_key = Some(pass.trim().to_string());
@@ -319,9 +327,8 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             }
             cmd @ ("status"
             | "node"
-            | "index"
-            | "hub"
-            | "test-tick"
+            | "hud"
+            | "probe"
             | "state-fixture"
             | "mesh-fixture"
             | "gossip-fixture"
@@ -358,10 +365,10 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 let ch = args.get(idx).ok_or("missing --channel value")?;
                 opts.channel = normalize_channel_name(Some(ch));
             }
-            "--password" | "--channel-secret" | "--pass" | "--secret-key" | "--mesh-key"
-            | "--key" | "--secret" => {
+            "--secret" | "--channel-secret" | "--secret-key" | "--mesh-key" | "--key" | "--pass"
+            | "--password" /* compat */ => { // compat
                 idx += 1;
-                opts.secret_key = Some(args.get(idx).ok_or("missing --password value")?.clone());
+                opts.secret_key = Some(args.get(idx).ok_or("missing --secret value")?.clone());
             }
             "--ttl" => {
                 idx += 1;
@@ -397,12 +404,9 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "--install-daemon" | "--daemon" => {
                 opts.install_daemon = true;
             }
-            "--bootstrap-ticket" | "--join-ticket" => {
+            "--invite" | "--join-ticket" | "--bootstrap-ticket" /* compat */ => { // compat
                 idx += 1;
-                let t = args
-                    .get(idx)
-                    .ok_or("missing --bootstrap-ticket value")?
-                    .clone();
+                let t = args.get(idx).ok_or("missing --invite value")?.clone();
                 if !opts.invites.contains(&t) {
                     opts.invites.push(t);
                 }
@@ -829,7 +833,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         opts.listen = bound_addr.to_string();
         local_web_url = format!("http://{bound_addr}");
 
-        let mut runtime_state = if opts.action == "index" {
+        let mut runtime_state = if opts.action == "hud" {
             NodeState::new_seeded(
                 &opts.node,
                 &opts.action,
@@ -920,7 +924,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
 
         let state = Arc::new(Mutex::new(runtime_state));
         let max_reqs = if opts.once { Some(1) } else { None };
-        if opts.action == "index" {
+        if opts.action == "hud" {
             println!("index listening {local_web_url}");
             return serve_http_blocking(listener, state, max_reqs);
         }
@@ -966,7 +970,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     );
     if verbose_boot {
         println!(
-            "[BOOT 3/5] Content-Addressed Blob Store (iroh-blobs) ..... [READY] {} (stage blobs via Web UI or POST /api/artifacts/blob)",
+            "[BOOT 3/5] Content-Addressed Blob Store (iroh-blobs) ..... [READY] {} (stage blobs via Web UI or POST /api/blob)",
             blob_dir.display()
         );
     }
@@ -1065,10 +1069,10 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         let raw_tickets_snapshot = opts.invites.clone();
         let mut redeemed_any = false;
         for raw_t in &raw_tickets_snapshot {
-            if raw_t.starts_with(INVITE_TICKET_PREFIX) {
+            if raw_t.starts_with(INVITE_PREFIX) {
                 if let Ok(parsed_inv) = raw_t.parse::<dialtone::mesh::Invite>() {
                     if let Ok(issuer_addr) =
-                        redeem_invite_ticket(&parsed_inv, keys, &node_id, now, &mut saved_cfg)
+                        redeem_invite(&parsed_inv, keys, &node_id, now, &mut saved_cfg)
                     {
                         invite_peer_addrs.push(issuer_addr);
                         redeemed_any = true;
@@ -1666,7 +1670,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                     Some(&node_id),
                                 ) {
                                     eprintln!(
-                                        "[gossip-allowlist-reject] dropped unlisted peer node={} node_id={} on main 'dialtone' channel (run 'dialtone peers allow {}' to authorize)",
+                                        "[gossip-allowlist-reject] dropped unlisted peer node={} node_id={} on main 'dialtone' channel (run 'dialtone allowlist add {}' to authorize)",
                                         rx_beat.node, rx_beat.node_id, rx_beat.node_id
                                     );
                                     continue;
@@ -2022,14 +2026,14 @@ async fn main() {
             print_usage();
             Ok(())
         }
-        "gen-password" => {
+        "secret" => {
             let pw = new_secret();
             println!("{pw}");
             Ok(())
         }
-        "peers" => (|| -> Result<(), String> {
+        "allowlist" => (|| -> Result<(), String> {
             let cfg_path = default_config_path();
-            match opts.peers_subcmd.as_str() {
+            match opts.allowlist_subcmd.as_str() {
                 "list" | "ls" => {
                     let cfg = load_mesh_config(&cfg_path);
                     println!(
@@ -2049,7 +2053,7 @@ async fn main() {
                     let target = opts
                         .peer_target
                         .as_deref()
-                        .ok_or_else(|| "usage: dialtone peers allow <node_id> [--addr <ip:port>]".to_string())?;
+                        .ok_or_else(|| "usage: dialtone allowlist add <node_id> [--addr <ip:port>]".to_string())?;
                     let relay_override = opts.transport.relay_urls.first().map(String::as_str);
                     let updated = allow_peer_in_config_with_addrs(
                         &cfg_path,
@@ -2074,7 +2078,7 @@ async fn main() {
                     let target = opts
                         .peer_target
                         .as_deref()
-                        .ok_or_else(|| "usage: dialtone peers revoke <node_id>".to_string())?;
+                        .ok_or_else(|| "usage: dialtone allowlist remove <node_id>".to_string())?;
                     let updated = revoke_peer_in_config(&cfg_path, target)?;
                     println!(
                         "{}",
@@ -2089,20 +2093,20 @@ async fn main() {
                     Ok(())
                 }
                 other => Err(format!(
-                    "unknown peers subcommand {other:?}; use: dialtone peers [allow|revoke|list] [<node_id>]"
+                    "unknown allowlist subcommand {other:?}; use: dialtone allowlist [list|add|remove] [<node_id>]"
                 )),
             }
         })(),
-        "blobs" => (|| -> Result<(), String> {
+        "blob" => (|| -> Result<(), String> {
             let api_token = opts
                 .api_token
                 .clone()
                 .or_else(|| load_or_create_api_token().ok())
                 .unwrap_or_default();
-            match opts.blobs_subcmd.as_str() {
+            match opts.blob_subcmd.as_str() {
                 "share" | "push" | "stage" => {
-                    let arg = opts.blobs_target.as_deref().ok_or_else(|| {
-                        "usage: dialtone blobs share <file-path-or-payload>".to_string()
+                    let arg = opts.blob_target.as_deref().ok_or_else(|| {
+                        "usage: dialtone blob share <file-path-or-payload>".to_string()
                     })?;
                     let path = PathBuf::from(arg);
                     let raw_bytes = if path.exists() && path.is_file() {
@@ -2115,7 +2119,7 @@ async fn main() {
                     let resp = local_daemon_http_json(
                         &opts.listen,
                         "POST",
-                        "/api/blobs/share",
+                        "/api/blob/share",
                         Some(&json!({ "bytes_base64": b64 })),
                         &api_token,
                         15,
@@ -2125,7 +2129,7 @@ async fn main() {
                 }
                 "pull" | "fetch" | "get" => {
                     let ticket_uri = opts
-                        .blobs_target
+                        .blob_target
                         .as_deref()
                         .or_else(|| {
                             if opts.uri.starts_with("iroh-blobs://ticket/")
@@ -2137,13 +2141,13 @@ async fn main() {
                             }
                         })
                         .ok_or_else(|| {
-                            "usage: dialtone blobs pull <iroh-blobs://ticket/...#sha256:...> [--force]"
+                            "usage: dialtone blob pull <iroh-blobs://ticket/...#sha256:...> [--force]"
                                 .to_string()
                         })?;
                     let resp = local_daemon_http_json(
                         &opts.listen,
                         "POST",
-                        "/api/blobs/pull",
+                        "/api/blob/pull",
                         Some(&json!({
                             "ticket_uri": ticket_uri,
                             "force": opts.force
@@ -2155,11 +2159,11 @@ async fn main() {
                     Ok(())
                 }
                 other => Err(format!(
-                    "unknown blobs subcommand {other:?}; use: dialtone blobs [share|pull] <arg>"
+                    "unknown blob subcommand {other:?}; use: dialtone blob [share|pull] <arg>"
                 )),
             }
         })(),
-        "test-tick" => (|| -> Result<(), String> {
+        "probe" => (|| -> Result<(), String> {
             let api_token = opts
                 .api_token
                 .clone()
@@ -2168,7 +2172,7 @@ async fn main() {
             let resp = local_daemon_http_json(
                 &opts.listen,
                 "POST",
-                "/api/e2e/tick",
+                "/api/probe",
                 Some(&json!({})),
                 &api_token,
                 5,
@@ -2176,7 +2180,7 @@ async fn main() {
             println!("{}", serde_json::to_string_pretty(&resp).unwrap());
             Ok(())
         })(),
-        "fleet-test" => (|| -> Result<(), String> {
+        "mesh-test" => (|| -> Result<(), String> {
             let api_token = opts
                 .api_token
                 .clone()
@@ -2360,11 +2364,11 @@ async fn main() {
                 std::thread::sleep(Duration::from_millis(500));
             };
 
-            let probe_payload = format!("dialtone-fleet-test-probe-{}-{}", opts.node, now_unix());
+            let probe_payload = format!("dialtone-mesh-test-probe-{}-{}", opts.node, now_unix());
             let share_resp = local_daemon_http_json(
                 &opts.listen,
                 "POST",
-                "/api/blobs/share",
+                "/api/blob/share",
                 Some(&json!({
                     "bytes_base64": dialtone::base64_encode(probe_payload.as_bytes())
                 })),
@@ -2378,7 +2382,7 @@ async fn main() {
             let pull_resp = local_daemon_http_json(
                 &opts.listen,
                 "POST",
-                "/api/blobs/pull",
+                "/api/blob/pull",
                 Some(&json!({
                     "ticket_uri": ticket_uri,
                     "force": true
@@ -2427,7 +2431,7 @@ async fn main() {
                 k
             } else {
                 return Err(
-                    "cannot mint invite ticket: no channel keys configured (pass --password <SECRET> or run 'dialtone join <SECRET>' first)"
+                    "cannot mint invite: no channel keys configured (pass --secret <SECRET> or run 'dialtone join <SECRET>' first)"
                         .to_string(),
                 );
             };
@@ -2437,7 +2441,7 @@ async fn main() {
             let node_id = secret_key.public().to_string();
 
             let now = now_unix();
-            let invite = create_invite_ticket(
+            let invite = new_invite(
                 &node_id,
                 Some("https://usw1-1.relay.n0.iroh.link./"),
                 &keys,
@@ -2456,7 +2460,8 @@ async fn main() {
                     "bound_node_id": opts.peer_target,
                     "ttl_secs": opts.invite_ttl_secs,
                     "expires_at_unix": invite.expires_at_unix,
-                    "invite_ticket": invite_token
+                    "invite": invite_token,
+                    "invite_ticket": invite_token, // compat
                 }))
                 .unwrap()
             );
@@ -2469,7 +2474,7 @@ async fn main() {
                 .or_else(|| opts.invites.first().cloned())
             else {
                 eprintln!(
-                    "dialtone: usage: dialtone join <SECRET> [--channel dialtone] [--bootstrap-ticket <TICKET_OR_INVITE>] [--listen 127.0.0.1:8788]"
+                    "dialtone: usage: dialtone join <SECRET> [--channel dialtone] [--invite <INVITE>] [--listen 127.0.0.1:8788]"
                 );
                 std::process::exit(2);
             };
@@ -2496,7 +2501,7 @@ async fn main() {
             let now = now_unix();
 
             for t in &opts.invites {
-                if t.starts_with(INVITE_TICKET_PREFIX) {
+                if t.starts_with(INVITE_PREFIX) {
                     let parsed_inv = match t.parse::<dialtone::mesh::Invite>() {
                         Ok(inv) => inv,
                         Err(err) => {
@@ -2504,8 +2509,7 @@ async fn main() {
                             std::process::exit(2);
                         }
                     };
-                    if let Err(err) =
-                        redeem_invite_ticket(&parsed_inv, &keys, &self_ep_id, now, &mut cfg)
+                    if let Err(err) = redeem_invite(&parsed_inv, &keys, &self_ep_id, now, &mut cfg)
                     {
                         eprintln!("dialtone: {err}");
                         std::process::exit(2);
@@ -2696,7 +2700,7 @@ async fn main() {
             Ok(())
         }
         "node" => run_node(opts, false).await,
-        "up" | "start" | "index" | "hub" => run_node(opts, true).await,
+        "up" | "start" | "hud" => run_node(opts, true).await,
         other => Err(format!("unsupported action {other:?}")),
     };
 
