@@ -1515,6 +1515,32 @@ fn default_summary_interval_secs() -> u64 {
     SUMMARY_HEARTBEAT_INTERVAL_SECS
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeE2eTestReport {
+    pub worker_name: String,
+    pub worker_sha256: String,
+    pub worker_pid: Option<u32>,
+    #[serde(default)]
+    pub worker_blob_cas_path: String,
+    #[serde(default)]
+    pub worker_staged_path: String,
+    #[serde(default)]
+    pub worker_blob_ticket: String,
+    pub cycle: u64,
+    pub updated_at_unix: u64,
+    pub passed_count: u8,
+    pub total_count: u8,
+    pub sha_blobs_ok: bool,
+    pub key_value_ok: bool,
+    pub sub_processes_ok: bool,
+    pub mesh_connectivity_ok: bool,
+    pub ab_rollback_ok: bool,
+    pub active_slot: String,
+    pub verified_blob_sha256: String,
+    pub kv_key: String,
+    pub mesh_peers_seen: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DialtoneHeartbeat {
     pub schema: String,
@@ -1541,6 +1567,8 @@ pub struct DialtoneHeartbeat {
     pub summary_stats: Option<TelemetryWindowSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geo_location: Option<NodeGeoLocation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub e2e_test: Option<NodeE2eTestReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_mac: Option<String>,
     #[serde(default = "default_os")]
@@ -1907,6 +1935,7 @@ pub async fn verify_live_gossip_exchange(
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
         geo_location: None,
+        e2e_test: None,
     };
     sign_heartbeat_with_keys(&mut hb_a, &keys);
 
@@ -1957,6 +1986,7 @@ pub async fn verify_live_gossip_exchange(
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
         geo_location: None,
+        e2e_test: None,
     };
     sign_heartbeat_with_keys(&mut hb_b, &keys);
 
@@ -2133,6 +2163,7 @@ mod tests {
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
             geo_location: None,
+            e2e_test: None,
         };
 
         let wire_bytes = encrypt_heartbeat_for_gossip(&hb, &k1).unwrap();
@@ -2270,6 +2301,7 @@ mod tests {
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
             geo_location: None,
+            e2e_test: None,
         };
         let mut stale = fresh.clone();
         stale.node = "stale-peer".to_string();
@@ -2326,6 +2358,7 @@ mod tests {
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
             geo_location: None,
+            e2e_test: None,
         };
         let mut hb_b = hb_a.clone();
         hb_b.node = "node-beta".to_string();

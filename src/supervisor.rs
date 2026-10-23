@@ -433,6 +433,75 @@ pub fn stage_executable_blob(
     Ok((normalized_sha, target_path))
 }
 
+pub const DEFAULT_SUBPROCESS_BLOB_NAME: &str = "mesh-blob-worker";
+
+/// Canonical cross-platform polyglot E2E test subprocess blob (`sh` on macOS/Linux, `cmd.exe` on Windows)
+/// sharing an identical SHA-256 digest across all OS/arch nodes in the fleet.
+/// Continuously exercises SHA-256 blobs, Key-Value store, Subprocess supervision, Mesh connectivity, and A/B rollback.
+pub fn default_subprocess_blob_bytes() -> &'static [u8] {
+    b":; while true; do if [ -n \"$APP_LISTEN\" ]; then \"$APP_BIN\" test-tick --listen \"$APP_LISTEN\"; fi; sleep 5; done; exit 0;\r\n@echo off\r\n:dialtone_blob_loop\r\nif defined APP_LISTEN \"%APP_BIN%\" test-tick --listen \"%APP_LISTEN%\"\r\nping -n 6 127.0.0.1 >NUL\r\ngoto dialtone_blob_loop\r\n"
+}
+
+/// Automatically store, verify, and stage the default cross-platform subprocess blob in `blob_cache_dir`
+/// and ensure its `ManagedProcessSpec` is registered in `specs`.
+pub fn ensure_default_subprocess_blob(
+    blob_cache_dir: &Path,
+    specs: &mut Vec<ManagedProcessSpec>,
+    ticket_uri: Option<&str>,
+) -> Result<ManagedProcessSpec, String> {
+    let payload = default_subprocess_blob_bytes();
+    let (sha256, _) = crate::blobs::store_verified_blob(blob_cache_dir, payload, None)?;
+    let (verified_sha, staged_path) =
+        stage_executable_blob(blob_cache_dir, DEFAULT_SUBPROCESS_BLOB_NAME, &sha256)?;
+
+    let mut env_vars = vec![
+        "DIALTONE_MESH_DEPLOY=1".to_string(),
+        "WORKER_ROLE=mesh-blob-worker".to_string(),
+    ];
+    if let Some(t_uri) = ticket_uri.map(str::trim).filter(|s| !s.is_empty()) {
+        env_vars.push(format!("DIALTONE_BLOB_TICKET={t_uri}"));
+    } else if let Some(existing) = specs
+        .iter()
+        .find(|p| p.name == DEFAULT_SUBPROCESS_BLOB_NAME)
+    {
+        for kv in &existing.env {
+            if kv.starts_with("DIALTONE_BLOB_TICKET=") {
+                env_vars.push(kv.clone());
+            }
+        }
+    }
+
+    if let Some(existing) = specs
+        .iter_mut()
+        .find(|p| p.name == DEFAULT_SUBPROCESS_BLOB_NAME)
+    {
+        existing.path = staged_path.to_string_lossy().to_string();
+        existing.sha256 = verified_sha;
+        if existing.desired_state.trim().is_empty() {
+            existing.desired_state = "running".to_string();
+        }
+        existing.env = env_vars;
+        return Ok(existing.clone());
+    }
+
+    let spec = ManagedProcessSpec {
+        name: DEFAULT_SUBPROCESS_BLOB_NAME.to_string(),
+        path: staged_path.to_string_lossy().to_string(),
+        sha256: verified_sha,
+        desired_state: "running".to_string(),
+        args: Vec::new(),
+        env: env_vars,
+        cwd: None,
+        startup_grace_secs: Some(2),
+        status: None,
+        pid: None,
+        restart_count: 0,
+        service_unit: None,
+    };
+    specs.push(spec.clone());
+    Ok(spec)
+}
+
 #[derive(Debug)]
 struct SupervisedChild {
     child: Child,
@@ -477,11 +546,31 @@ impl ManagedProcessSupervisor {
                     }
                 }
                 if needs_spawn {
-                    let mut cmd = Command::new(&spec.path);
-                    cmd.args(&spec.args)
-                        .stdin(Stdio::null())
+                    #[cfg(unix)]
+                    let mut cmd = {
+                        let header = fs::read(&spec.path).unwrap_or_default();
+                        if header.starts_with(b":;") {
+                            let mut c = Command::new("/bin/sh");
+                            c.arg(&spec.path).args(&spec.args);
+                            c
+                        } else {
+                            let mut c = Command::new(&spec.path);
+                            c.args(&spec.args);
+                            c
+                        }
+                    };
+                    #[cfg(not(unix))]
+                    let mut cmd = {
+                        let mut c = Command::new(&spec.path);
+                        c.args(&spec.args);
+                        c
+                    };
+                    cmd.stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null());
+                    if let Ok(exe_path) = std::env::current_exe() {
+                        cmd.env("APP_BIN", exe_path);
+                    }
                     for kv in &spec.env {
                         if kv.starts_with("DIALTONE_") || kv.starts_with("DAEMON_V1_") {
                             continue;

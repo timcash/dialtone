@@ -2,6 +2,86 @@
 
 `dialtone` is a single-binary Rust + **Iroh 1.3** peer-to-peer mesh control plane, 3D tactical HUD & terminal `top` monitor, content-addressed blob store (`iroh-blobs`), and process supervisor. It runs without SSH, Git, or Tailscale/VPN runtime dependencies.
 
+```text
+$ dialtone --help
+DIALTONE v0.2.0 — Iroh 1.3 Encrypted Mesh Control Plane, SHA-256 Blob Store & 3D Tactical HUD
+
+USAGE:
+  dialtone [ACTION] [FLAGS]
+
+  Running `dialtone` with no arguments boots all 5 stages in dependency order
+  (Logger -> Local Web HUD -> SHA-256 Blob Store -> Iroh QUIC -> Encrypted Gossip Mesh),
+  stages & supervises the cross-platform E2E worker blob, and serves http://127.0.0.1:8788.
+
+CORE ACTIONS:
+  up | start | hub                         Boot full daemon: Web HUD + CAS Blob Store + QUIC + Gossip Mesh
+  status                                   Bind persistent Iroh 1.3 endpoint and print transport JSON
+  daemon [install|status]                  Install or inspect persistent OS login daemon (launchd / systemd / schtasks)
+  index                                    Run HTTP dashboard and state API server without gossip loop
+  node                                     Run headless Iroh 1.3 gossip + blob mesh peer node
+  help | -h | --help                       Print this CLI help menu
+
+CHANNEL, SECURITY & PEER ALLOWLIST:
+  gen-password                             Generate a CSPRNG 256-bit channel password (dt-...)
+  join <password>                          Derive Argon2id keys & unlock/join the encrypted gossip channel
+  invite [--ttl 15m] [--peer <id>]         Mint a signed, expiring, single-use bootstrap invite ticket
+  peers list                               List authorized peer EndpointIds and static seed addresses
+  peers allow <endpoint_id> [--addr <ip>]  Authorize a peer EndpointId (and optional static QUIC SocketAddr)
+  peers revoke <endpoint_id>               Revoke a peer EndpointId from the local allowlist
+
+BLOBS, SUBPROCESSES & VERIFICATION:
+  blobs share <file-or-string>             Store payload in SHA-256 CAS and mint an iroh-blobs://ticket/...
+  blobs pull <iroh-blobs-ticket> [--force] Pull & SHA-256 verify a blob from a mesh peer over QUIC
+  test-tick [--listen <addr>]              Execute one 5-capability E2E tick (BLB, KVS, PRC, MSH, A/B)
+  fleet-test [--expect-peers <n>]          Verify live daemon security posture, mesh convergence & QUIC blobs
+  self-test | ci                           Run full 7-capability offline + live Iroh 1.3 verification suite
+
+DIAGNOSTIC & PLANNER FIXTURES:
+  state-fixture                            Print representative daemon state JSON
+  mesh-fixture                             Print global mesh peer index JSON
+  gossip-fixture                           Print Iroh gossip & service discovery JSON
+  iroh-runtime-fixture                     Print Iroh 1.3 runtime identity & transport diagnostics
+  deploy-plan-fixture                      Print deploy target plan or build-decision evidence
+  blob-fetch-report                        Print tiered blob hydration plan (cache / iroh-blobs / fallback)
+  process-intent-fixture                   Print start/stop/restart process intent plan & diff
+  rollback-plan-fixture                    Print side-effect-free guarded A/B rollback plan
+  alert-ack-fixture                        Print side-effect-free alert acknowledgement preview
+  proof-validation-fixture                 Print session proof acceptance/rejection report
+  program-catalog-fixture                  Print program catalog & named dataset evidence
+  service [--os <macos|linux|windows>]     Render OS login service unit definition
+
+FLAGS:
+  --node <name>                            Node name (default: auto-detected hostname or saved config)
+  --listen <ip:port>                       Local Web HUD & API listen address (default: 127.0.0.1:8788)
+  --api-token <token>                      Bearer token for POST routes (default: ~/.dialtone/api-token)
+  --channel <name>                         Gossip channel name (default: dialtone)
+  --password <pass>                        Password to unlock & authenticate the gossip channel
+  --bootstrap-ticket <ticket>              Bootstrap gossip or dialtone-invite-v1 ticket (repeatable)
+  --ttl <duration>                         TTL for `dialtone invite` (e.g. 15m, 1h, 300s; default: 15m)
+  --peer <endpoint_id>                     Target EndpointId for `invite` or `peers`
+  --addr <ip:port>                         Direct peer QUIC SocketAddr for `peers allow` (repeatable)
+  --expect-peers <count>                   Expected converged peer count for `fleet-test`
+  --timeout <duration>                     Timeout for `fleet-test` (default: 15s)
+  --force                                  Force QUIC network transfer on `blobs pull` even if cached
+  --install-daemon                         Register persistent OS login service during `up` or `join`
+  --no-tailnet                             Strip Tailscale CGNAT/ULA IPs and bind physical LAN/WAN IPv4 (default)
+  --allow-tailnet                          Permit Tailscale interface addresses
+  --private-mesh                           Disable relays, Pkarr DNS & DHT (direct static peer QUIC only)
+  --quic-port <port>                       Explicit UDP port to bind for the Iroh QUIC endpoint
+  --lan                                    Enable mDNS local discovery (lan_only profile)
+  --dns / --no-dns                         Enable or disable public Pkarr DNS lookup/publish
+  --dht                                    Enable Mainline BitTorrent DHT lookup
+  --no-relay / --relay-only                Disable Iroh relay servers or force relay-only tickets
+  --relay-url <url>                        Custom Iroh relay URL (repeatable)
+  --once                                   Run one cycle and exit
+
+WEB HUD & KEYBOARD SHORTCUTS (http://127.0.0.1:8788):
+  Up / Down Arrow                          Zoom camera in/out across Layers 1..5 (GLOBE -> PROCESS)
+  Left / Right Arrow                       Step backward/forward through the 6-Step System Tour & Nodes
+  Double-Click Node / Row                  Zoom into focused node symbol (resets to L1 GLOBE after L5)
+  Click [1 MSH] .. [6 A/B] in Bottom CC    Jump directly to any capability step in the live Closed Captions
+```
+
 ---
 
 ## Quick Start (60 Seconds)

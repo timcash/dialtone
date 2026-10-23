@@ -62,6 +62,7 @@ fn print_usage() {
          \x20 blobs [share|pull] <arg> Share a local file/payload or pull an iroh-blobs://ticket/... via the running daemon\n\
          \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use bootstrap invite ticket\n\
          \x20 daemon [install|status]  Install or inspect persistent OS background daemon (survives restarts)\n\
+         \x20 test-tick                Execute one 5-capability E2E verification tick (BLB, KVS, PRC, MSH, A/B) on local daemon\n\
          \x20 fleet-test               Verify live daemon security posture, multi-node convergence & QUIC blob transfer\n\
          \x20 index                    Run HTTP dashboard, registration, and state API server\n\
          \x20 node                     Run headless Iroh 1.3 gossip + blob mesh peer node\n\
@@ -325,6 +326,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             | "node"
             | "index"
             | "hub"
+            | "test-tick"
             | "state-fixture"
             | "mesh-fixture"
             | "gossip-fixture"
@@ -538,6 +540,9 @@ fn upsert_heartbeat(nodes: &mut Vec<DialtoneHeartbeat>, mut hb: DialtoneHeartbea
         if hb.geo_location.is_none() {
             hb.geo_location = existing.geo_location.clone();
         }
+        if hb.e2e_test.is_none() {
+            hb.e2e_test = existing.e2e_test.clone();
+        }
         for (k, v) in &existing.peer_rtt_ms {
             hb.peer_rtt_ms.entry(k.clone()).or_insert(*v);
         }
@@ -588,6 +593,7 @@ fn build_self_heartbeat(
         observed_remote_addrs: vec!["local:self".to_string()],
         tailnet_used: false,
         geo_location: cached_local_public_ip_geo(),
+        e2e_test: None,
         channel_mac: None,
     }
 }
@@ -884,6 +890,13 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                 runtime_state.managed_processes.push(saved_proc);
             }
         }
+        if !opts.once {
+            let _ = dialtone::supervisor::ensure_default_subprocess_blob(
+                &blob_dir,
+                &mut runtime_state.managed_processes,
+                None,
+            );
+        }
         runtime_state.reconcile_live_processes();
 
         if !opts.once {
@@ -983,14 +996,36 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         .spawn();
 
     if let Some(st_arc) = &shared_state {
+        let bridge = LiveBlobBridge {
+            endpoint: endpoint.clone(),
+            store: blobs_mem_store.clone(),
+            memory_lookup: memory_lookup.clone(),
+            transport_config: opts.transport.clone(),
+            runtime_handle: tokio::runtime::Handle::current(),
+        };
+        let default_ticket = if !opts.once {
+            bridge
+                .share_verified_blob(
+                    &blob_dir,
+                    dialtone::supervisor::default_subprocess_blob_bytes(),
+                    None,
+                )
+                .ok()
+                .map(|r| r.ticket_uri)
+        } else {
+            None
+        };
         if let Ok(mut st) = st_arc.lock() {
-            st.blob_bridge = Some(LiveBlobBridge {
-                endpoint: endpoint.clone(),
-                store: blobs_mem_store.clone(),
-                memory_lookup: memory_lookup.clone(),
-                transport_config: opts.transport.clone(),
-                runtime_handle: tokio::runtime::Handle::current(),
-            });
+            st.blob_bridge = Some(bridge);
+            if !opts.once {
+                let _ = dialtone::supervisor::ensure_default_subprocess_blob(
+                    &blob_dir,
+                    &mut st.managed_processes,
+                    default_ticket.as_deref(),
+                );
+                st.reconcile_live_processes();
+                let _ = st.run_e2e_capability_tick();
+            }
         }
     }
 
@@ -1136,6 +1171,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
             st.reconcile_live_processes();
             initial_self_hb.managed_processes = st.managed_processes.clone();
             initial_self_hb.service_endpoints = st.service_endpoints.clone();
+            initial_self_hb.e2e_test = st.e2e_test.clone();
         }
     }
 
@@ -1235,6 +1271,8 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     }
 
     let mut last_broadcast_procs = initial_self_hb.managed_processes.clone();
+    let mut auto_pulled_peer_blobs: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
     let mut sample_tick = tokio::time::interval(Duration::from_secs(1));
     let mut hb_tick = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
     loop {
@@ -1468,6 +1506,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                     last_broadcast_procs = st.managed_processes.clone();
                     self_hb.managed_processes = st.managed_processes.clone();
                     self_hb.service_endpoints = st.service_endpoints.clone();
+                    self_hb.e2e_test = st.e2e_test.clone();
                     for n in &st.nodes {
                         if n.node != opts.node && !measured_peer_rtt_ms.contains_key(&n.node) {
                             missing_peer_rtt = true;
@@ -1583,6 +1622,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                                 st.reconcile_live_processes();
                                 self_hb.managed_processes = st.managed_processes.clone();
                                 self_hb.service_endpoints = st.service_endpoints.clone();
+                                self_hb.e2e_test = st.e2e_test.clone();
                             }
                         }
                         sign_heartbeat_with_keys(&mut self_hb, keys);
@@ -1745,38 +1785,148 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                             rx_hb.updated_at_unix = now_unix();
 
                             if let Some(st_arc) = &shared_state {
-                                let mut st = st_arc.lock().unwrap();
-                                let is_first_seen =
-                                    !st.nodes.iter().any(|n| n.node == peer_node_name);
-                                upsert_heartbeat(&mut st.nodes, rx_hb);
-                                let self_name = st.node.clone();
-                                if let Some(self_entry) =
-                                    st.nodes.iter_mut().find(|n| n.node == self_name)
+                                let mut pending_blob_pulls = Vec::new();
                                 {
-                                    self_entry.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                                    if let Some(local_geo) = cached_local_public_ip_geo() {
-                                        self_entry.geo_location = Some(local_geo);
+                                    let mut st = st_arc.lock().unwrap();
+                                    for peer_proc in &rx_hb.managed_processes {
+                                        if peer_proc.desired_state == "running"
+                                            && peer_proc
+                                                .env
+                                                .iter()
+                                                .any(|kv| kv == "DIALTONE_MESH_DEPLOY=1")
+                                        {
+                                            if let Some(t_uri) = peer_proc.env.iter().find_map(|kv| {
+                                                kv.strip_prefix("DIALTONE_BLOB_TICKET=")
+                                            }) {
+                                                let already_running = st
+                                                    .managed_processes
+                                                    .iter()
+                                                    .any(|p| {
+                                                        p.name == peer_proc.name
+                                                            && p.sha256 == peer_proc.sha256
+                                                            && p.status.as_deref() == Some("running")
+                                                    });
+                                                let pull_key = (
+                                                    rx_hb.endpoint_id.clone(),
+                                                    peer_proc.sha256.clone(),
+                                                );
+                                                if !already_running
+                                                    || auto_pulled_peer_blobs.insert(pull_key)
+                                                {
+                                                    if let Some(ref bridge) = st.blob_bridge {
+                                                        pending_blob_pulls.push((
+                                                            bridge.clone(),
+                                                            st.blob_cache_dir.clone(),
+                                                            peer_proc.clone(),
+                                                            t_uri.to_string(),
+                                                            rx_hb.node.clone(),
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    let is_first_seen =
+                                        !st.nodes.iter().any(|n| n.node == peer_node_name);
+                                    upsert_heartbeat(&mut st.nodes, rx_hb);
+                                    let self_name = st.node.clone();
+                                    if let Some(self_entry) =
+                                        st.nodes.iter_mut().find(|n| n.node == self_name)
+                                    {
+                                        self_entry.peer_rtt_ms = measured_peer_rtt_ms.clone();
+                                        if let Some(local_geo) = cached_local_public_ip_geo() {
+                                            self_entry.geo_location = Some(local_geo);
+                                        }
+                                    }
+                                    let rtt = build_mesh_rtt_matrix(&st.nodes);
+                                    resolve_fleet_node_locations(&mut st.nodes, &rtt);
+                                    st.mesh_rtt_ms = rtt;
+                                    st.refresh_live_alerts();
+                                    if is_first_seen {
+                                        st.record_event(
+                                            "mesh.peer_joined",
+                                            "info",
+                                            format!("Discovered mesh peer '{}'", peer_node_name),
+                                        );
+                                        st.record_log(
+                                            "gossip-mesh",
+                                            "INFO",
+                                            "stdout",
+                                            format!(
+                                                "peer '{}' joined active gossip swarm (rtt={})",
+                                                peer_node_name, rtt_log
+                                            ),
+                                        );
                                     }
                                 }
-                                let rtt = build_mesh_rtt_matrix(&st.nodes);
-                                resolve_fleet_node_locations(&mut st.nodes, &rtt);
-                                st.mesh_rtt_ms = rtt;
-                                st.refresh_live_alerts();
-                                if is_first_seen {
-                                    st.record_event(
-                                        "mesh.peer_joined",
-                                        "info",
-                                        format!("Discovered mesh peer '{}'", peer_node_name),
-                                    );
-                                    st.record_log(
-                                        "gossip-mesh",
-                                        "INFO",
-                                        "stdout",
-                                        format!(
-                                            "peer '{}' joined active gossip swarm (rtt={})",
-                                            peer_node_name, rtt_log
-                                        ),
-                                    );
+
+                                for (bridge, cache_dir, peer_proc, t_uri, provider_node) in
+                                    pending_blob_pulls
+                                {
+                                    let st_clone = Arc::clone(st_arc);
+                                    std::thread::spawn(move || {
+                                        if let Ok(rep) = bridge.pull_verified_blob_ticket(
+                                            &cache_dir,
+                                            &t_uri,
+                                            false,
+                                        ) {
+                                            if let Ok((verified_sha, staged_path)) =
+                                                dialtone::supervisor::stage_executable_blob(
+                                                    &cache_dir,
+                                                    &peer_proc.name,
+                                                    &rep.sha256,
+                                                )
+                                            {
+                                                if let Ok(mut st) = st_clone.lock() {
+                                                    if !st
+                                                        .blob_fetches
+                                                        .iter()
+                                                        .any(|f| f.ticket_uri == rep.ticket_uri)
+                                                    {
+                                                        st.blob_fetches.push(rep);
+                                                    }
+                                                    let needs_update = !st
+                                                        .managed_processes
+                                                        .iter()
+                                                        .any(|p| {
+                                                            p.name == peer_proc.name
+                                                                && p.sha256 == verified_sha
+                                                                && p.status.as_deref()
+                                                                    == Some("running")
+                                                        });
+                                                    if needs_update {
+                                                        let mut new_spec = peer_proc.clone();
+                                                        new_spec.sha256 = verified_sha;
+                                                        new_spec.path = staged_path
+                                                            .to_string_lossy()
+                                                            .to_string();
+                                                        new_spec.pid = None;
+                                                        new_spec.status = None;
+                                                        if let Some(ex) = st
+                                                            .managed_processes
+                                                            .iter_mut()
+                                                            .find(|p| p.name == new_spec.name)
+                                                        {
+                                                            *ex = new_spec;
+                                                        } else {
+                                                            st.managed_processes.push(new_spec);
+                                                        }
+                                                        st.reconcile_live_processes();
+                                                        st.record_log(
+                                                            "blob-supervisor",
+                                                            "INFO",
+                                                            "stdout",
+                                                            format!(
+                                                                "auto-deployed & executed subprocess blob '{}' from peer '{}'",
+                                                                peer_proc.name, provider_node
+                                                            ),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
                                 }
                             }
 
@@ -2017,6 +2167,23 @@ async fn main() {
                 )),
             }
         })(),
+        "test-tick" => (|| -> Result<(), String> {
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+            let resp = local_daemon_http_json(
+                &opts.listen,
+                "POST",
+                "/api/e2e/tick",
+                Some(&json!({})),
+                &api_token,
+                5,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&resp).unwrap());
+            Ok(())
+        })(),
         "fleet-test" => (|| -> Result<(), String> {
             let api_token = opts
                 .api_token
@@ -2170,6 +2337,8 @@ async fn main() {
                             "tailnet_used": tailnet_used,
                             "peer_rtt_ms": n.get("peer_rtt_ms"),
                             "geo_location": n.get("geo_location"),
+                            "managed_processes": n.get("managed_processes"),
+                            "e2e_test": n.get("e2e_test"),
                             "host_resources": {
                                 "cpu_cores": hr.get("cpu_cores"),
                                 "cpu_percent": hr.get("cpu_percent"),
