@@ -4221,7 +4221,7 @@ function canFireFx(kind, node, nowMs) {
 }
 
 function pushFx(fx) {
-  console.info(`[dialtone fx] ${fx.kind} @ ${fx.node}: ${fx.label}`);
+  console.info(`[dialtone fx] ${fx.kind} @ ${fx.node}: ${fx.label}${fx.source === "tour" ? " (tour replay)" : ""}`);
   while (activeFx.length >= FX_MAX_ACTIVE) {
     const old = activeFx.shift();
     old.objects.forEach(o => { fxGroup.remove(o); disposeFxObject(o); });
@@ -4232,7 +4232,8 @@ function pushFx(fx) {
 
 // Blob download into the node's SHA-256 CAS: ink particles stream down and converge into the node,
 // a hexagonal "hash lock" ring closes on it, and a BLB tag names the stored digest.
-function spawnBlobDownloadFx(nodeName, label, nowMs = performance.now()) {
+function spawnBlobDownloadFx(nodeName, label, source = "live") {
+  const nowMs = performance.now();
   const sv = siteVisuals.find(s => s.node === nodeName);
   if (!sv || !canFireFx("blob", nodeName, nowMs)) return;
   const inkCol = palette.accent.clone();
@@ -4262,6 +4263,7 @@ function spawnBlobDownloadFx(nodeName, label, nowMs = performance.now()) {
     kind: "blob",
     node: nodeName,
     label: `BLB ${label}`,
+    source,
     startMs: nowMs,
     dur,
     frame,
@@ -4293,7 +4295,8 @@ function spawnBlobDownloadFx(nodeName, label, nowMs = performance.now()) {
 
 // Subprocess start: the node's H3 cell lights up blue, a blue particle burst erupts from the node,
 // two rings ripple outward, and a PRC tag names the process and its PID.
-function spawnSubprocessStartFx(nodeName, procName, pid, nowMs = performance.now()) {
+function spawnSubprocessStartFx(nodeName, procName, pid, source = "live") {
+  const nowMs = performance.now();
   const sv = siteVisuals.find(s => s.node === nodeName);
   if (!sv || !canFireFx("spawn", nodeName, nowMs)) return;
   const blue = palette.blue.clone();
@@ -4352,6 +4355,7 @@ function spawnSubprocessStartFx(nodeName, procName, pid, nowMs = performance.now
     kind: "spawn",
     node: nodeName,
     label: `${procName} PID ${pid}`,
+    source,
     startMs: nowMs,
     dur,
     frame,
@@ -4465,9 +4469,9 @@ function replayTourStepFx(stepIdx, nodeName) {
   const running = procs.find(p => p && p.status === "running" && p.pid) || null;
   if (stepIdx === 1) {
     const sha = e2e.worker_sha256 || (running && running.sha256) || "";
-    if (sha) spawnBlobDownloadFx(nodeName, shortSha(sha));
+    if (sha) spawnBlobDownloadFx(nodeName, shortSha(sha), "tour");
   } else if (stepIdx === 2 && running) {
-    spawnSubprocessStartFx(nodeName, running.name, running.pid);
+    spawnSubprocessStartFx(nodeName, running.name, running.pid, "tour");
   }
 }
 
