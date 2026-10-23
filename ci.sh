@@ -30,7 +30,17 @@ echo "    Staged single binary: $(cat bin/dialtone.sha256)"
 
 BIN="./bin/dialtone"
 CI_BLOB_DIR=$(mktemp -d /tmp/dialtone-ci-blob-sup-XXXXXX)
-trap 'kill ${CI_DAEMON_PID:-} 2>/dev/null || true; rm -rf "$CI_BLOB_DIR" /tmp/dialtone-ci-*.json /tmp/dialtone-ci-*.log' EXIT
+# Stop the CI daemon *and* the blob worker subprocesses it supervises: killing the daemon
+# alone re-parents its workers to init, leaving one orphan per CI run.
+ci_cleanup() {
+  if [ -n "${CI_DAEMON_PID:-}" ]; then
+    kill "$CI_DAEMON_PID" 2>/dev/null || true
+    wait "$CI_DAEMON_PID" 2>/dev/null || true
+  fi
+  pkill -f "$CI_BLOB_DIR/run/" 2>/dev/null || true
+  rm -rf "$CI_BLOB_DIR" /tmp/dialtone-ci-*.json /tmp/dialtone-ci-*.log
+}
+trap ci_cleanup EXIT
 export DIALTONE_STATE_DIR="$CI_BLOB_DIR"
 
 echo "==> [4/5] Running end-to-end single-binary CLI & 7-capability acceptance suite"
@@ -220,8 +230,6 @@ assert "nats://" not in logs_txt, "fake seeded NATS log found in live daemon sta
 '
 echo "    7. Verified live /api/state reports real OS telemetry, 5s/30s summary stats, and non-synthetic logs"
 
-kill $CI_DAEMON_PID 2>/dev/null || true
-wait $CI_DAEMON_PID 2>/dev/null || true
-rm -rf "$CI_BLOB_DIR" /tmp/dialtone-ci-*.json /tmp/dialtone-ci-*.log
+ci_cleanup
 trap - EXIT
 echo "==> ALL LOCAL CI/CD CHECKS PASSED!"
