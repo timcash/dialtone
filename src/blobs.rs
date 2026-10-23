@@ -112,7 +112,16 @@ pub fn store_verified_blob(
         fs::create_dir_all(parent)
             .map_err(|e| format!("create blob dir {}: {e}", parent.display()))?;
     }
-    fs::write(&blob_path, bytes).map_err(|e| format!("write blob {}: {e}", blob_path.display()))?;
+    // Content-addressed: an intact existing copy is already correct, so skip the rewrite.
+    // This keeps the file's mtime at "first stored" (gossiped as the node's newest blob)
+    // instead of churning it on every E2E tick; a corrupted copy is still repaired.
+    let intact = fs::read(&blob_path)
+        .map(|existing| compute_sha256(&existing) == observed)
+        .unwrap_or(false);
+    if !intact {
+        fs::write(&blob_path, bytes)
+            .map_err(|e| format!("write blob {}: {e}", blob_path.display()))?;
+    }
     Ok((observed, blob_path))
 }
 
@@ -557,6 +566,32 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("blob sha256 mismatch"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restoring_an_intact_blob_keeps_mtime_but_repairs_a_corrupted_copy() {
+        let dir = env::temp_dir().join(format!("dialtone-blob-restore-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (_, path) = store_verified_blob(&dir, b"dialtone-program", None).unwrap();
+
+        let first_stored =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(first_stored)
+            .unwrap();
+        store_verified_blob(&dir, b"dialtone-program", None).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().modified().unwrap(),
+            first_stored
+        );
+
+        fs::write(&path, b"corrupted").unwrap();
+        store_verified_blob(&dir, b"dialtone-program", None).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"dialtone-program");
         let _ = fs::remove_dir_all(&dir);
     }
 
