@@ -1,15 +1,14 @@
-pub mod blobs;
+pub mod api;
+pub mod blob;
 pub mod deploy;
-pub mod evidence;
-pub mod gossip;
 pub mod h3_land;
-pub mod http;
-pub mod identity;
-pub mod metadata;
+pub mod hud;
+pub mod mesh;
+pub mod node;
+pub mod record;
+pub mod service;
+pub mod stats;
 pub mod supervisor;
-
-pub use metadata as refs;
-pub use supervisor as journal;
 
 use std::collections::HashMap;
 use std::env;
@@ -198,7 +197,8 @@ pub fn sha1_digest(data: &[u8]) -> [u8; 20] {
     out
 }
 
-use crate::blobs::{
+use crate::api::{serve_http_blocking, DaemonRuntimeState};
+use crate::blob::{
     compute_sha256, evaluate_tiered_blob_fetch, store_verified_blob, transfer_blob_via_iroh_ticket,
     BlobTransportReport, TieredBlobFetchRequest,
 };
@@ -207,17 +207,16 @@ use crate::deploy::{
     probe_build_cache, validate_manifest_contract, BuildCacheRecord, BuildProbeRequest,
     DeployManifest, DeploySlot,
 };
-use crate::evidence::{evaluate_proof_case, paginate_kv_records, plan_alert_ack};
-use crate::gossip::{
+use crate::mesh::{
     load_peer_cache, save_peer_cache, verify_live_gossip_exchange, DialtoneHeartbeat,
     DEFAULT_PEER_TTL_SECS,
 };
-use crate::http::{serve_http_blocking, DaemonRuntimeState};
-use crate::identity::{
+use crate::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
     load_or_create_secret_key_at, IrohTransportConfig, IrohTransportDiagnostics,
 };
-use crate::metadata::{
+use crate::record::{evaluate_proof_case, paginate_kv_records, plan_alert_ack};
+use crate::service::{
     resolve_service, DeployPolicyConfig, KeyLeaseDefinition, ManagedProcessSpec, PeerRef,
 };
 use crate::supervisor::{

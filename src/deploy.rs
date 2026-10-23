@@ -3,8 +3,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::blobs::{compute_sha256, normalize_sha256};
-use crate::metadata::DeployPolicyConfig;
+use crate::blob::{compute_sha256, normalize_sha256};
+use crate::service::DeployPolicyConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeployManifest {
@@ -488,12 +488,12 @@ pub fn install_persistent_os_daemon(
 
     if let Some(sec) = secret_key.filter(|s| !s.trim().is_empty()) {
         let cfg_path = state_dir.join("config.json");
-        let mut cfg = crate::gossip::load_mesh_config(&cfg_path);
+        let mut cfg = crate::mesh::load_mesh_config(&cfg_path);
         cfg.node_name = Some(node.to_string());
         cfg.listen_addr = Some(listen.to_string());
         let ch = cfg.channel.clone();
         cfg.apply_channel_password(&ch, sec.trim());
-        let _ = crate::gossip::save_mesh_config(&cfg_path, &cfg);
+        let _ = crate::mesh::save_mesh_config(&cfg_path, &cfg);
     }
 
     if os_kind == "macos" {

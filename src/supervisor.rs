@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::blobs::{compute_sha256, normalize_sha256, read_cached_blob};
-use crate::metadata::{InstalledBinary, ManagedProcessSpec};
+use crate::blob::{compute_sha256, normalize_sha256, read_cached_blob};
+use crate::service::{InstalledBinary, ManagedProcessSpec};
 
 pub const RTCORE_ARM_MAGIC: u32 = 0x4152_4d44;
 pub const RTCORE_MODE_BOUND_VERSION: u32 = 2;
@@ -450,7 +450,7 @@ pub fn ensure_default_subprocess_blob(
     ticket_uri: Option<&str>,
 ) -> Result<ManagedProcessSpec, String> {
     let payload = default_subprocess_blob_bytes();
-    let (sha256, _) = crate::blobs::store_verified_blob(blob_cache_dir, payload, None)?;
+    let (sha256, _) = crate::blob::store_verified_blob(blob_cache_dir, payload, None)?;
     let (verified_sha, staged_path) =
         stage_executable_blob(blob_cache_dir, DEFAULT_SUBPROCESS_BLOB_NAME, &sha256)?;
 
@@ -638,7 +638,7 @@ impl Drop for ManagedProcessSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blobs::store_verified_blob;
+    use crate::blob::store_verified_blob;
     use std::env;
 
     #[test]

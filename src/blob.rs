@@ -8,7 +8,7 @@ use iroh_blobs::{store::mem::MemStore, ticket::BlobTicket, BlobsProtocol};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::identity::{build_endpoint_builder, IrohTransportConfig};
+use crate::node::{build_endpoint_builder, IrohTransportConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlobTransportReport {
@@ -394,10 +394,8 @@ impl LiveBlobBridge {
                         .add_slice(&payload)
                         .await
                         .map_err(|e| format!("import blob into daemon MemStore: {e}"))?;
-                    let adv = crate::identity::advertised_endpoint_addr(
-                        &endpoint.addr(),
-                        &transport_config,
-                    );
+                    let adv =
+                        crate::node::advertised_endpoint_addr(&endpoint.addr(), &transport_config);
                     let provider_id = endpoint.id().to_string();
                     let ticket = BlobTicket::new(adv, tag.hash, tag.format);
                     let uri = format_blob_ticket_uri(&ticket, &sha_clone);

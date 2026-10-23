@@ -6,17 +6,18 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use dialtone::blobs::{
+use dialtone::api::{
+    count_blob_cache_stats, default_boot_stages, latest_blob_sha256, load_or_create_api_token,
+    serve_http_blocking, validate_listen_addr_security, DaemonRuntimeState,
+};
+use dialtone::blob::{
     evaluate_tiered_blob_fetch, store_verified_blob, LiveBlobBridge, TieredBlobFetchRequest,
 };
 use dialtone::deploy::{
     evaluate_deploy_build_decision, generate_deploy_plan, install_persistent_os_daemon,
     plan_rollback, render_os_service_unit,
 };
-use dialtone::evidence::{
-    evaluate_proof_case, plan_alert_ack, sample_live_host_resources, TelemetryRollingWindow,
-};
-use dialtone::gossip::{
+use dialtone::mesh::{
     allow_peer_in_config_with_addrs, build_mesh_rtt_matrix, cached_local_public_ip_geo,
     compute_rtt_ms_from_echo, create_invite_ticket, decrypt_heartbeat_from_gossip, default_arch,
     default_blob_cache_dir, default_config_path, default_fleet_seed_peers, default_os,
@@ -30,14 +31,12 @@ use dialtone::gossip::{
     PeerRttEcho, DEFAULT_CHANNEL_NAME, DIALTONE_HEARTBEAT_SCHEMA, HEARTBEAT_INTERVAL_SECS,
     INVITE_TICKET_PREFIX, SUMMARY_HEARTBEAT_EVERY_N_TICKS, SUMMARY_HEARTBEAT_INTERVAL_SECS,
 };
-use dialtone::http::{
-    count_blob_cache_stats, default_boot_stages, latest_blob_sha256, load_or_create_api_token,
-    serve_http_blocking, validate_listen_addr_security, DaemonRuntimeState,
-};
-use dialtone::identity::{
+use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
     load_or_create_secret_key_at, IrohRelayPolicy, IrohTransportConfig, IrohTransportDiagnostics,
 };
+use dialtone::record::{evaluate_proof_case, plan_alert_ack};
+use dialtone::stats::{sample_live_host_resources, TelemetryRollingWindow};
 use dialtone::supervisor::plan_process_intent;
 use dialtone::{collect_node_diagnostics, run_self_test};
 use futures_lite::StreamExt;
@@ -1079,7 +1078,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         let mut redeemed_any = false;
         for raw_t in &raw_tickets_snapshot {
             if raw_t.starts_with(INVITE_TICKET_PREFIX) {
-                if let Ok(parsed_inv) = raw_t.parse::<dialtone::gossip::InviteTicket>() {
+                if let Ok(parsed_inv) = raw_t.parse::<dialtone::mesh::InviteTicket>() {
                     if let Ok(issuer_addr) =
                         redeem_invite_ticket(&parsed_inv, keys, &endpoint_id, now, &mut saved_cfg)
                     {
@@ -2520,7 +2519,7 @@ async fn main() {
 
             for t in &opts.bootstrap_tickets {
                 if t.starts_with(INVITE_TICKET_PREFIX) {
-                    let parsed_inv = match t.parse::<dialtone::gossip::InviteTicket>() {
+                    let parsed_inv = match t.parse::<dialtone::mesh::InviteTicket>() {
                         Ok(inv) => inv,
                         Err(err) => {
                             eprintln!("dialtone: {err}");

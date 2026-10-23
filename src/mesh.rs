@@ -22,12 +22,12 @@ use iroh_gossip::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::evidence::{sample_live_host_resources, HostResourceTelemetry, TelemetryWindowSummary};
-use crate::identity::{
+use crate::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, is_tailnet_ip,
     IrohTransportConfig, IrohTransportDiagnostics,
 };
-use crate::refs::ServiceAdvertisement;
+use crate::service::ServiceAdvertisement;
+use crate::stats::{sample_live_host_resources, HostResourceTelemetry, TelemetryWindowSummary};
 
 pub const DIALTONE_HEARTBEAT_SCHEMA: &str = "dialtone.iroh.heartbeat.v1";
 pub const DIALTONE_ENVELOPE_SCHEMA_V2: &str = "dialtone.iroh.envelope.v2";
@@ -664,7 +664,7 @@ pub struct PersistentMeshConfig {
     pub bootstrap_tickets: Vec<String>,
     pub daemon_installed: bool,
     pub daemon_service_path: Option<String>,
-    pub managed_processes: Vec<crate::metadata::ManagedProcessSpec>,
+    pub managed_processes: Vec<crate::service::ManagedProcessSpec>,
     pub updated_at_unix: u64,
 }
 
@@ -1540,7 +1540,7 @@ pub struct DialtoneHeartbeat {
     pub host_resources: HostResourceTelemetry,
     pub service_endpoints: Vec<ServiceAdvertisement>,
     #[serde(default)]
-    pub managed_processes: Vec<crate::metadata::ManagedProcessSpec>,
+    pub managed_processes: Vec<crate::service::ManagedProcessSpec>,
     pub iroh_transport: IrohTransportDiagnostics,
     #[serde(default)]
     pub observed_remote_addrs: Vec<String>,
