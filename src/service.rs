@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Canonical peer-first service/process/artifact URI:
+/// Canonical peer-first service/process/blob URI:
 /// `dialtone://<peer-name>/<role>/<name>` (also accepts `daemon-v1://`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerRef {
@@ -65,7 +65,7 @@ impl PeerRef {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServiceAdvertisement {
+pub struct Service {
     pub name: String,
     pub kind: String,
     pub protocol: String,
@@ -82,9 +82,9 @@ pub struct ServiceAdvertisement {
 
 pub fn resolve_service<'a>(
     reference: &PeerRef,
-    services: &'a [ServiceAdvertisement],
-) -> Result<&'a ServiceAdvertisement, String> {
-    let candidates: Vec<&ServiceAdvertisement> = services
+    services: &'a [Service],
+) -> Result<&'a Service, String> {
+    let candidates: Vec<&Service> = services
         .iter()
         .filter(|svc| {
             svc.advertised_by.eq_ignore_ascii_case(&reference.peer)
@@ -122,17 +122,19 @@ pub fn resolve_service<'a>(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InstalledBinary {
+pub struct InstalledProgram {
     pub name: String,
     pub path: String,
-    pub sha256: String,
+    #[serde(alias = "sha256")] // compat
+    pub digest: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ManagedProcessSpec {
+pub struct ProcessSpec {
     pub name: String,
     pub path: String,
-    pub sha256: String,
+    #[serde(alias = "sha256")] // compat
+    pub digest: String,
     pub desired_state: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -246,7 +248,7 @@ impl Default for DeployPolicyConfig {
     fn default() -> Self {
         Self {
             manifest_schemas: vec![
-                "dialtone.artifact_manifest.v1".to_string(),
+                "dialtone.blob_manifest.v1".to_string(),
                 "daemon.v1.artifact_manifest.v1".to_string(),
             ],
             source_bundle_schemas: vec![
@@ -257,7 +259,7 @@ impl Default for DeployPolicyConfig {
             forbidden_build_input_segments: vec![
                 ".git".to_string(),
                 ".run".to_string(),
-                "artifacts".to_string(),
+                "blobs".to_string(),
                 "bin".to_string(),
                 "dist".to_string(),
                 "node_modules".to_string(),
@@ -378,7 +380,7 @@ mod tests {
     fn peer_ref_expands_node_template_and_resolves_service() {
         let parsed =
             PeerRef::expand_template("dialtone://{node}/controller/nats", "node-alpha").unwrap();
-        let services = vec![ServiceAdvertisement {
+        let services = vec![Service {
             name: "nats".to_string(),
             kind: "nats-jetstream".to_string(),
             protocol: "nats".to_string(),

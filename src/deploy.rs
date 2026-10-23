@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::blob::{compute_sha256, normalize_sha256};
+use crate::blob::{digest_of, normalize_digest};
 use crate::service::DeployPolicyConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -14,10 +14,13 @@ pub struct DeployManifest {
     pub target_host: String,
     pub component: String,
     pub source_tree_hash: String,
-    pub source_bundle_sha256: String,
+    #[serde(alias = "source_bundle_sha256")] // compat
+    pub source_bundle_digest: String,
     pub source_bundle_uri: String,
-    pub binary_sha256: String,
-    pub binary_blob_uri: String,
+    #[serde(alias = "binary_sha256")] // compat
+    pub program_digest: String,
+    #[serde(alias = "binary_blob_uri")] // compat
+    pub program_ticket: String,
     pub runtime_path: String,
     pub build_inputs: Vec<String>,
     #[serde(default)]
@@ -49,16 +52,16 @@ pub fn validate_manifest_contract(
                 .to_string(),
         );
     }
-    let _ = normalize_sha256(&manifest.source_bundle_sha256)?;
-    let _ = normalize_sha256(&manifest.binary_sha256)?;
+    let _ = normalize_digest(&manifest.source_bundle_digest)?;
+    let _ = normalize_digest(&manifest.program_digest)?;
 
     if !manifest
         .source_bundle_uri
         .starts_with("iroh-blobs://ticket/")
-        || !manifest.binary_blob_uri.starts_with("iroh-blobs://ticket/")
+        || !manifest.program_ticket.starts_with("iroh-blobs://ticket/")
     {
         return Err(
-            "manifest rejected: source_bundle_uri and binary_blob_uri must use iroh-blobs://ticket/..."
+            "manifest rejected: source_bundle_uri and program_ticket must use iroh-blobs://ticket/..."
                 .to_string(),
         );
     }
@@ -110,14 +113,17 @@ pub struct BuildCacheRecord {
     pub target_host: String,
     pub component: String,
     pub source_tree_hash: String,
-    pub source_bundle_sha256: String,
+    #[serde(alias = "source_bundle_sha256")] // compat
+    pub source_bundle_digest: String,
     pub build_profile: String,
     pub toolchain: String,
     pub platform_os: String,
     pub platform_arch: String,
     pub target_triple: String,
-    pub binary_sha256: String,
-    pub binary_blob_uri: String,
+    #[serde(alias = "binary_sha256")] // compat
+    pub program_digest: String,
+    #[serde(alias = "binary_blob_uri")] // compat
+    pub program_ticket: String,
     pub status: String,
 }
 
@@ -126,7 +132,8 @@ pub struct BuildProbeRequest {
     pub target_host: String,
     pub component: String,
     pub source_tree_hash: String,
-    pub source_bundle_sha256: String,
+    #[serde(alias = "source_bundle_sha256")] // compat
+    pub source_bundle_digest: String,
     pub build_profile: String,
     pub toolchain: String,
     pub platform_os: String,
@@ -140,8 +147,10 @@ pub struct BuildProbeResponse {
     pub cache_hit: bool,
     pub provider_peer: Option<String>,
     pub exact_target_match: bool,
-    pub binary_sha256: Option<String>,
-    pub binary_blob_uri: Option<String>,
+    #[serde(alias = "binary_sha256")] // compat
+    pub program_digest: Option<String>,
+    #[serde(alias = "binary_blob_uri")] // compat
+    pub program_ticket: Option<String>,
     pub transferred_bytes: u64,
     pub compiler_invoked: bool,
 }
@@ -158,7 +167,7 @@ pub fn probe_build_cache(
             c.status == "ready"
                 && c.component == req.component
                 && c.source_tree_hash == req.source_tree_hash
-                && c.source_bundle_sha256 == req.source_bundle_sha256
+                && c.source_bundle_digest == req.source_bundle_digest
                 && c.build_profile == req.build_profile
                 && c.toolchain == req.toolchain
                 && c.platform_os == req.platform_os
@@ -175,8 +184,8 @@ pub fn probe_build_cache(
             cache_hit: true,
             provider_peer: Some(exact.peer_node.clone()),
             exact_target_match: true,
-            binary_sha256: Some(exact.binary_sha256.clone()),
-            binary_blob_uri: Some(exact.binary_blob_uri.clone()),
+            program_digest: Some(exact.program_digest.clone()),
+            program_ticket: Some(exact.program_ticket.clone()),
             transferred_bytes: 0,
             compiler_invoked: false,
         };
@@ -187,8 +196,8 @@ pub fn probe_build_cache(
             cache_hit: true,
             provider_peer: Some(cross_peer.peer_node.clone()),
             exact_target_match: false,
-            binary_sha256: Some(cross_peer.binary_sha256.clone()),
-            binary_blob_uri: Some(cross_peer.binary_blob_uri.clone()),
+            program_digest: Some(cross_peer.program_digest.clone()),
+            program_ticket: Some(cross_peer.program_ticket.clone()),
             transferred_bytes: 0,
             compiler_invoked: false,
         };
@@ -198,8 +207,8 @@ pub fn probe_build_cache(
         cache_hit: false,
         provider_peer: None,
         exact_target_match: false,
-        binary_sha256: None,
-        binary_blob_uri: None,
+        program_digest: None,
+        program_ticket: None,
         transferred_bytes: 0,
         compiler_invoked: !req.cache_only,
     }
@@ -213,7 +222,8 @@ pub struct DeployBuildDecision {
     pub peer_local_build: bool,
     pub async_non_blocking: bool,
     pub api_state_responsive: bool,
-    pub output_sha256: String,
+    #[serde(alias = "output_sha256")] // compat
+    pub output_digest: String,
     pub parse_ms: u64,
     pub peer_fetch_ms: u64,
     pub build_ms: u64,
@@ -232,7 +242,7 @@ pub fn evaluate_deploy_build_decision(case: &str) -> Result<DeployBuildDecision,
             peer_local_build: false,
             async_non_blocking: true,
             api_state_responsive: true,
-            output_sha256: sample_sha,
+            output_digest: sample_sha,
             parse_ms: 1,
             peer_fetch_ms: 0,
             build_ms: 0,
@@ -246,7 +256,7 @@ pub fn evaluate_deploy_build_decision(case: &str) -> Result<DeployBuildDecision,
             peer_local_build: false,
             async_non_blocking: true,
             api_state_responsive: true,
-            output_sha256: sample_sha,
+            output_digest: sample_sha,
             parse_ms: 2,
             peer_fetch_ms: 14,
             build_ms: 0,
@@ -260,7 +270,7 @@ pub fn evaluate_deploy_build_decision(case: &str) -> Result<DeployBuildDecision,
             peer_local_build: true,
             async_non_blocking: true,
             api_state_responsive: true,
-            output_sha256: sample_sha,
+            output_digest: sample_sha,
             parse_ms: 2,
             peer_fetch_ms: 18,
             build_ms: 420,
@@ -277,7 +287,8 @@ pub fn evaluate_deploy_build_decision(case: &str) -> Result<DeployBuildDecision,
 pub struct DeployPlan {
     pub deploy_target: String,
     pub target_peers: Vec<String>,
-    pub artifacts: Vec<String>,
+    #[serde(alias = "artifacts")] // compat
+    pub blobs: Vec<String>,
     pub includes_daemon_self_update: bool,
 }
 
@@ -291,7 +302,7 @@ pub fn generate_deploy_plan(deploy_target: &str) -> Result<DeployPlan, String> {
                 "edge-1".to_string(),
                 "pendant-1".to_string(),
             ],
-            artifacts: vec![
+            blobs: vec![
                 "robot-v4-cartesiand".to_string(),
                 "robot-v4-rtcore".to_string(),
                 "robot-v4-pendant-ui".to_string(),
@@ -306,7 +317,7 @@ pub fn generate_deploy_plan(deploy_target: &str) -> Result<DeployPlan, String> {
                 "edge-1".to_string(),
                 "pendant-1".to_string(),
             ],
-            artifacts: vec!["dialtone".to_string()],
+            blobs: vec!["dialtone".to_string()],
             includes_daemon_self_update: true,
         }),
         "all-with-daemons" => Ok(DeployPlan {
@@ -317,7 +328,7 @@ pub fn generate_deploy_plan(deploy_target: &str) -> Result<DeployPlan, String> {
                 "edge-1".to_string(),
                 "pendant-1".to_string(),
             ],
-            artifacts: vec![
+            blobs: vec![
                 "dialtone".to_string(),
                 "robot-v4-cartesiand".to_string(),
                 "robot-v4-rtcore".to_string(),
@@ -336,9 +347,11 @@ pub struct DeploySlot {
     pub name: String,
     pub active: bool,
     pub path: String,
-    pub sha256: String,
+    #[serde(alias = "sha256")] // compat
+    pub digest: String,
     pub previous_path: Option<String>,
-    pub previous_sha256: Option<String>,
+    #[serde(alias = "previous_sha256")] // compat
+    pub previous_digest: Option<String>,
     pub status: String,
 }
 
@@ -347,9 +360,11 @@ pub struct RollbackPlan {
     pub target_node: String,
     pub slot: String,
     pub current_path: String,
-    pub current_sha256: String,
+    #[serde(alias = "current_sha256")] // compat
+    pub current_digest: String,
     pub previous_path: String,
-    pub previous_sha256: String,
+    #[serde(alias = "previous_sha256")] // compat
+    pub previous_digest: String,
     pub eligible: bool,
     pub side_effect_free_preview: bool,
     pub manual_apply_guard: String,
@@ -362,19 +377,19 @@ pub fn plan_rollback(target_node: &str, slot: &DeploySlot) -> Result<RollbackPla
         .clone()
         .ok_or_else(|| format!("slot {} has no previous_path", slot.name))?;
     let prev_sha = slot
-        .previous_sha256
+        .previous_digest
         .clone()
-        .ok_or_else(|| format!("slot {} has no previous_sha256", slot.name))?;
-    let _ = normalize_sha256(&slot.sha256)?;
-    let _ = normalize_sha256(&prev_sha)?;
+        .ok_or_else(|| format!("slot {} has no previous_digest", slot.name))?;
+    let _ = normalize_digest(&slot.digest)?;
+    let _ = normalize_digest(&prev_sha)?;
 
     Ok(RollbackPlan {
         target_node: target_node.to_string(),
         slot: slot.name.clone(),
         current_path: slot.path.clone(),
-        current_sha256: slot.sha256.clone(),
+        current_digest: slot.digest.clone(),
         previous_path: prev_path,
-        previous_sha256: prev_sha,
+        previous_digest: prev_sha,
         eligible: slot.active,
         side_effect_free_preview: true,
         manual_apply_guard:
@@ -391,39 +406,39 @@ pub fn execute_verified_rollback(slot: &mut DeploySlot) -> Result<(), String> {
         .clone()
         .ok_or_else(|| "missing previous_path for rollback".to_string())?;
     let prev_sha = slot
-        .previous_sha256
+        .previous_digest
         .clone()
-        .ok_or_else(|| "missing previous_sha256 for rollback".to_string())?;
+        .ok_or_else(|| "missing previous_digest for rollback".to_string())?;
 
     let cur_bytes =
         fs::read(&slot.path).map_err(|e| format!("read current slot {}: {e}", slot.path))?;
-    if compute_sha256(&cur_bytes) != normalize_sha256(&slot.sha256)? {
+    if digest_of(&cur_bytes) != normalize_digest(&slot.digest)? {
         return Err("current slot binary SHA-256 mismatch".to_string());
     }
     let prev_bytes =
         fs::read(&prev_path).map_err(|e| format!("read previous slot {}: {e}", prev_path))?;
-    if compute_sha256(&prev_bytes) != normalize_sha256(&prev_sha)? {
+    if digest_of(&prev_bytes) != normalize_digest(&prev_sha)? {
         return Err("previous slot binary SHA-256 mismatch".to_string());
     }
 
     let old_path = slot.path.clone();
-    let old_sha = slot.sha256.clone();
+    let old_sha = slot.digest.clone();
     slot.path = prev_path;
-    slot.sha256 = prev_sha;
+    slot.digest = prev_sha;
     slot.previous_path = Some(old_path);
-    slot.previous_sha256 = Some(old_sha);
+    slot.previous_digest = Some(old_sha);
     slot.status = "rolled_back".to_string();
     Ok(())
 }
 
 pub fn render_install_v1_sh(base_url: &str) -> String {
     format!(
-        "#!/usr/bin/env sh\nset -eu\n# dialtone install/v1 bootstrap\nSERVER=\"{base_url}\"\ncurl -fsSL \"$SERVER/install/v1/manifest.json\" -o /tmp/dialtone-install-manifest.json\necho \"dialtone bootstrap manifest fetched from $SERVER\"\n"
+        "#!/usr/bin/env sh\nset -eu\n# dialtone install/v1 seed\nSERVER=\"{base_url}\"\ncurl -fsSL \"$SERVER/install/v1/manifest.json\" -o /tmp/dialtone-install-manifest.json\necho \"dialtone seed manifest fetched from $SERVER\"\n"
     )
 }
 
-pub fn render_os_service_unit(os_kind: &str, binary_path: &Path, node: &str) -> String {
-    let bin = binary_path.display();
+pub fn render_os_service_unit(os_kind: &str, program_path: &Path, node: &str) -> String {
+    let bin = program_path.display();
     if os_kind == "macos" {
         format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>com.timcash.dialtone</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>{bin}</string>\n    <string>up</string>\n    <string>--node</string>\n    <string>{node}</string>\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <true/>\n</dict>\n</plist>\n"
@@ -443,7 +458,8 @@ pub struct DaemonInstallReport {
     pub os: String,
     pub node: String,
     pub listen: String,
-    pub installed_binary_path: String,
+    #[serde(alias = "installed_binary_path")] // compat
+    pub program_path: String,
     pub service_unit_path: String,
     pub survives_restarts: bool,
     pub instructions: String,
@@ -492,7 +508,7 @@ pub fn install_persistent_os_daemon(
         cfg.node_name = Some(node.to_string());
         cfg.listen_addr = Some(listen.to_string());
         let ch = cfg.channel.clone();
-        cfg.apply_channel_password(&ch, sec.trim());
+        cfg.apply_secret(&ch, sec.trim());
         let _ = crate::mesh::save_mesh_config(&cfg_path, &cfg);
     }
 
@@ -524,7 +540,7 @@ pub fn install_persistent_os_daemon(
             os: os_kind.to_string(),
             node: node.to_string(),
             listen: listen.to_string(),
-            installed_binary_path: dest_bin.to_string_lossy().to_string(),
+            program_path: dest_bin.to_string_lossy().to_string(),
             service_unit_path: plist_path.to_string_lossy().to_string(),
             survives_restarts: true,
             instructions: format!(
@@ -580,7 +596,7 @@ pub fn install_persistent_os_daemon(
             os: os_kind.to_string(),
             node: node.to_string(),
             listen: listen.to_string(),
-            installed_binary_path: dest_bin.to_string_lossy().to_string(),
+            program_path: dest_bin.to_string_lossy().to_string(),
             service_unit_path: cmd_path.to_string_lossy().to_string(),
             survives_restarts: true,
             instructions: format!(
@@ -615,7 +631,7 @@ pub fn install_persistent_os_daemon(
             os: os_kind.to_string(),
             node: node.to_string(),
             listen: listen.to_string(),
-            installed_binary_path: dest_bin.to_string_lossy().to_string(),
+            program_path: dest_bin.to_string_lossy().to_string(),
             service_unit_path: unit_path.to_string_lossy().to_string(),
             survives_restarts: true,
             instructions: format!(
@@ -636,22 +652,22 @@ mod tests {
         let policy = DeployPolicyConfig::default();
         let allowed_roots = vec!["/opt/dialtone/".to_string()];
         let valid = DeployManifest {
-            schema: "dialtone.artifact_manifest.v1".to_string(),
+            schema: "dialtone.blob_manifest.v1".to_string(),
             id: "manifest-1".to_string(),
             publisher_node: "node-alpha".to_string(),
             target_host: "edge-1".to_string(),
             component: "cartesiand".to_string(),
             source_tree_hash: "tree-1".to_string(),
-            source_bundle_sha256:
+            source_bundle_digest:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111"
                     .to_string(),
             source_bundle_uri:
                 "iroh-blobs://ticket/blobsrc#sha256:1111111111111111111111111111111111111111111111111111111111111111"
                     .to_string(),
-            binary_sha256:
+            program_digest:
                 "sha256:2222222222222222222222222222222222222222222222222222222222222222"
                     .to_string(),
-            binary_blob_uri:
+            program_ticket:
                 "iroh-blobs://ticket/blobbin#sha256:2222222222222222222222222222222222222222222222222222222222222222"
                     .to_string(),
             runtime_path: "/opt/dialtone/bin/cartesiand".to_string(),
@@ -682,14 +698,14 @@ mod tests {
             target_host: "edge-1".to_string(),
             component: "cartesiand".to_string(),
             source_tree_hash: "tree-abc".to_string(),
-            source_bundle_sha256: "sha256:aaaa".to_string(),
+            source_bundle_digest: "sha256:aaaa".to_string(),
             build_profile: "release".to_string(),
             toolchain: "1.95.0".to_string(),
             platform_os: "linux".to_string(),
             platform_arch: "aarch64".to_string(),
             target_triple: "aarch64-unknown-linux-gnu".to_string(),
-            binary_sha256: "sha256:bbbb".to_string(),
-            binary_blob_uri: "iroh-blobs://ticket/blob#sha256:bbbb".to_string(),
+            program_digest: "sha256:bbbb".to_string(),
+            program_ticket: "iroh-blobs://ticket/blob#sha256:bbbb".to_string(),
             status: "ready".to_string(),
         }];
 
@@ -699,7 +715,7 @@ mod tests {
                 target_host: "edge-2".to_string(),
                 component: "cartesiand".to_string(),
                 source_tree_hash: "tree-abc".to_string(),
-                source_bundle_sha256: "sha256:aaaa".to_string(),
+                source_bundle_digest: "sha256:aaaa".to_string(),
                 build_profile: "release".to_string(),
                 toolchain: "1.95.0".to_string(),
                 platform_os: "linux".to_string(),
@@ -724,26 +740,26 @@ mod tests {
         let path_b = dir.join("slot-b");
         fs::write(&path_a, b"binary-v2").unwrap();
         fs::write(&path_b, b"binary-v1").unwrap();
-        let sha_a = compute_sha256(b"binary-v2");
-        let sha_b = compute_sha256(b"binary-v1");
+        let sha_a = digest_of(b"binary-v2");
+        let sha_b = digest_of(b"binary-v1");
 
         let mut slot = DeploySlot {
             name: "edge-1-motion-server".to_string(),
             active: true,
             path: path_a.to_string_lossy().to_string(),
-            sha256: sha_a.clone(),
+            digest: sha_a.clone(),
             previous_path: Some(path_b.to_string_lossy().to_string()),
-            previous_sha256: Some(sha_b.clone()),
+            previous_digest: Some(sha_b.clone()),
             status: "ready".to_string(),
         };
 
         let plan = plan_rollback("edge-1", &slot).unwrap();
         assert!(plan.side_effect_free_preview);
-        assert_eq!(slot.sha256, sha_a);
+        assert_eq!(slot.digest, sha_a);
 
         execute_verified_rollback(&mut slot).unwrap();
-        assert_eq!(slot.sha256, sha_b);
-        assert_eq!(slot.previous_sha256.as_deref(), Some(sha_a.as_str()));
+        assert_eq!(slot.digest, sha_b);
+        assert_eq!(slot.previous_digest.as_deref(), Some(sha_a.as_str()));
         assert_eq!(slot.status, "rolled_back");
         let _ = fs::remove_dir_all(&dir);
     }

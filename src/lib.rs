@@ -197,9 +197,9 @@ pub fn sha1_digest(data: &[u8]) -> [u8; 20] {
     out
 }
 
-use crate::api::{serve_http_blocking, DaemonRuntimeState};
+use crate::api::{serve_http_blocking, NodeState};
 use crate::blob::{
-    compute_sha256, evaluate_tiered_blob_fetch, store_verified_blob, transfer_blob_via_iroh_ticket,
+    digest_of, evaluate_tiered_blob_fetch, put_blob, transfer_blob_via_iroh_ticket,
     BlobTransportReport, TieredBlobFetchRequest,
 };
 use crate::deploy::{
@@ -208,8 +208,7 @@ use crate::deploy::{
     DeployManifest, DeploySlot,
 };
 use crate::mesh::{
-    load_peer_cache, save_peer_cache, verify_live_gossip_exchange, DialtoneHeartbeat,
-    DEFAULT_PEER_TTL_SECS,
+    load_peer_cache, save_peer_cache, verify_live_gossip_exchange, Beat, DEFAULT_PEER_TTL_SECS,
 };
 use crate::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
@@ -217,11 +216,11 @@ use crate::node::{
 };
 use crate::record::{evaluate_proof_case, paginate_kv_records, plan_alert_ack};
 use crate::service::{
-    resolve_service, DeployPolicyConfig, KeyLeaseDefinition, ManagedProcessSpec, PeerRef,
+    resolve_service, DeployPolicyConfig, KeyLeaseDefinition, PeerRef, ProcessSpec,
 };
 use crate::supervisor::{
-    dispatch_rtcore_udp_command_loopback, hydrate_managed_process_hashes, plan_process_intent,
-    reconcile_systemd_intent_drop_in, ManagedProcessSupervisor, RobotCommandIntentRecord,
+    dispatch_rtcore_udp_command_loopback, hydrate_process_digests, plan_process_intent,
+    reconcile_systemd_intent_drop_in, RobotCommandIntentRecord, Supervisor,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -230,7 +229,8 @@ pub struct SelfTestReport {
     pub iroh_version: String,
     pub status: String,
     pub capabilities_verified: Vec<String>,
-    pub persistent_endpoint_id: String,
+    #[serde(alias = "persistent_endpoint_id")] // compat
+    pub persistent_node_id: String,
     pub resolved_service_uri: String,
     pub gossip_received_from: String,
     pub gossip_receiver_node: String,
@@ -252,9 +252,9 @@ pub async fn collect_node_diagnostics(
         .bind()
         .await
         .map_err(|e| format!("bind iroh endpoint: {e}"))?;
-    let endpoint_id = endpoint.id().to_string();
+    let node_id = endpoint.id().to_string();
     let advertised = advertised_endpoint_addr(&endpoint.addr(), config);
-    let diagnostics = build_diagnostics(config, &advertised, Some(&key_path), &endpoint_id);
+    let diagnostics = build_diagnostics(config, &advertised, Some(&key_path), &node_id);
     endpoint.close().await;
     Ok(diagnostics)
 }
@@ -272,16 +272,19 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
     if key1.public() != key2.public() {
         return Err("persistent secret key public identity mismatch".to_string());
     }
-    let persistent_endpoint_id = key1.public().to_string();
+    let persistent_node_id = key1.public().to_string();
 
     // 2. Multi-Transport Discovery & Iroh Gossip Control Plane + TTL Peer Cache
-    let (received_hb, peer_b_hb): (DialtoneHeartbeat, DialtoneHeartbeat) =
+    let (received_beat, peer_b_beat): (Beat, Beat) =
         verify_live_gossip_exchange("node-alpha", "edge-1").await?;
     let peer_cache_path = tmp_root.join("peer-cache.json");
-    save_peer_cache(&peer_cache_path, &[received_hb.clone(), peer_b_hb.clone()])?;
+    save_peer_cache(
+        &peer_cache_path,
+        &[received_beat.clone(), peer_b_beat.clone()],
+    )?;
     let loaded_peers = load_peer_cache(
         &peer_cache_path,
-        received_hb.updated_at_unix,
+        received_beat.updated_at_unix,
         DEFAULT_PEER_TTL_SECS,
     )?;
     if loaded_peers.len() != 2 {
@@ -289,23 +292,23 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
     }
 
     let target_ref = PeerRef::expand_template("dialtone://{node}/controller/nats", "node-alpha")?;
-    let resolved = resolve_service(&target_ref, &received_hb.service_endpoints)?;
+    let resolved = resolve_service(&target_ref, &received_beat.service_endpoints)?;
     let resolved_service_uri = resolved.url.clone();
 
-    // 3. Content-Addressed Artifact Store & Native Iroh Blob Transport
+    // 3. Content-Addressed Blob Store & Native Iroh Blob Transport
     let blob_dir = tmp_root.join("blobs");
     let blob_transfer = transfer_blob_via_iroh_ticket(
-        b"dialtone-self-test-verified-artifact-payload",
+        b"dialtone-self-test-verified-blob-payload",
         &blob_dir,
         &IrohTransportConfig::local_offline(),
     )
     .await?;
-    let cache_dir = tmp_root.join("tiered-cache");
-    let (cached_sha, _) = store_verified_blob(&cache_dir, b"cached-item", None)?;
+    let store_dir = tmp_root.join("tiered-cache");
+    let (cached_sha, _) = put_blob(&store_dir, b"cached-item", None)?;
     let tiered_hit = evaluate_tiered_blob_fetch(
-        &cache_dir,
+        &store_dir,
         &TieredBlobFetchRequest {
-            sha256: cached_sha,
+            digest: cached_sha,
             uri: "iroh-blobs://ticket/test".to_string(),
             provider_node: "node-beta".to_string(),
             expected_bytes: 11,
@@ -319,16 +322,16 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
     // 4. Manifest-Driven Deployment, Distributed Build Cache & Rollback
     let policy = DeployPolicyConfig::default();
     let manifest = DeployManifest {
-        schema: "dialtone.artifact_manifest.v1".to_string(),
+        schema: "dialtone.blob_manifest.v1".to_string(),
         id: "self-test-manifest".to_string(),
         publisher_node: "node-alpha".to_string(),
         target_host: "edge-1".to_string(),
         component: "cartesiand".to_string(),
         source_tree_hash: "tree-1".to_string(),
-        source_bundle_sha256: blob_transfer.sha256.clone(),
+        source_bundle_digest: blob_transfer.digest.clone(),
         source_bundle_uri: blob_transfer.ticket_uri.clone(),
-        binary_sha256: blob_transfer.sha256.clone(),
-        binary_blob_uri: blob_transfer.ticket_uri.clone(),
+        program_digest: blob_transfer.digest.clone(),
+        program_ticket: blob_transfer.ticket_uri.clone(),
         runtime_path: "/opt/dialtone/bin/cartesiand".to_string(),
         build_inputs: vec!["src/main.rs".to_string()],
         whole_repo_sync: false,
@@ -347,14 +350,14 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
         target_host: "edge-1".to_string(),
         component: "cartesiand".to_string(),
         source_tree_hash: "tree-1".to_string(),
-        source_bundle_sha256: blob_transfer.sha256.clone(),
+        source_bundle_digest: blob_transfer.digest.clone(),
         build_profile: "release".to_string(),
         toolchain: "1.95.0".to_string(),
         platform_os: "linux".to_string(),
         platform_arch: "aarch64".to_string(),
         target_triple: "aarch64-unknown-linux-gnu".to_string(),
-        binary_sha256: blob_transfer.sha256.clone(),
-        binary_blob_uri: blob_transfer.ticket_uri.clone(),
+        program_digest: blob_transfer.digest.clone(),
+        program_ticket: blob_transfer.ticket_uri.clone(),
         status: "ready".to_string(),
     }];
     let probe = probe_build_cache(
@@ -363,7 +366,7 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
             target_host: "edge-2".to_string(),
             component: "cartesiand".to_string(),
             source_tree_hash: "tree-1".to_string(),
-            source_bundle_sha256: blob_transfer.sha256.clone(),
+            source_bundle_digest: blob_transfer.digest.clone(),
             build_profile: "release".to_string(),
             toolchain: "1.95.0".to_string(),
             platform_os: "linux".to_string(),
@@ -384,9 +387,9 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
         name: "slot-main".to_string(),
         active: true,
         path: slot_a.to_string_lossy().to_string(),
-        sha256: compute_sha256(b"v2-bytes"),
+        digest: digest_of(b"v2-bytes"),
         previous_path: Some(slot_b.to_string_lossy().to_string()),
-        previous_sha256: Some(compute_sha256(b"v1-bytes")),
+        previous_digest: Some(digest_of(b"v1-bytes")),
         status: "ready".to_string(),
     };
     let rb_plan = plan_rollback("edge-1", &slot)?;
@@ -404,10 +407,10 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
     } else {
         ("/bin/sleep".to_string(), vec!["5".to_string()])
     };
-    let mut proc_specs = vec![ManagedProcessSpec {
+    let mut proc_specs = vec![ProcessSpec {
         name: "self-test-sleep".to_string(),
         path: sleep_path,
-        sha256: "sha256:unknown".to_string(),
+        digest: "sha256:unknown".to_string(),
         desired_state: "running".to_string(),
         args: sleep_args,
         env: vec!["DIALTONE_SYSTEMD_RECONCILE_INTENT=1".to_string()],
@@ -418,9 +421,9 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
         restart_count: 0,
         service_unit: Some("self-test-sleep.service".to_string()),
     }];
-    hydrate_managed_process_hashes(&mut proc_specs, &[], &HashMap::new());
+    hydrate_process_digests(&mut proc_specs, &[], &HashMap::new());
     let _ = plan_process_intent("node-alpha", "edge-1", &proc_specs[0], "restart")?;
-    let mut supervisor = ManagedProcessSupervisor::new();
+    let mut supervisor = Supervisor::new();
     supervisor.reconcile(&mut proc_specs)?;
     proc_specs[0].desired_state = "stopped".to_string();
     supervisor.reconcile(&mut proc_specs)?;
@@ -468,12 +471,12 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
 
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
-    let runtime_state = Arc::new(Mutex::new(DaemonRuntimeState::new_seeded(
+    let runtime_state = Arc::new(Mutex::new(NodeState::new_seeded(
         "node-alpha",
         "hub",
         &addr.to_string(),
         tmp_root.join("http-blobs"),
-        received_hb.iroh_transport.clone(),
+        received_beat.iroh_transport.clone(),
     )));
     {
         let st = runtime_state.lock().map_err(|_| "poisoned".to_string())?;
@@ -523,16 +526,16 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
         capabilities_verified: vec![
             "1. Cryptographic Mesh Identity & Peer Addressing".to_string(),
             "2. Multi-Transport Discovery & Iroh Gossip Control Plane".to_string(),
-            "3. Content-Addressed Artifact Store & Native Iroh Blob Transport".to_string(),
+            "3. Content-Addressed Blob Store & Native Iroh Blob Transport".to_string(),
             "4. Manifest-Driven Deployment, Distributed Build Cache & Rollback".to_string(),
             "5. Daemon-Owned Process Supervision & Intent Convergence".to_string(),
             "6. Service Discovery, Generic Catalogs & Command Journals".to_string(),
             "7. Metadata-Driven Policy & Operational Evidence UI".to_string(),
         ],
-        persistent_endpoint_id,
+        persistent_node_id,
         resolved_service_uri,
-        gossip_received_from: received_hb.node,
-        gossip_receiver_node: peer_b_hb.node,
+        gossip_received_from: received_beat.node,
+        gossip_receiver_node: peer_b_beat.node,
         blob_transfer,
         build_cache_hit: probe.cache_hit,
         rollback_verified: slot.status == "rolled_back",

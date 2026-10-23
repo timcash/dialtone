@@ -26,19 +26,18 @@ use crate::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, is_tailnet_ip,
     IrohTransportConfig, IrohTransportDiagnostics,
 };
-use crate::service::ServiceAdvertisement;
-use crate::stats::{sample_live_host_resources, HostResourceTelemetry, TelemetryWindowSummary};
+use crate::service::Service;
+use crate::stats::{sample_stats, Stats, StatsSummary};
 
-pub const DIALTONE_HEARTBEAT_SCHEMA: &str = "dialtone.iroh.heartbeat.v1";
+pub const BEAT_SCHEMA: &str = "dialtone.iroh.beat.v1";
 pub const DIALTONE_ENVELOPE_SCHEMA_V2: &str = "dialtone.iroh.envelope.v2";
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
 pub const INVITE_TICKET_PREFIX: &str = "dialtone-invite-v1:";
 pub const DEFAULT_CHANNEL_NAME: &str = "dialtone";
 pub const DEFAULT_PEER_TTL_SECS: u64 = 300;
-pub const HEARTBEAT_INTERVAL_SECS: u64 = 5;
-pub const SUMMARY_HEARTBEAT_INTERVAL_SECS: u64 = 30;
-pub const SUMMARY_HEARTBEAT_EVERY_N_TICKS: u64 =
-    SUMMARY_HEARTBEAT_INTERVAL_SECS / HEARTBEAT_INTERVAL_SECS;
+pub const BEAT_INTERVAL_SECS: u64 = 5;
+pub const SUMMARY_INTERVAL_SECS: u64 = 30;
+pub const SUMMARY_EVERY_N_BEATS: u64 = SUMMARY_INTERVAL_SECS / BEAT_INTERVAL_SECS;
 
 /// Documented Argon2id parameters (OWASP recommended: 19 MiB memory, 2 iterations, 1 lane).
 pub const ARGON2ID_M_COST_KIB: u32 = 19_456;
@@ -84,27 +83,27 @@ pub fn normalize_channel_name(channel: Option<&str>) -> String {
     }
 }
 
-/// Generate a high-entropy 256-bit channel password (`dt-<43-char-base64url>`) using CSPRNG bytes.
-pub fn generate_channel_password() -> String {
+/// Generate a high-entropy 256-bit channel secret (`dt-<43-char-base64url>`) using CSPRNG bytes.
+pub fn new_secret() -> String {
     let random_bytes = iroh::SecretKey::generate().to_bytes();
     format!("dt-{}", crate::base64url_encode(&random_bytes))
 }
 
-/// Estimate password character-set entropy in bits and enforce minimum strength (Issue #1).
+/// Estimate secret character-set entropy in bits and enforce minimum strength (Issue #1).
 /// Rejects empty strings, `"dialtone"`, `"default"`, `"dialtone2"`, `"password123"`, dictionary words,
 /// and strings with fewer than 16 characters or insufficient entropy.
-pub fn validate_channel_password(password: &str) -> Result<String, String> {
-    let trimmed = password.trim();
+pub fn validate_secret(secret: &str) -> Result<String, String> {
+    let trimmed = secret.trim();
     if trimmed.is_empty() {
         return Err(
-            "a channel password is required to join the channel (run `dialtone gen-password` to generate one)"
+            "a channel secret is required to join the channel (run `dialtone gen-password` to generate one)"
                 .to_string(),
         );
     }
     let lower = trimmed.to_ascii_lowercase();
     const FORBIDDEN_SUBSTRINGS: &[&str] = &[
         "dialtone",
-        "password",
+        "password", // compat: the literal dictionary word
         "default",
         "qwerty",
         "123456",
@@ -115,13 +114,13 @@ pub fn validate_channel_password(password: &str) -> Result<String, String> {
     ];
     if FORBIDDEN_SUBSTRINGS.iter().any(|w| lower.contains(w)) {
         return Err(
-            "channel password is too weak or contains a forbidden dictionary word (e.g. 'dialtone', 'password'); run `dialtone gen-password`"
+            "channel secret is too weak or contains a forbidden dictionary word (e.g. 'dialtone', 'default'); run `dialtone gen-password`"
                 .to_string(),
         );
     }
     if trimmed.len() < 16 {
         return Err(format!(
-            "channel password must be at least 16 characters long (got {}); run `dialtone gen-password`",
+            "channel secret must be at least 16 characters long (got {}); run `dialtone gen-password`",
             trimmed.len()
         ));
     }
@@ -148,7 +147,7 @@ pub fn validate_channel_password(password: &str) -> Result<String, String> {
         (has_lower as u8) + (has_upper as u8) + (has_digit as u8) + (has_symbol as u8);
     if unique_chars.len() < 8 || class_count < 2 {
         return Err(
-            "channel password has insufficient entropy (must contain at least 2 character classes and 8+ unique characters); run `dialtone gen-password`"
+            "channel secret has insufficient entropy (must contain at least 2 character classes and 8+ unique characters); run `dialtone gen-password`"
                 .to_string(),
         );
     }
@@ -156,17 +155,17 @@ pub fn validate_channel_password(password: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-/// Derive a node-private standby `TopicId` when no channel password has been configured yet.
-pub fn derive_standby_topic_id(endpoint_id: &str) -> TopicId {
+/// Derive a node-private standby `TopicId` when no channel secret has been configured yet.
+pub fn derive_standby_topic_id(node_id: &str) -> TopicId {
     let mut hasher = Sha256::new();
     hasher.update(b"dialtone.channel.standby.v2:");
-    hasher.update(endpoint_id.trim().as_bytes());
+    hasher.update(node_id.trim().as_bytes());
     let digest: [u8; 32] = hasher.finalize().into();
     TopicId::from_bytes(digest)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DerivedChannelKeys {
+pub struct ChannelKeys {
     pub channel: String,
     pub topic_id: TopicId,
     pub auth_key: [u8; 32],
@@ -174,16 +173,16 @@ pub struct DerivedChannelKeys {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DerivedChannelKeyHex {
+pub struct ChannelKeysHex {
     pub kdf_version: String,
     pub topic_id_hex: String,
     pub auth_key_hex: String,
     pub enc_key_hex: String,
 }
 
-impl DerivedChannelKeys {
-    pub fn to_hex_bundle(&self) -> DerivedChannelKeyHex {
-        DerivedChannelKeyHex {
+impl ChannelKeys {
+    pub fn to_hex_bundle(&self) -> ChannelKeysHex {
+        ChannelKeysHex {
             kdf_version: KDF_VERSION_V2.to_string(),
             topic_id_hex: crate::hex_encode(self.topic_id.as_bytes()),
             auth_key_hex: crate::hex_encode(&self.auth_key),
@@ -191,7 +190,7 @@ impl DerivedChannelKeys {
         }
     }
 
-    pub fn from_hex_bundle(channel: &str, bundle: &DerivedChannelKeyHex) -> Result<Self, String> {
+    pub fn from_hex_bundle(channel: &str, bundle: &ChannelKeysHex) -> Result<Self, String> {
         let topic_bytes = crate::hex_decode(&bundle.topic_id_hex)?;
         let auth_bytes = crate::hex_decode(&bundle.auth_key_hex)?;
         let enc_bytes = crate::hex_decode(&bundle.enc_key_hex)?;
@@ -218,16 +217,16 @@ impl DerivedChannelKeys {
     }
 }
 
-fn kdf_cache() -> &'static Mutex<HashMap<(String, String), DerivedChannelKeys>> {
-    static CACHE: OnceLock<Mutex<HashMap<(String, String), DerivedChannelKeys>>> = OnceLock::new();
+fn kdf_cache() -> &'static Mutex<HashMap<(String, String), ChannelKeys>> {
+    static CACHE: OnceLock<Mutex<HashMap<(String, String), ChannelKeys>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Derive separate `topic_id`, `auth_key`, and `enc_key` from `(channel, password)` using
+/// Derive separate `topic_id`, `auth_key`, and `enc_key` from `(channel, secret)` using
 /// **Argon2id** (`m=19456 KiB, t=2, p=1`) + domain-separated HKDF-style PRF expansion (Issue #4).
-pub fn derive_channel_keys_v2(channel: &str, password: &str) -> DerivedChannelKeys {
+pub fn derive_channel_keys_v2(channel: &str, secret: &str) -> ChannelKeys {
     let norm_channel = normalize_channel_name(Some(channel));
-    let clean_pass = password.trim().to_string();
+    let clean_pass = secret.trim().to_string();
     let cache_key = (norm_channel.clone(), clean_pass.clone());
 
     if let Ok(guard) = kdf_cache().lock() {
@@ -273,7 +272,7 @@ pub fn derive_channel_keys_v2(channel: &str, password: &str) -> DerivedChannelKe
     let auth_key = expand_subkey(b"dialtone.kdf.auth.v2");
     let enc_key = expand_subkey(b"dialtone.kdf.enc.v2");
 
-    let derived = DerivedChannelKeys {
+    let derived = ChannelKeys {
         channel: norm_channel,
         topic_id: TopicId::from_bytes(topic_bytes),
         auth_key,
@@ -286,18 +285,18 @@ pub fn derive_channel_keys_v2(channel: &str, password: &str) -> DerivedChannelKe
     derived
 }
 
-/// Deterministically derive an `iroh-gossip` 32-byte `TopicId` from `(channel, password)` via Argon2id v2.
-pub fn derive_channel_topic_id(channel: &str, password: &str) -> TopicId {
-    derive_channel_keys_v2(channel, password).topic_id
+/// Deterministically derive an `iroh-gossip` 32-byte `TopicId` from `(channel, secret)` via Argon2id v2.
+pub fn derive_channel_topic_id(channel: &str, secret: &str) -> TopicId {
+    derive_channel_keys_v2(channel, secret).topic_id
 }
 
-/// Deterministically derive an `iroh-gossip` 32-byte `TopicId` from a password or `<channel>:<password>`.
+/// Deterministically derive an `iroh-gossip` 32-byte `TopicId` from a secret or `<channel>:<secret>`.
 pub fn derive_topic_id_from_secret(secret: &str) -> TopicId {
     let trimmed = secret.trim();
     if trimmed.is_empty() {
         return derive_standby_topic_id("unconfigured");
     }
-    if let Ok(ticket) = GossipTicket::from_str(trimmed) {
+    if let Ok(ticket) = SeedList::from_str(trimmed) {
         return ticket.topic;
     }
     if let Some((sec_part, _)) = trimmed.split_once('@') {
@@ -322,8 +321,9 @@ pub fn secret_channel_fingerprint(secret: &str) -> String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SeedPeerConfig {
-    pub endpoint_id: String,
+pub struct Seed {
+    #[serde(alias = "endpoint_id")] // compat
+    pub node_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -331,12 +331,12 @@ pub struct SeedPeerConfig {
 }
 
 /// Returns the seed peer endpoints configured in the host's local `~/.dialtone/config.json`
-/// (`seed_peers` array). No production `EndpointId`s are hardcoded in the repository.
-pub fn default_fleet_seed_peers() -> Vec<EndpointAddr> {
+/// (`seeds` array). No production `EndpointId`s are hardcoded in the repository.
+pub fn default_seeds() -> Vec<EndpointAddr> {
     let cfg = load_mesh_config(&default_config_path());
     let mut out = Vec::new();
-    for entry in &cfg.seed_peers {
-        if let Ok(id) = entry.endpoint_id.trim().parse::<iroh::EndpointId>() {
+    for entry in &cfg.seeds {
+        if let Ok(id) = entry.node_id.trim().parse::<iroh::EndpointId>() {
             let mut addr = EndpointAddr::new(id);
             let relay_str = entry
                 .relay_url
@@ -361,19 +361,19 @@ pub fn default_fleet_seed_peers() -> Vec<EndpointAddr> {
     out
 }
 
-/// Evaluate whether `candidate_endpoint_id` is allowed by an allowlist (Issue #3).
+/// Evaluate whether `candidate_node_id` is allowed by an allowlist (Issue #3).
 /// **Deny by default**: if `allowed_ids` is empty, returns `false` for all remote peers.
-/// A node's own `self_endpoint_id` is always allowed.
+/// A node's own `self_node_id` is always allowed.
 pub fn is_allowed_peer_in_list(
     allowed_ids: &[String],
-    candidate_endpoint_id: &str,
-    self_endpoint_id: Option<&str>,
+    candidate_node_id: &str,
+    self_node_id: Option<&str>,
 ) -> bool {
-    let candidate = candidate_endpoint_id.trim();
+    let candidate = candidate_node_id.trim();
     if candidate.is_empty() {
         return false;
     }
-    if let Some(self_id) = self_endpoint_id {
+    if let Some(self_id) = self_node_id {
         if !self_id.trim().is_empty() && self_id.trim().eq_ignore_ascii_case(candidate) {
             return true;
         }
@@ -386,17 +386,17 @@ pub fn is_allowed_peer_in_list(
         .any(|allowed| allowed.trim().eq_ignore_ascii_case(candidate))
 }
 
-/// Atomically add `endpoint_id` with optional relay URL and direct IP:port addresses to `config_path`.
+/// Atomically add `node_id` with optional relay URL and direct IP:port addresses to `config_path`.
 pub fn allow_peer_in_config_with_addrs(
     config_path: &Path,
-    endpoint_id: &str,
+    node_id: &str,
     relay_url: Option<&str>,
     ip_addrs: &[String],
-) -> Result<PersistentMeshConfig, String> {
-    let parsed_id = endpoint_id
+) -> Result<MeshConfig, String> {
+    let parsed_id = node_id
         .trim()
         .parse::<iroh::EndpointId>()
-        .map_err(|e| format!("invalid EndpointId '{}': {e}", endpoint_id.trim()))?
+        .map_err(|e| format!("invalid EndpointId '{}': {e}", node_id.trim()))?
         .to_string();
     let mut validated_ips = Vec::new();
     for raw_ip in ip_addrs {
@@ -411,16 +411,16 @@ pub fn allow_peer_in_config_with_addrs(
     }
     let mut cfg = load_mesh_config(config_path);
     if !cfg
-        .allowed_endpoint_ids
+        .allowlist
         .iter()
         .any(|x| x.eq_ignore_ascii_case(&parsed_id))
     {
-        cfg.allowed_endpoint_ids.push(parsed_id.clone());
+        cfg.allowlist.push(parsed_id.clone());
     }
     if let Some(existing) = cfg
-        .seed_peers
+        .seeds
         .iter_mut()
-        .find(|s| s.endpoint_id.eq_ignore_ascii_case(&parsed_id))
+        .find(|s| s.node_id.eq_ignore_ascii_case(&parsed_id))
     {
         if let Some(r) = relay_url {
             existing.relay_url = Some(r.to_string());
@@ -431,8 +431,8 @@ pub fn allow_peer_in_config_with_addrs(
             }
         }
     } else {
-        cfg.seed_peers.push(SeedPeerConfig {
-            endpoint_id: parsed_id,
+        cfg.seeds.push(Seed {
+            node_id: parsed_id,
             relay_url: Some(
                 relay_url
                     .unwrap_or("https://usw1-1.relay.n0.iroh.link./")
@@ -446,30 +446,28 @@ pub fn allow_peer_in_config_with_addrs(
     Ok(cfg)
 }
 
-/// Atomically revoke `endpoint_id` from `allowed_endpoint_ids` and `seed_peers` in `config_path` (Issue #3).
-pub fn revoke_peer_in_config(
-    config_path: &Path,
-    endpoint_id: &str,
-) -> Result<PersistentMeshConfig, String> {
-    let target = endpoint_id.trim();
+/// Atomically revoke `node_id` from `allowlist` and `seeds` in `config_path` (Issue #3).
+pub fn revoke_peer_in_config(config_path: &Path, node_id: &str) -> Result<MeshConfig, String> {
+    let target = node_id.trim();
     if target.is_empty() {
-        return Err("endpoint_id is required".to_string());
+        return Err("node_id is required".to_string());
     }
     let mut cfg = load_mesh_config(config_path);
-    cfg.allowed_endpoint_ids
+    cfg.allowlist
         .retain(|x| !x.trim().eq_ignore_ascii_case(target));
-    cfg.seed_peers
-        .retain(|s| !s.endpoint_id.trim().eq_ignore_ascii_case(target));
+    cfg.seeds
+        .retain(|s| !s.node_id.trim().eq_ignore_ascii_case(target));
     cfg.updated_at_unix = now_unix();
     save_mesh_config(config_path, &cfg)?;
     Ok(cfg)
 }
 
-/// Expiring, single-use bootstrap invite ticket signed with the channel's `auth_key` (Issue #6).
+/// Expiring, single-use seed invite ticket signed with the channel's `auth_key` (Issue #6).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InviteTicket {
+pub struct Invite {
     pub schema: String,
-    pub issuer_endpoint_id: String,
+    #[serde(alias = "issuer_endpoint_id")] // compat
+    pub issuer_node_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
     pub channel: String,
@@ -477,11 +475,12 @@ pub struct InviteTicket {
     pub nonce: String,
     pub expires_at_unix: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bound_endpoint_id: Option<String>,
+    #[serde(alias = "bound_endpoint_id")] // compat
+    pub bound_node_id: Option<String>,
     pub signature: String,
 }
 
-impl InviteTicket {
+impl Invite {
     pub fn compute_signature(&self, auth_key: &[u8; 32]) -> String {
         let mut h = Sha256::new();
         h.update(b"dialtone.invite.sig.v1:");
@@ -489,7 +488,7 @@ impl InviteTicket {
         h.update(b":");
         h.update(self.schema.as_bytes());
         h.update(b":");
-        h.update(self.issuer_endpoint_id.as_bytes());
+        h.update(self.issuer_node_id.as_bytes());
         h.update(b":");
         h.update(self.relay_url.as_deref().unwrap_or("").as_bytes());
         h.update(b":");
@@ -501,7 +500,7 @@ impl InviteTicket {
         h.update(b":");
         h.update(self.expires_at_unix.to_string().as_bytes());
         h.update(b":");
-        h.update(self.bound_endpoint_id.as_deref().unwrap_or("").as_bytes());
+        h.update(self.bound_node_id.as_deref().unwrap_or("").as_bytes());
         let digest: [u8; 32] = h.finalize().into();
         crate::hex_encode(&digest)
     }
@@ -515,7 +514,7 @@ impl InviteTicket {
     }
 }
 
-impl FromStr for InviteTicket {
+impl FromStr for Invite {
     type Err = String;
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
@@ -530,27 +529,27 @@ impl FromStr for InviteTicket {
 
 /// Create a signed, expiring, single-use invite ticket (Issue #6).
 pub fn create_invite_ticket(
-    issuer_endpoint_id: &str,
+    issuer_node_id: &str,
     relay_url: Option<&str>,
-    keys: &DerivedChannelKeys,
+    keys: &ChannelKeys,
     now_unix: u64,
     ttl_secs: u64,
-    bound_endpoint_id: Option<&str>,
-) -> Result<InviteTicket, String> {
+    bound_node_id: Option<&str>,
+) -> Result<Invite, String> {
     if ttl_secs == 0 || ttl_secs > 86_400 {
         return Err("invite TTL must be between 1s and 86400s (24h)".to_string());
     }
     let rand_bytes = iroh::SecretKey::generate().to_bytes();
     let nonce = crate::hex_encode(&rand_bytes[..16]);
-    let mut ticket = InviteTicket {
+    let mut ticket = Invite {
         schema: DIALTONE_INVITE_SCHEMA_V1.to_string(),
-        issuer_endpoint_id: issuer_endpoint_id.trim().to_string(),
+        issuer_node_id: issuer_node_id.trim().to_string(),
         relay_url: relay_url.map(|s| s.to_string()),
         channel: keys.channel.clone(),
         topic_id_hex: crate::hex_encode(keys.topic_id.as_bytes()),
         nonce,
         expires_at_unix: now_unix.saturating_add(ttl_secs),
-        bound_endpoint_id: bound_endpoint_id
+        bound_node_id: bound_node_id
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(String::from),
@@ -560,22 +559,25 @@ pub fn create_invite_ticket(
     Ok(ticket)
 }
 
-/// Verify and redeem a single-use `InviteTicket` (Issue #6).
-/// Checks signature, expiry, optional `bound_endpoint_id`, and single-use `nonce`, records the used
-/// nonce in `cfg.used_invite_nonces`, and adds the issuer and redeemer to `cfg.allowed_endpoint_ids`.
+/// Verify and redeem a single-use `Invite` (Issue #6).
+/// Checks signature, expiry, optional `bound_node_id`, and single-use `nonce`, records the used
+/// nonce in `cfg.used_invite_nonces`, and adds the issuer and redeemer to `cfg.allowlist`.
 pub fn redeem_invite_ticket(
-    ticket: &InviteTicket,
-    keys: &DerivedChannelKeys,
-    redeemer_endpoint_id: &str,
+    ticket: &Invite,
+    keys: &ChannelKeys,
+    redeemer_node_id: &str,
     now_unix: u64,
-    cfg: &mut PersistentMeshConfig,
+    cfg: &mut MeshConfig,
 ) -> Result<EndpointAddr, String> {
     if ticket.schema != DIALTONE_INVITE_SCHEMA_V1 {
         return Err(format!("unsupported invite schema '{}'", ticket.schema));
     }
     let expected_sig = ticket.compute_signature(&keys.auth_key);
     if !constant_time_eq(ticket.signature.as_bytes(), expected_sig.as_bytes()) {
-        return Err("invite ticket signature verification failed (wrong channel password or tampered ticket)".to_string());
+        return Err(
+            "invite ticket signature verification failed (wrong channel secret or tampered ticket)"
+                .to_string(),
+        );
     }
     if now_unix > ticket.expires_at_unix {
         return Err(format!(
@@ -583,14 +585,11 @@ pub fn redeem_invite_ticket(
             ticket.expires_at_unix, now_unix
         ));
     }
-    if let Some(ref bound) = ticket.bound_endpoint_id {
-        if !bound
-            .trim()
-            .eq_ignore_ascii_case(redeemer_endpoint_id.trim())
-        {
+    if let Some(ref bound) = ticket.bound_node_id {
+        if !bound.trim().eq_ignore_ascii_case(redeemer_node_id.trim()) {
             return Err(format!(
-                "invite ticket is bound to endpoint_id '{}' (cannot be redeemed by '{}')",
-                bound, redeemer_endpoint_id
+                "invite ticket is bound to node_id '{}' (cannot be redeemed by '{}')",
+                bound, redeemer_node_id
             ));
         }
     }
@@ -602,7 +601,7 @@ pub fn redeem_invite_ticket(
     }
 
     let issuer_id = ticket
-        .issuer_endpoint_id
+        .issuer_node_id
         .trim()
         .parse::<iroh::EndpointId>()
         .map_err(|e| format!("invalid issuer EndpointId in invite: {e}"))?;
@@ -616,17 +615,14 @@ pub fn redeem_invite_ticket(
     }
 
     cfg.used_invite_nonces.push(ticket.nonce.clone());
-    for peer_to_allow in [
-        ticket.issuer_endpoint_id.trim(),
-        redeemer_endpoint_id.trim(),
-    ] {
+    for peer_to_allow in [ticket.issuer_node_id.trim(), redeemer_node_id.trim()] {
         if !peer_to_allow.is_empty()
             && !cfg
-                .allowed_endpoint_ids
+                .allowlist
                 .iter()
                 .any(|x| x.eq_ignore_ascii_case(peer_to_allow))
         {
-            cfg.allowed_endpoint_ids.push(peer_to_allow.to_string());
+            cfg.allowlist.push(peer_to_allow.to_string());
         }
     }
     Ok(addr)
@@ -644,35 +640,39 @@ pub struct BootStageStatus {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct PersistentMeshConfig {
+pub struct MeshConfig {
     pub node_name: Option<String>,
     pub listen_addr: Option<String>,
     #[serde(default = "default_channel_name")]
     pub channel: String,
-    /// Masked/configured indicator (`true` when user has configured a valid channel password).
+    /// Masked/configured indicator (`true` when user has configured a valid channel secret).
     pub configured: bool,
-    /// Legacy/in-memory password field — NEVER serialized to `config.json` (Issue #2).
+    /// Legacy/in-memory secret field — NEVER serialized to `config.json` (Issue #2).
     #[serde(default, skip_serializing)]
     pub secret_key: Option<String>,
     /// Derived Argon2id v2 key bundle (`topic_id_hex`, `auth_key_hex`, `enc_key_hex`) persisted in `0600` `config.json`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub derived_keys: Option<DerivedChannelKeyHex>,
+    pub derived_keys: Option<ChannelKeysHex>,
     pub channel_fingerprint: String,
-    pub seed_peers: Vec<SeedPeerConfig>,
-    pub allowed_endpoint_ids: Vec<String>,
+    #[serde(alias = "seed_peers")] // compat
+    pub seeds: Vec<Seed>,
+    #[serde(alias = "allowed_endpoint_ids")] // compat
+    pub allowlist: Vec<String>,
     pub used_invite_nonces: Vec<String>,
-    pub bootstrap_tickets: Vec<String>,
+    #[serde(alias = "bootstrap_tickets")] // compat
+    pub invites: Vec<String>,
     pub daemon_installed: bool,
     pub daemon_service_path: Option<String>,
-    pub managed_processes: Vec<crate::service::ManagedProcessSpec>,
+    #[serde(alias = "managed_processes")] // compat
+    pub processes: Vec<crate::service::ProcessSpec>,
     pub updated_at_unix: u64,
 }
 
-impl PersistentMeshConfig {
-    /// Derive and store the Argon2id v2 channel key bundle without persisting the raw password (Issue #2).
-    pub fn apply_channel_password(&mut self, channel: &str, password: &str) -> DerivedChannelKeys {
+impl MeshConfig {
+    /// Derive and store the Argon2id v2 channel key bundle without persisting the raw secret (Issue #2).
+    pub fn apply_secret(&mut self, channel: &str, secret: &str) -> ChannelKeys {
         let norm_channel = normalize_channel_name(Some(channel));
-        let keys = derive_channel_keys_v2(&norm_channel, password);
+        let keys = derive_channel_keys_v2(&norm_channel, secret);
         self.channel = norm_channel;
         self.configured = true;
         self.secret_key = None;
@@ -681,10 +681,10 @@ impl PersistentMeshConfig {
         keys
     }
 
-    /// Resolve active `DerivedChannelKeys` from either persisted `derived_keys` or in-memory `secret_key`.
-    pub fn active_channel_keys(&self) -> Option<DerivedChannelKeys> {
+    /// Resolve active `ChannelKeys` from either persisted `derived_keys` or in-memory `secret_key`.
+    pub fn active_channel_keys(&self) -> Option<ChannelKeys> {
         if let Some(ref bundle) = self.derived_keys {
-            if let Ok(keys) = DerivedChannelKeys::from_hex_bundle(&self.channel, bundle) {
+            if let Ok(keys) = ChannelKeys::from_hex_bundle(&self.channel, bundle) {
                 return Some(keys);
             }
         }
@@ -701,8 +701,8 @@ impl PersistentMeshConfig {
 pub enum MeshControlCommand {
     JoinMesh {
         channel: String,
-        keys: DerivedChannelKeys,
-        bootstrap_tickets: Vec<String>,
+        keys: ChannelKeys,
+        invites: Vec<String>,
         node_name: Option<String>,
     },
 }
@@ -725,7 +725,7 @@ pub fn default_config_path() -> PathBuf {
     default_state_dir().join("config.json")
 }
 
-pub fn default_blob_cache_dir() -> PathBuf {
+pub fn default_store_dir() -> PathBuf {
     default_state_dir().join("blobs")
 }
 
@@ -746,16 +746,15 @@ pub fn migrate_and_scrub_legacy_config(config_path: &Path, legacy_path: &Path) -
         return false;
     }
     eprintln!(
-        "[config-migration-warn] detected legacy config file at {}; migrating derived keys and scrubbing plaintext password",
+        "[config-migration-warn] detected legacy config file at {}; migrating derived keys and scrubbing plaintext secret",
         legacy_path.display()
     );
     if !config_path.exists() {
         if let Ok(raw) = fs::read_to_string(legacy_path) {
-            if let Ok(mut legacy_cfg) = serde_json::from_str::<PersistentMeshConfig>(&raw) {
+            if let Ok(mut legacy_cfg) = serde_json::from_str::<MeshConfig>(&raw) {
                 if let Some(raw_pass) = legacy_cfg.secret_key.take() {
                     if !raw_pass.trim().is_empty() {
-                        let _ = legacy_cfg
-                            .apply_channel_password(&legacy_cfg.channel.clone(), &raw_pass);
+                        let _ = legacy_cfg.apply_secret(&legacy_cfg.channel.clone(), &raw_pass);
                     }
                 }
                 let _ = save_mesh_config(config_path, &legacy_cfg);
@@ -766,26 +765,26 @@ pub fn migrate_and_scrub_legacy_config(config_path: &Path, legacy_path: &Path) -
     true
 }
 
-pub fn load_mesh_config(path: &Path) -> PersistentMeshConfig {
+pub fn load_mesh_config(path: &Path) -> MeshConfig {
     if let Some(legacy_path) = legacy_config_path_for(path) {
         let _ = migrate_and_scrub_legacy_config(path, &legacy_path);
     }
-    let mut cfg: PersistentMeshConfig = match fs::read_to_string(path) {
+    let mut cfg: MeshConfig = match fs::read_to_string(path) {
         Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
-        Err(_) => return PersistentMeshConfig::default(),
+        Err(_) => return MeshConfig::default(),
     };
     // Auto-migrate any legacy plaintext `secret_key` into `derived_keys` and scrub disk file immediately (Issue #2).
     if let Some(raw_pass) = cfg.secret_key.take() {
         if !raw_pass.trim().is_empty() {
             let ch = cfg.channel.clone();
-            let _ = cfg.apply_channel_password(&ch, &raw_pass);
+            let _ = cfg.apply_secret(&ch, &raw_pass);
             let _ = save_mesh_config(path, &cfg);
         }
     }
     cfg
 }
 
-pub fn save_mesh_config(path: &Path, cfg: &PersistentMeshConfig) -> Result<(), String> {
+pub fn save_mesh_config(path: &Path, cfg: &MeshConfig) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("create config dir {}: {e}", parent.display()))?;
@@ -794,7 +793,7 @@ pub fn save_mesh_config(path: &Path, cfg: &PersistentMeshConfig) -> Result<(), S
     if let Some(raw_pass) = sanitized.secret_key.take() {
         if !raw_pass.trim().is_empty() && sanitized.derived_keys.is_none() {
             let ch = sanitized.channel.clone();
-            let _ = sanitized.apply_channel_password(&ch, &raw_pass);
+            let _ = sanitized.apply_secret(&ch, &raw_pass);
         }
     }
     let json = serde_json::to_string_pretty(&sanitized).map_err(|e| e.to_string())?;
@@ -867,8 +866,8 @@ pub fn node_role_for(node: &str) -> String {
 pub fn node_capabilities_for(node: &str) -> Vec<String> {
     let mut caps = vec![
         "iroh-1.3-quic-endpoint".to_string(),
-        "iroh-gossip-swarm".to_string(),
-        "iroh-blobs-sha256-cas".to_string(),
+        "iroh-gossip-mesh".to_string(),
+        "iroh-blobs-digest-store".to_string(),
         "no-tailnet-physical-bind".to_string(),
         "process-supervisor".to_string(),
         "rtcore-udp-journal".to_string(),
@@ -897,19 +896,19 @@ pub fn node_capabilities_for(node: &str) -> Vec<String> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GossipTicket {
+pub struct SeedList {
     pub topic: TopicId,
     pub peers: Vec<EndpointAddr>,
 }
 
-impl GossipTicket {
+impl SeedList {
     pub fn to_text(&self) -> Result<String, String> {
         let bytes = serde_json::to_vec(self).map_err(|err| err.to_string())?;
         Ok(format!("iroh-gossip-v1:{}", crate::hex_encode(&bytes)))
     }
 }
 
-impl FromStr for GossipTicket {
+impl FromStr for SeedList {
     type Err = String;
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
@@ -951,9 +950,7 @@ pub fn compute_rtt_ms_from_echo(now_mono_ms: u64, echo: &PeerRttEcho) -> Option<
     Some(((net_ms.max(0.2)) * 10.0).round() / 10.0)
 }
 
-pub fn build_mesh_rtt_matrix(
-    nodes: &[DialtoneHeartbeat],
-) -> std::collections::BTreeMap<String, f64> {
+pub fn build_mesh_rtt_matrix(nodes: &[Beat]) -> std::collections::BTreeMap<String, f64> {
     let mut matrix = std::collections::BTreeMap::new();
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
     for n in nodes {
@@ -1120,22 +1117,22 @@ fn parse_ipv4_from_token(raw: &str) -> Option<std::net::Ipv4Addr> {
     cleaned.parse::<std::net::Ipv4Addr>().ok()
 }
 
-pub fn extract_public_ipv4_from_heartbeat(hb: &DialtoneHeartbeat) -> Option<std::net::Ipv4Addr> {
-    if let Some(ref b) = hb.iroh_transport.bound_non_tailnet_ipv4 {
+pub fn public_ipv4_of_beat(beat: &Beat) -> Option<std::net::Ipv4Addr> {
+    if let Some(ref b) = beat.iroh_transport.bound_non_tailnet_ipv4 {
         if let Some(ip) = parse_ipv4_from_token(b) {
             if is_globally_routable_ipv4(ip) {
                 return Some(ip);
             }
         }
     }
-    for s in &hb.iroh_transport.advertised_ip_addrs {
+    for s in &beat.iroh_transport.advertised_ip_addrs {
         if let Some(ip) = parse_ipv4_from_token(s) {
             if is_globally_routable_ipv4(ip) {
                 return Some(ip);
             }
         }
     }
-    for s in &hb.observed_remote_addrs {
+    for s in &beat.observed_remote_addrs {
         if let Some(ip) = parse_ipv4_from_token(s) {
             if is_globally_routable_ipv4(ip) {
                 return Some(ip);
@@ -1250,8 +1247,8 @@ pub fn great_circle_deg(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
 }
 
 fn lookup_pair_rtt_ms(
-    a: &DialtoneHeartbeat,
-    b: &DialtoneHeartbeat,
+    a: &Beat,
+    b: &Beat,
     mesh_rtt_ms: &std::collections::BTreeMap<String, f64>,
 ) -> Option<f64> {
     let key = if a.node <= b.node {
@@ -1284,10 +1281,7 @@ fn lookup_pair_rtt_ms(
 ///    with great-circle angular separation proportional to pairwise RTT (`mesh_rtt_ms` / `peer_rtt_ms`) and spherical spring relaxation.
 /// 3. Co-located nodes sharing the same public IP coordinates are arranged in a tight RTT-proportional micro-cluster so every node
 ///    occupies a distinct, clickable position on the H3 globe.
-pub fn resolve_fleet_node_locations(
-    nodes: &mut [DialtoneHeartbeat],
-    mesh_rtt_ms: &std::collections::BTreeMap<String, f64>,
-) {
+pub fn place_nodes(nodes: &mut [Beat], mesh_rtt_ms: &std::collections::BTreeMap<String, f64>) {
     if nodes.is_empty() {
         return;
     }
@@ -1300,7 +1294,7 @@ pub fn resolve_fleet_node_locations(
             .map(|g| g.source == "public_ip_geo" && (g.lat != 0.0 || g.lng != 0.0))
             .unwrap_or(false);
         if !has_public_geo {
-            if let Some(pub_ip) = extract_public_ipv4_from_heartbeat(n) {
+            if let Some(pub_ip) = public_ipv4_of_beat(n) {
                 n.geo_location = Some(approx_geo_from_public_ipv4(pub_ip));
             }
         }
@@ -1449,65 +1443,80 @@ pub fn resolve_fleet_node_locations(
     }
 }
 
-fn default_heartbeat_kind() -> String {
+fn default_beat_kind() -> String {
     "regular".to_string()
 }
 
-fn default_heartbeat_interval_secs() -> u64 {
-    HEARTBEAT_INTERVAL_SECS
+fn default_beat_interval_secs() -> u64 {
+    BEAT_INTERVAL_SECS
 }
 
 fn default_summary_interval_secs() -> u64 {
-    SUMMARY_HEARTBEAT_INTERVAL_SECS
+    SUMMARY_INTERVAL_SECS
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NodeE2eTestReport {
-    pub worker_name: String,
-    pub worker_sha256: String,
-    pub worker_pid: Option<u32>,
+pub struct ProbeReport {
+    #[serde(alias = "worker_name")] // compat
+    pub program_name: String,
+    #[serde(alias = "worker_sha256")] // compat
+    pub program_digest: String,
+    #[serde(alias = "worker_pid")] // compat
+    pub pid: Option<u32>,
     #[serde(default)]
-    pub worker_blob_cas_path: String,
+    #[serde(alias = "worker_blob_cas_path")] // compat
+    pub store_path: String,
     #[serde(default)]
-    pub worker_staged_path: String,
+    #[serde(alias = "worker_staged_path")] // compat
+    pub staged_path: String,
     #[serde(default)]
-    pub worker_blob_ticket: String,
+    #[serde(alias = "worker_blob_ticket")] // compat
+    pub ticket: String,
     pub cycle: u64,
     pub updated_at_unix: u64,
     pub passed_count: u8,
     pub total_count: u8,
-    pub sha_blobs_ok: bool,
+    #[serde(alias = "sha_blobs_ok")] // compat
+    pub blobs_ok: bool,
     pub key_value_ok: bool,
-    pub sub_processes_ok: bool,
+    #[serde(alias = "sub_processes_ok")] // compat
+    pub processes_ok: bool,
     pub mesh_connectivity_ok: bool,
     pub ab_rollback_ok: bool,
     pub active_slot: String,
-    pub verified_blob_sha256: String,
+    #[serde(alias = "verified_blob_sha256")] // compat
+    pub verified_digest: String,
     pub kv_key: String,
     pub mesh_peers_seen: usize,
 }
 
-/// Per-node SHA-256 CAS blob store counters, gossiped so every HUD can see blob downloads land on peers.
+/// Per-node store counters, gossiped so every HUD can see blobs land on peers.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NodeBlobStoreStats {
-    pub sha_blob_keys: u64,
-    pub sha_blob_bytes: u64,
+pub struct StoreStats {
+    #[serde(alias = "sha_blob_keys")] // compat
+    pub blob_keys: u64,
+    #[serde(alias = "sha_blob_bytes")] // compat
+    pub blob_bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub latest_sha256: Option<String>,
+    #[serde(alias = "latest_sha256")] // compat
+    pub latest_digest: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DialtoneHeartbeat {
+pub struct Beat {
     pub schema: String,
     pub node: String,
-    pub endpoint_id: String,
+    #[serde(alias = "endpoint_id")] // compat
+    pub node_id: String,
     pub ticket: String,
     pub counter: u64,
     pub updated_at_unix: u64,
-    #[serde(default = "default_heartbeat_kind")]
-    pub heartbeat_kind: String,
-    #[serde(default = "default_heartbeat_interval_secs")]
-    pub heartbeat_interval_secs: u64,
+    #[serde(default = "default_beat_kind")]
+    #[serde(alias = "heartbeat_kind")] // compat
+    pub kind: String,
+    #[serde(default = "default_beat_interval_secs")]
+    #[serde(alias = "heartbeat_interval_secs")] // compat
+    pub beat_interval_secs: u64,
     #[serde(default = "default_summary_interval_secs")]
     pub summary_interval_secs: u64,
     #[serde(default)]
@@ -1519,13 +1528,15 @@ pub struct DialtoneHeartbeat {
     #[serde(default)]
     pub peer_rtt_ms: std::collections::BTreeMap<String, f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary_stats: Option<TelemetryWindowSummary>,
+    pub summary_stats: Option<StatsSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geo_location: Option<NodeGeoLocation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub e2e_test: Option<NodeE2eTestReport>,
+    #[serde(alias = "e2e_test")] // compat
+    pub probe: Option<ProbeReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blob_store: Option<NodeBlobStoreStats>,
+    #[serde(alias = "blob_store")] // compat
+    pub store: Option<StoreStats>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_mac: Option<String>,
     #[serde(default = "default_os")]
@@ -1537,10 +1548,12 @@ pub struct DialtoneHeartbeat {
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default)]
-    pub host_resources: HostResourceTelemetry,
-    pub service_endpoints: Vec<ServiceAdvertisement>,
+    #[serde(alias = "host_resources")] // compat
+    pub stats: Stats,
+    pub service_endpoints: Vec<Service>,
     #[serde(default)]
-    pub managed_processes: Vec<crate::service::ManagedProcessSpec>,
+    #[serde(alias = "managed_processes")] // compat
+    pub processes: Vec<crate::service::ProcessSpec>,
     pub iroh_transport: IrohTransportDiagnostics,
     #[serde(default)]
     pub observed_remote_addrs: Vec<String>,
@@ -1548,7 +1561,7 @@ pub struct DialtoneHeartbeat {
     pub tailnet_used: bool,
 }
 
-/// Encrypted wire frame for `DialtoneHeartbeat` over `iroh-gossip` using XChaCha20-Poly1305 (Issue #5).
+/// Encrypted wire frame for `Beat` over `iroh-gossip` using XChaCha20-Poly1305 (Issue #5).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EncryptedGossipEnvelope {
     pub schema: String,
@@ -1567,56 +1580,45 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-pub fn compute_heartbeat_mac_with_key(
-    hb: &DialtoneHeartbeat,
-    channel: &str,
-    auth_key: &[u8; 32],
-) -> String {
+pub fn beat_mac(beat: &Beat, channel: &str, auth_key: &[u8; 32]) -> String {
     let norm_channel = normalize_channel_name(Some(channel));
     let mut hasher = Sha256::new();
-    hasher.update(b"dialtone.heartbeat.mac.v2:");
+    hasher.update(b"dialtone.heartbeat.mac.v2:"); // compat: MAC domain label is a protocol constant
     hasher.update(auth_key);
     hasher.update(b":");
     hasher.update(norm_channel.as_bytes());
     hasher.update(b":");
-    hasher.update(hb.node.as_bytes());
+    hasher.update(beat.node.as_bytes());
     hasher.update(b":");
-    hasher.update(hb.endpoint_id.as_bytes());
+    hasher.update(beat.node_id.as_bytes());
     hasher.update(b":");
-    hasher.update(hb.counter.to_string().as_bytes());
+    hasher.update(beat.counter.to_string().as_bytes());
     hasher.update(b":");
-    hasher.update(hb.updated_at_unix.to_string().as_bytes());
+    hasher.update(beat.updated_at_unix.to_string().as_bytes());
     let digest: [u8; 32] = hasher.finalize().into();
     crate::hex_encode(&digest)
 }
 
-/// Sign `DialtoneHeartbeat` in-place with `DerivedChannelKeys`.
-pub fn sign_heartbeat_with_keys(hb: &mut DialtoneHeartbeat, keys: &DerivedChannelKeys) {
-    hb.channel_mac = Some(compute_heartbeat_mac_with_key(
-        hb,
-        &keys.channel,
-        &keys.auth_key,
-    ));
+/// Sign `Beat` in-place with `ChannelKeys`.
+pub fn sign_beat(beat: &mut Beat, keys: &ChannelKeys) {
+    beat.channel_mac = Some(beat_mac(beat, &keys.channel, &keys.auth_key));
 }
 
-/// Verify in constant time that `DialtoneHeartbeat` carries a valid MAC for `keys`.
-pub fn verify_heartbeat_with_keys(hb: &DialtoneHeartbeat, keys: &DerivedChannelKeys) -> bool {
-    let Some(ref provided_mac) = hb.channel_mac else {
+/// Verify in constant time that `Beat` carries a valid MAC for `keys`.
+pub fn verify_beat(beat: &Beat, keys: &ChannelKeys) -> bool {
+    let Some(ref provided_mac) = beat.channel_mac else {
         return false;
     };
-    let expected_mac = compute_heartbeat_mac_with_key(hb, &keys.channel, &keys.auth_key);
+    let expected_mac = beat_mac(beat, &keys.channel, &keys.auth_key);
     constant_time_eq(provided_mac.as_bytes(), expected_mac.as_bytes())
 }
 
-/// Encrypt and authenticate a `DialtoneHeartbeat` using **XChaCha20-Poly1305** with a random 24-byte
+/// Encrypt and authenticate a `Beat` using **XChaCha20-Poly1305** with a random 24-byte
 /// nonce and `DIALTONE_ENVELOPE_SCHEMA_V2` as Associated Data (AAD) (Issue #5).
-pub fn encrypt_heartbeat_for_gossip(
-    hb: &DialtoneHeartbeat,
-    keys: &DerivedChannelKeys,
-) -> Result<Vec<u8>, String> {
-    let mut signed_hb = hb.clone();
-    sign_heartbeat_with_keys(&mut signed_hb, keys);
-    let plaintext = serde_json::to_vec(&signed_hb).map_err(|e| e.to_string())?;
+pub fn seal_beat(beat: &Beat, keys: &ChannelKeys) -> Result<Vec<u8>, String> {
+    let mut signed_beat = beat.clone();
+    sign_beat(&mut signed_beat, keys);
+    let plaintext = serde_json::to_vec(&signed_beat).map_err(|e| e.to_string())?;
 
     let rand_bytes = iroh::SecretKey::generate().to_bytes();
     let nonce_bytes = &rand_bytes[..24];
@@ -1643,10 +1645,7 @@ pub fn encrypt_heartbeat_for_gossip(
 
 /// Decrypt and authenticate an `EncryptedGossipEnvelope` frame from `iroh-gossip` (Issue #5).
 /// Drops any plaintext frame, tampered ciphertext, wrong AAD, or invalid inner MAC.
-pub fn decrypt_heartbeat_from_gossip(
-    raw_frame: &[u8],
-    keys: &DerivedChannelKeys,
-) -> Result<DialtoneHeartbeat, String> {
+pub fn open_beat(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Beat, String> {
     let env: EncryptedGossipEnvelope = serde_json::from_slice(raw_frame)
         .map_err(|_| "gossip frame is not a valid encrypted envelope".to_string())?;
     if env.schema != DIALTONE_ENVELOPE_SCHEMA_V2 {
@@ -1675,12 +1674,12 @@ pub fn decrypt_heartbeat_from_gossip(
             "XChaCha20-Poly1305 decryption failed (wrong key or tampered frame)".to_string()
         })?;
 
-    let hb: DialtoneHeartbeat = serde_json::from_slice(&plaintext)
-        .map_err(|e| format!("invalid decrypted heartbeat JSON: {e}"))?;
-    if !verify_heartbeat_with_keys(&hb, keys) {
-        return Err("decrypted heartbeat failed inner channel_mac verification".to_string());
+    let beat: Beat = serde_json::from_slice(&plaintext)
+        .map_err(|e| format!("invalid decrypted beat JSON: {e}"))?;
+    if !verify_beat(&beat, keys) {
+        return Err("decrypted beat failed inner channel_mac verification".to_string());
     }
-    Ok(hb)
+    Ok(beat)
 }
 
 pub async fn observe_peer_remote_addrs(
@@ -1721,14 +1720,14 @@ pub async fn observe_peer_remote_addrs(
 
 pub use crate::now_unix;
 
-/// Prune peer heartbeat entries older than `ttl_secs`.
-pub fn prune_stale_peers(peers: &mut Vec<DialtoneHeartbeat>, now: u64, ttl_secs: u64) -> usize {
+/// Prune peer beat entries older than `ttl_secs`.
+pub fn prune_stale_peers(peers: &mut Vec<Beat>, now: u64, ttl_secs: u64) -> usize {
     let before = peers.len();
     peers.retain(|p| now.saturating_sub(p.updated_at_unix) <= ttl_secs);
     before.saturating_sub(peers.len())
 }
 
-pub fn save_peer_cache(path: &Path, peers: &[DialtoneHeartbeat]) -> Result<(), String> {
+pub fn save_peer_cache(path: &Path, peers: &[Beat]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("create peer cache dir {}: {e}", parent.display()))?;
@@ -1737,30 +1736,26 @@ pub fn save_peer_cache(path: &Path, peers: &[DialtoneHeartbeat]) -> Result<(), S
     fs::write(path, json).map_err(|e| format!("write peer cache {}: {e}", path.display()))
 }
 
-pub fn load_peer_cache(
-    path: &Path,
-    now: u64,
-    ttl_secs: u64,
-) -> Result<Vec<DialtoneHeartbeat>, String> {
+pub fn load_peer_cache(path: &Path, now: u64, ttl_secs: u64) -> Result<Vec<Beat>, String> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(format!("read peer cache {}: {e}", path.display())),
     };
-    let mut peers: Vec<DialtoneHeartbeat> =
+    let mut peers: Vec<Beat> =
         serde_json::from_str(&raw).map_err(|e| format!("parse peer cache: {e}"))?;
     prune_stale_peers(&mut peers, now, ttl_secs);
     Ok(peers)
 }
 
-/// Live in-process two-peer `iroh-gossip` heartbeat exchange over QUIC protected by Argon2id + XChaCha20-Poly1305.
+/// Live in-process two-peer `iroh-gossip` beat exchange over QUIC protected by Argon2id + XChaCha20-Poly1305.
 pub async fn verify_live_gossip_exchange(
     node_a: &str,
     node_b: &str,
-) -> Result<(DialtoneHeartbeat, DialtoneHeartbeat), String> {
+) -> Result<(Beat, Beat), String> {
     let config = IrohTransportConfig::local_offline();
-    let test_password = "dt-SelfTest_HighEntropy_Channel_Key_2026!";
-    let keys = derive_channel_keys_v2(DEFAULT_CHANNEL_NAME, test_password);
+    let test_secret = "dt-SelfTest_HighEntropy_Channel_Key_2026!";
+    let keys = derive_channel_keys_v2(DEFAULT_CHANNEL_NAME, test_secret);
     let topic_id = keys.topic_id;
 
     let lookup_a = MemoryLookup::new();
@@ -1797,12 +1792,12 @@ pub async fn verify_live_gossip_exchange(
     let id_a = endpoint_a.id();
     let id_b = endpoint_b.id();
 
-    let ticket_a = GossipTicket {
+    let ticket_a = SeedList {
         topic: topic_id,
         peers: vec![addr_a.clone()],
     }
     .to_text()?;
-    let ticket_b = GossipTicket {
+    let ticket_b = SeedList {
         topic: topic_id,
         peers: vec![addr_b.clone()],
     }
@@ -1829,16 +1824,16 @@ pub async fn verify_live_gossip_exchange(
         .await
         .map_err(|e| format!("join_peers B->A: {e}"))?;
 
-    let mut hb_a = DialtoneHeartbeat {
-        schema: DIALTONE_HEARTBEAT_SCHEMA.to_string(),
+    let mut beat_a = Beat {
+        schema: BEAT_SCHEMA.to_string(),
         node: node_a.to_string(),
-        endpoint_id: id_a.to_string(),
+        node_id: id_a.to_string(),
         ticket: ticket_a,
         counter: 1,
         updated_at_unix: now_unix(),
-        heartbeat_kind: "summary".to_string(),
-        heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
-        summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+        kind: "summary".to_string(),
+        beat_interval_secs: BEAT_INTERVAL_SECS,
+        summary_interval_secs: SUMMARY_INTERVAL_SECS,
         sent_mono_ms: monotonic_now_ms(),
         rtt_probe_requested: true,
         peer_echoes: HashMap::new(),
@@ -1849,8 +1844,8 @@ pub async fn verify_live_gossip_exchange(
         arch: default_arch(),
         role: node_role_for(node_a),
         capabilities: node_capabilities_for(node_a),
-        host_resources: sample_live_host_resources(node_a, None, 1),
-        service_endpoints: vec![ServiceAdvertisement {
+        stats: sample_stats(node_a, None, 1),
+        service_endpoints: vec![Service {
             name: "nats".to_string(),
             kind: "nats-jetstream".to_string(),
             protocol: "nats".to_string(),
@@ -1862,27 +1857,27 @@ pub async fn verify_live_gossip_exchange(
             mesh: "dialtone-iroh-gossip".to_string(),
             subjects: vec!["dialtone/events.>".to_string()],
         }],
-        managed_processes: Vec::new(),
+        processes: Vec::new(),
         iroh_transport: build_diagnostics(&config, &addr_a, None, &id_a.to_string()),
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
         geo_location: None,
-        e2e_test: None,
-        blob_store: None,
+        probe: None,
+        store: None,
     };
-    sign_heartbeat_with_keys(&mut hb_a, &keys);
+    sign_beat(&mut beat_a, &keys);
 
-    let received_hb: DialtoneHeartbeat = tokio::time::timeout(Duration::from_secs(10), async {
+    let received_beat: Beat = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let encrypted_payload_a = encrypt_heartbeat_for_gossip(&hb_a, &keys)?;
+            let encrypted_payload_a = seal_beat(&beat_a, &keys)?;
             let _ = sender_a.broadcast(encrypted_payload_a.into()).await;
             while let Ok(Some(event)) =
                 tokio::time::timeout(Duration::from_millis(120), receiver_b.next()).await
             {
                 if let GossipEvent::Received(msg) = event.map_err(|e| e.to_string())? {
-                    if let Ok(parsed) = decrypt_heartbeat_from_gossip(&msg.content, &keys) {
+                    if let Ok(parsed) = open_beat(&msg.content, &keys) {
                         if parsed.node == node_a {
-                            return Ok::<DialtoneHeartbeat, String>(parsed);
+                            return Ok::<Beat, String>(parsed);
                         }
                     }
                 }
@@ -1890,18 +1885,18 @@ pub async fn verify_live_gossip_exchange(
         }
     })
     .await
-    .map_err(|_| "timed out waiting for encrypted iroh-gossip heartbeat".to_string())??;
+    .map_err(|_| "timed out waiting for encrypted iroh-gossip beat".to_string())??;
 
-    let mut hb_b = DialtoneHeartbeat {
-        schema: DIALTONE_HEARTBEAT_SCHEMA.to_string(),
+    let mut beat_b = Beat {
+        schema: BEAT_SCHEMA.to_string(),
         node: node_b.to_string(),
-        endpoint_id: id_b.to_string(),
+        node_id: id_b.to_string(),
         ticket: ticket_b,
         counter: 1,
         updated_at_unix: now_unix(),
-        heartbeat_kind: "summary".to_string(),
-        heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
-        summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+        kind: "summary".to_string(),
+        beat_interval_secs: BEAT_INTERVAL_SECS,
+        summary_interval_secs: SUMMARY_INTERVAL_SECS,
         sent_mono_ms: monotonic_now_ms(),
         rtt_probe_requested: false,
         peer_echoes: HashMap::new(),
@@ -1912,22 +1907,22 @@ pub async fn verify_live_gossip_exchange(
         arch: default_arch(),
         role: node_role_for(node_b),
         capabilities: node_capabilities_for(node_b),
-        host_resources: sample_live_host_resources(node_b, None, 1),
+        stats: sample_stats(node_b, None, 1),
         service_endpoints: Vec::new(),
-        managed_processes: Vec::new(),
+        processes: Vec::new(),
         iroh_transport: build_diagnostics(&config, &addr_b, None, &id_b.to_string()),
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
         geo_location: None,
-        e2e_test: None,
-        blob_store: None,
+        probe: None,
+        store: None,
     };
-    sign_heartbeat_with_keys(&mut hb_b, &keys);
+    sign_beat(&mut beat_b, &keys);
 
     let _ = router_a.shutdown().await;
     let _ = router_b.shutdown().await;
 
-    Ok((received_hb, hb_b))
+    Ok((received_beat, beat_b))
 }
 
 #[cfg(test)]
@@ -1936,25 +1931,25 @@ mod tests {
     use std::env;
 
     #[test]
-    fn issue_1_channel_password_validation_rejects_weak_and_accepts_generated() {
-        assert!(validate_channel_password("").is_err());
-        assert!(validate_channel_password("   ").is_err());
-        assert!(validate_channel_password("dialtone").is_err());
-        assert!(validate_channel_password("dialtone2").is_err());
-        assert!(validate_channel_password("password123").is_err());
-        assert!(validate_channel_password("default").is_err());
-        assert!(validate_channel_password("short-pass-1").is_err());
-        assert!(validate_channel_password("aaaaaaaaaaaaaaaaaaaa").is_err());
-        assert!(validate_channel_password("alllowercasewordsinhere").is_err());
+    fn issue_1_channel_secret_validation_rejects_weak_and_accepts_generated() {
+        assert!(validate_secret("").is_err());
+        assert!(validate_secret("   ").is_err());
+        assert!(validate_secret("dialtone").is_err());
+        assert!(validate_secret("dialtone2").is_err());
+        assert!(validate_secret("password123").is_err());
+        assert!(validate_secret("default").is_err());
+        assert!(validate_secret("short-pass-1").is_err());
+        assert!(validate_secret("aaaaaaaaaaaaaaaaaaaa").is_err());
+        assert!(validate_secret("alllowercasewordsinhere").is_err());
 
-        let generated = generate_channel_password();
+        let generated = new_secret();
         assert!(generated.starts_with("dt-"));
         assert!(generated.len() >= 40);
-        assert_eq!(validate_channel_password(&generated).unwrap(), generated);
+        assert_eq!(validate_secret(&generated).unwrap(), generated);
     }
 
     #[test]
-    fn issue_2_config_never_stores_plaintext_password_and_migrates_legacy_file() {
+    fn issue_2_config_never_stores_plaintext_secret_and_migrates_legacy_file() {
         let root = env::temp_dir().join(format!("dialtone-cfg-mig-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let legacy_dir = root.join(".dialtone2");
@@ -1993,7 +1988,7 @@ mod tests {
         let disk_content = fs::read_to_string(&new_path).unwrap();
         assert!(
             !disk_content.contains(raw_pass),
-            "config.json on disk must never contain the raw password"
+            "config.json on disk must never contain the raw secret"
         );
         assert!(disk_content.contains("\"derived_keys\""));
 
@@ -2022,20 +2017,16 @@ mod tests {
         let _ = fs::remove_file(&cfg_path);
 
         let after_allow = allow_peer_in_config_with_addrs(&cfg_path, &ep_a, None, &[]).unwrap();
-        assert!(is_allowed_peer_in_list(
-            &after_allow.allowed_endpoint_ids,
-            &ep_a,
-            None
-        ));
+        assert!(is_allowed_peer_in_list(&after_allow.allowlist, &ep_a, None));
         assert!(!is_allowed_peer_in_list(
-            &after_allow.allowed_endpoint_ids,
+            &after_allow.allowlist,
             &ep_b,
             None
         ));
 
         let after_revoke = revoke_peer_in_config(&cfg_path, &ep_a).unwrap();
         assert!(!is_allowed_peer_in_list(
-            &after_revoke.allowed_endpoint_ids,
+            &after_revoke.allowlist,
             &ep_a,
             None
         ));
@@ -2044,7 +2035,7 @@ mod tests {
     }
 
     #[test]
-    fn issue_4_and_5_argon2id_kdf_known_answer_and_xchacha20poly1305_heartbeat_encryption() {
+    fn issue_4_and_5_argon2id_kdf_known_answer_and_xchacha20poly1305_beat_encryption() {
         let k1 = derive_channel_keys_v2("dialtone", "dt-KnownAnswer_Vector_Test_2026!");
         let k2 = derive_channel_keys_v2("dialtone", "dt-KnownAnswer_Vector_Test_2026!");
         let k_other = derive_channel_keys_v2("dialtone", "dt-Different_Vector_Test_2026!");
@@ -2070,16 +2061,16 @@ mod tests {
         let cfg = IrohTransportConfig::local_offline();
         let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &addr, None, "ep-secret-node");
-        let hb = DialtoneHeartbeat {
-            schema: DIALTONE_HEARTBEAT_SCHEMA.to_string(),
+        let beat = Beat {
+            schema: BEAT_SCHEMA.to_string(),
             node: "node-alpha".to_string(),
-            endpoint_id: "ep-secret-node".to_string(),
+            node_id: "ep-secret-node".to_string(),
             ticket: "iroh-gossip-v1:super-secret-ticket".to_string(),
             counter: 42,
             updated_at_unix: 1_700_000_000,
-            heartbeat_kind: "regular".to_string(),
-            heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
-            summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+            kind: "regular".to_string(),
+            beat_interval_secs: BEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_INTERVAL_SECS,
             sent_mono_ms: 1_000,
             rtt_probe_requested: false,
             peer_echoes: HashMap::new(),
@@ -2090,36 +2081,145 @@ mod tests {
             arch: default_arch(),
             role: node_role_for("node-alpha"),
             capabilities: node_capabilities_for("node-alpha"),
-            host_resources: sample_live_host_resources("node-alpha", None, 42),
+            stats: sample_stats("node-alpha", None, 42),
             service_endpoints: Vec::new(),
-            managed_processes: Vec::new(),
+            processes: Vec::new(),
             iroh_transport: diag,
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
             geo_location: None,
-            e2e_test: None,
-            blob_store: None,
+            probe: None,
+            store: None,
         };
 
-        let wire_bytes = encrypt_heartbeat_for_gossip(&hb, &k1).unwrap();
+        let wire_bytes = seal_beat(&beat, &k1).unwrap();
         let wire_str = String::from_utf8_lossy(&wire_bytes);
         // Captured gossip frames must contain NO plaintext fields
         assert!(!wire_str.contains("node-alpha"));
         assert!(!wire_str.contains("ep-secret-node"));
         assert!(!wire_str.contains("super-secret-ticket"));
-        assert!(!wire_str.contains("host_resources"));
+        assert!(!wire_str.contains("stats"));
 
         // Round-trip decrypts cleanly with k1 and fails with k_other or tampered ciphertext
-        let decrypted = decrypt_heartbeat_from_gossip(&wire_bytes, &k1).unwrap();
+        let decrypted = open_beat(&wire_bytes, &k1).unwrap();
         assert_eq!(decrypted.node, "node-alpha");
         assert_eq!(decrypted.counter, 42);
-        assert!(decrypt_heartbeat_from_gossip(&wire_bytes, &k_other).is_err());
+        assert!(open_beat(&wire_bytes, &k_other).is_err());
 
         let mut tampered_env: EncryptedGossipEnvelope =
             serde_json::from_slice(&wire_bytes).unwrap();
         tampered_env.ciphertext.push_str("AA");
         let tampered_bytes = serde_json::to_vec(&tampered_env).unwrap();
-        assert!(decrypt_heartbeat_from_gossip(&tampered_bytes, &k1).is_err());
+        assert!(open_beat(&tampered_bytes, &k1).is_err());
+    }
+
+    /// Beats from peers and config files written before the domain-language rename use the
+    /// old field names; they must still parse to the same values.
+    #[test]
+    fn old_field_names_still_parse() {
+        fn rename_keys(v: &mut serde_json::Value, map: &[(&str, &str)]) {
+            match v {
+                serde_json::Value::Object(obj) => {
+                    for (new, old) in map {
+                        if let Some(val) = obj.remove(*new) {
+                            obj.insert(old.to_string(), val);
+                        }
+                    }
+                    obj.values_mut().for_each(|child| rename_keys(child, map));
+                }
+                serde_json::Value::Array(items) => {
+                    items.iter_mut().for_each(|child| rename_keys(child, map))
+                }
+                _ => {}
+            }
+        }
+        let old_names = [
+            ("node_id", "endpoint_id"),                        // compat
+            ("kind", "heartbeat_kind"),                        // compat
+            ("beat_interval_secs", "heartbeat_interval_secs"), // compat
+            ("stats", "host_resources"),                       // compat
+            ("processes", "managed_processes"),                // compat
+            ("store", "blob_store"),                           // compat
+            ("digest", "sha256"),                              // compat
+            ("blob_keys", "sha_blob_keys"),                    // compat
+            ("blob_bytes", "sha_blob_bytes"),                  // compat
+            ("latest_digest", "latest_sha256"),                // compat
+            ("allowlist", "allowed_endpoint_ids"),             // compat
+            ("seeds", "seed_peers"),                           // compat
+            ("invites", "bootstrap_tickets"),                  // compat
+        ];
+
+        let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
+        let diag = build_diagnostics(&IrohTransportConfig::local_offline(), &addr, None, "n1");
+        let beat = Beat {
+            schema: BEAT_SCHEMA.to_string(),
+            node: "node-alpha".to_string(),
+            node_id: "n1".to_string(),
+            ticket: String::new(),
+            counter: 7,
+            updated_at_unix: 1_700_000_000,
+            kind: "summary".to_string(),
+            beat_interval_secs: BEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_INTERVAL_SECS,
+            sent_mono_ms: 1,
+            rtt_probe_requested: false,
+            peer_echoes: HashMap::new(),
+            peer_rtt_ms: std::collections::BTreeMap::new(),
+            summary_stats: None,
+            channel_mac: None,
+            os: default_os(),
+            arch: default_arch(),
+            role: String::new(),
+            capabilities: Vec::new(),
+            stats: sample_stats("node-alpha", None, 7),
+            service_endpoints: Vec::new(),
+            processes: vec![crate::service::ProcessSpec {
+                name: "probe".to_string(),
+                path: "/tmp/probe".to_string(),
+                digest: format!("sha256:{}", "a".repeat(64)),
+                desired_state: "running".to_string(),
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: None,
+                startup_grace_secs: None,
+                status: Some("running".to_string()),
+                pid: Some(42),
+                restart_count: 0,
+                service_unit: None,
+            }],
+            iroh_transport: diag,
+            observed_remote_addrs: Vec::new(),
+            tailnet_used: false,
+            geo_location: None,
+            probe: None,
+            store: Some(StoreStats {
+                blob_keys: 3,
+                blob_bytes: 99,
+                latest_digest: Some(format!("sha256:{}", "b".repeat(64))),
+            }),
+        };
+        let mut old_beat = serde_json::to_value(&beat).unwrap();
+        rename_keys(&mut old_beat, &old_names);
+        assert!(old_beat.get("host_resources").is_some()); // compat
+        let parsed: Beat = serde_json::from_value(old_beat).unwrap();
+        assert_eq!(parsed, beat);
+
+        let cfg = MeshConfig {
+            allowlist: vec!["n2".to_string()],
+            seeds: vec![Seed {
+                node_id: "n2".to_string(),
+                relay_url: None,
+                ip_addrs: Vec::new(),
+            }],
+            invites: vec!["dialtone-invite-v1:x".to_string()],
+            ..Default::default()
+        };
+        let mut old_cfg = serde_json::to_value(&cfg).unwrap();
+        rename_keys(&mut old_cfg, &old_names);
+        let parsed_cfg: MeshConfig = serde_json::from_value(old_cfg).unwrap();
+        assert_eq!(parsed_cfg.allowlist, cfg.allowlist);
+        assert_eq!(parsed_cfg.seeds, cfg.seeds);
+        assert_eq!(parsed_cfg.invites, cfg.invites);
     }
 
     #[test]
@@ -2139,24 +2239,24 @@ mod tests {
         )
         .unwrap();
         let encoded = invite.to_text().unwrap();
-        let parsed = InviteTicket::from_str(&encoded).unwrap();
+        let parsed = Invite::from_str(&encoded).unwrap();
 
-        let mut cfg = PersistentMeshConfig::default();
+        let mut cfg = MeshConfig::default();
 
         // 1. Expired invite is rejected
         let expired_err =
             redeem_invite_ticket(&parsed, &keys, &redeemer_id, now + 901, &mut cfg).unwrap_err();
         assert!(expired_err.contains("expired"));
 
-        // 2. Wrong bound endpoint_id is rejected
+        // 2. Wrong bound node_id is rejected
         let wrong_peer_err =
             redeem_invite_ticket(&parsed, &keys, "wrong-endpoint", now + 10, &mut cfg).unwrap_err();
-        assert!(wrong_peer_err.contains("bound to endpoint_id"));
+        assert!(wrong_peer_err.contains("bound to node_id"));
 
-        // 3. Valid redemption succeeds and adds issuer & redeemer to allowed_endpoint_ids
+        // 3. Valid redemption succeeds and adds issuer & redeemer to allowlist
         let _addr = redeem_invite_ticket(&parsed, &keys, &redeemer_id, now + 10, &mut cfg).unwrap();
-        assert!(cfg.allowed_endpoint_ids.contains(&issuer_id));
-        assert!(cfg.allowed_endpoint_ids.contains(&redeemer_id));
+        assert!(cfg.allowlist.contains(&issuer_id));
+        assert!(cfg.allowlist.contains(&redeemer_id));
 
         // 4. Reusing the same invite ticket is rejected
         let replay_err =
@@ -2177,12 +2277,12 @@ mod tests {
             ep.close().await;
             addr
         });
-        let ticket = GossipTicket {
+        let ticket = SeedList {
             topic: derive_standby_topic_id("test-endpoint-id"),
             peers: vec![addr],
         };
         let encoded = ticket.to_text().unwrap();
-        let decoded = GossipTicket::from_str(&encoded).unwrap();
+        let decoded = SeedList::from_str(&encoded).unwrap();
         assert_eq!(decoded.topic, ticket.topic);
         assert_eq!(decoded.peers.len(), 1);
     }
@@ -2209,16 +2309,16 @@ mod tests {
         let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &addr, None, "ep-1");
 
-        let fresh = DialtoneHeartbeat {
-            schema: DIALTONE_HEARTBEAT_SCHEMA.to_string(),
+        let fresh = Beat {
+            schema: BEAT_SCHEMA.to_string(),
             node: "node-alpha".to_string(),
-            endpoint_id: "ep-1".to_string(),
+            node_id: "ep-1".to_string(),
             ticket: "iroh-gossip-v1:fresh".to_string(),
             counter: 1,
             updated_at_unix: 1_000,
-            heartbeat_kind: "regular".to_string(),
-            heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
-            summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+            kind: "regular".to_string(),
+            beat_interval_secs: BEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_INTERVAL_SECS,
             sent_mono_ms: 1_000,
             rtt_probe_requested: false,
             peer_echoes: HashMap::new(),
@@ -2229,15 +2329,15 @@ mod tests {
             arch: default_arch(),
             role: node_role_for("node-alpha"),
             capabilities: node_capabilities_for("node-alpha"),
-            host_resources: sample_live_host_resources("node-alpha", None, 1),
+            stats: sample_stats("node-alpha", None, 1),
             service_endpoints: Vec::new(),
-            managed_processes: Vec::new(),
+            processes: Vec::new(),
             iroh_transport: diag.clone(),
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
             geo_location: None,
-            e2e_test: None,
-            blob_store: None,
+            probe: None,
+            store: None,
         };
         let mut stale = fresh.clone();
         stale.node = "stale-peer".to_string();
@@ -2252,9 +2352,9 @@ mod tests {
 
     #[test]
     fn rtt_echo_and_mesh_matrix_calculate_pairwise_latency() {
-        assert_eq!(HEARTBEAT_INTERVAL_SECS, 5);
-        assert_eq!(SUMMARY_HEARTBEAT_INTERVAL_SECS, 30);
-        assert_eq!(SUMMARY_HEARTBEAT_EVERY_N_TICKS, 6);
+        assert_eq!(BEAT_INTERVAL_SECS, 5);
+        assert_eq!(SUMMARY_INTERVAL_SECS, 30);
+        assert_eq!(SUMMARY_EVERY_N_BEATS, 6);
 
         let echo = PeerRttEcho {
             echoed_mono_ms: 10_000,
@@ -2267,16 +2367,16 @@ mod tests {
         let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &addr, None, "ep-1");
 
-        let mut hb_a = DialtoneHeartbeat {
-            schema: DIALTONE_HEARTBEAT_SCHEMA.to_string(),
+        let mut beat_a = Beat {
+            schema: BEAT_SCHEMA.to_string(),
             node: "node-alpha".to_string(),
-            endpoint_id: "ep-1".to_string(),
+            node_id: "ep-1".to_string(),
             ticket: "iroh-gossip-v1:a".to_string(),
             counter: 1,
             updated_at_unix: 1_000,
-            heartbeat_kind: "summary".to_string(),
-            heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
-            summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+            kind: "summary".to_string(),
+            beat_interval_secs: BEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_INTERVAL_SECS,
             sent_mono_ms: 1_000,
             rtt_probe_requested: false,
             peer_echoes: HashMap::new(),
@@ -2287,29 +2387,29 @@ mod tests {
             arch: default_arch(),
             role: node_role_for("node-alpha"),
             capabilities: node_capabilities_for("node-alpha"),
-            host_resources: sample_live_host_resources("node-alpha", None, 1),
+            stats: sample_stats("node-alpha", None, 1),
             service_endpoints: Vec::new(),
-            managed_processes: Vec::new(),
+            processes: Vec::new(),
             iroh_transport: diag,
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
             geo_location: None,
-            e2e_test: None,
-            blob_store: None,
+            probe: None,
+            store: None,
         };
-        let mut hb_b = hb_a.clone();
-        hb_b.node = "node-beta".to_string();
-        hb_b.peer_rtt_ms = std::collections::BTreeMap::from([("node-alpha".to_string(), 15.8)]);
-        hb_a.peer_rtt_ms.insert("node-gamma".to_string(), 22.4);
+        let mut beat_b = beat_a.clone();
+        beat_b.node = "node-beta".to_string();
+        beat_b.peer_rtt_ms = std::collections::BTreeMap::from([("node-alpha".to_string(), 15.8)]);
+        beat_a.peer_rtt_ms.insert("node-gamma".to_string(), 22.4);
 
-        let mut nodes = vec![hb_a, hb_b];
+        let mut nodes = vec![beat_a, beat_b];
         let matrix = build_mesh_rtt_matrix(&nodes);
         assert_eq!(matrix.get("node-alpha<->node-beta"), Some(&15.0));
         assert_eq!(matrix.get("node-alpha<->node-gamma"), Some(&22.4));
 
         // Verify public IP geolocation + RTT latency clustering placement
         nodes[0].observed_remote_addrs = vec!["direct-ip:52.10.20.30:44222".to_string()];
-        resolve_fleet_node_locations(&mut nodes, &matrix);
+        place_nodes(&mut nodes, &matrix);
         let geo_a = nodes[0].geo_location.as_ref().unwrap();
         let geo_b = nodes[1].geo_location.as_ref().unwrap();
         assert_eq!(geo_a.source, "public_ip_geo");
@@ -2322,12 +2422,12 @@ mod tests {
     }
 
     #[test]
-    fn live_two_peer_iroh_gossip_heartbeat_exchange_succeeds() {
+    fn live_two_peer_iroh_gossip_beat_exchange_succeeds() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (received, peer_b) = rt
             .block_on(verify_live_gossip_exchange("node-alpha", "edge-1"))
             .unwrap();
-        assert_eq!(received.schema, DIALTONE_HEARTBEAT_SCHEMA);
+        assert_eq!(received.schema, BEAT_SCHEMA);
         assert_eq!(received.node, "node-alpha");
         assert_eq!(
             received.service_endpoints[0].url,

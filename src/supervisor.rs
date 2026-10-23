@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::blob::{compute_sha256, normalize_sha256, read_cached_blob};
-use crate::service::{InstalledBinary, ManagedProcessSpec};
+use crate::blob::{digest_of, normalize_digest, read_blob};
+use crate::service::{InstalledProgram, ProcessSpec};
 
 pub const RTCORE_ARM_MAGIC: u32 = 0x4152_4d44;
 pub const RTCORE_MODE_BOUND_VERSION: u32 = 2;
@@ -184,7 +184,7 @@ pub struct ProcessIntentPlan {
 
 /// Audit process args and env for forbidden steady-state dependencies (fixed LAN IPs,
 /// Tailnet `.ts.net`, SSH/scp, remote git).
-pub fn audit_process_dependencies(spec: &ManagedProcessSpec) -> Vec<String> {
+pub fn audit_process_dependencies(spec: &ProcessSpec) -> Vec<String> {
     let mut warnings = Vec::new();
     for item in spec.args.iter().chain(spec.env.iter()) {
         let lower = item.to_ascii_lowercase();
@@ -210,7 +210,7 @@ pub fn audit_process_dependencies(spec: &ManagedProcessSpec) -> Vec<String> {
 pub fn plan_process_intent(
     publisher_node: &str,
     target_node: &str,
-    spec: &ManagedProcessSpec,
+    spec: &ProcessSpec,
     action: &str,
 ) -> Result<ProcessIntentPlan, String> {
     let (desired_state, restart_requested) = match action {
@@ -245,26 +245,26 @@ pub fn plan_process_intent(
 
 /// Hydrate empty or `sha256:unknown` process hashes from matching installed binaries,
 /// falling back to hashing the executable path on disk.
-pub fn hydrate_managed_process_hashes(
-    processes: &mut [ManagedProcessSpec],
-    installed: &[InstalledBinary],
+pub fn hydrate_process_digests(
+    processes: &mut [ProcessSpec],
+    installed: &[InstalledProgram],
     previous_paths: &HashMap<String, String>,
 ) {
     for proc in processes.iter_mut() {
         if let Some(prev_path) = previous_paths.get(&proc.name) {
             if prev_path != &proc.path {
-                proc.sha256 = "sha256:unknown".to_string();
+                proc.digest = "sha256:unknown".to_string();
             }
         }
-        if proc.sha256.trim().is_empty() || proc.sha256 == "sha256:unknown" {
+        if proc.digest.trim().is_empty() || proc.digest == "sha256:unknown" {
             if let Some(bin) = installed.iter().find(|b| b.path == proc.path) {
-                if !bin.sha256.is_empty() && bin.sha256 != "sha256:unknown" {
-                    proc.sha256 = bin.sha256.clone();
+                if !bin.digest.is_empty() && bin.digest != "sha256:unknown" {
+                    proc.digest = bin.digest.clone();
                     continue;
                 }
             }
             if let Ok(bytes) = fs::read(&proc.path) {
-                proc.sha256 = compute_sha256(&bytes);
+                proc.digest = digest_of(&bytes);
             }
         }
     }
@@ -283,7 +283,7 @@ pub struct SystemdReconcileReport {
 /// variables from the child environment.
 pub fn reconcile_systemd_intent_drop_in(
     unit_dir: &Path,
-    spec: &ManagedProcessSpec,
+    spec: &ProcessSpec,
     reconcile_drift: bool,
     remove_drop_ins: &[String],
     simulated_stop_elapsed_ms: u64,
@@ -367,16 +367,16 @@ pub fn reconcile_systemd_intent_drop_in(
     })
 }
 
-/// Materialize a verified blob (`sha256:<hex>`) from `blob_cache_dir` into an executable
-/// binary/script under `<blob_cache_dir>/../run/<name>-<short_hex>`, setting `0o755` permissions
+/// Materialize a verified blob (`sha256:<hex>`) from `store_dir` into an executable
+/// binary/script under `<store_dir>/../run/<name>-<short_hex>`, setting `0o755` permissions
 /// on Unix and using atomic temp-file rename so running processes are never corrupted.
-pub fn stage_executable_blob(
-    blob_cache_dir: &Path,
+pub fn stage_program(
+    store_dir: &Path,
     name: &str,
-    sha256: &str,
+    digest: &str,
 ) -> Result<(String, PathBuf), String> {
-    let normalized_sha = normalize_sha256(sha256)?;
-    let bytes = read_cached_blob(blob_cache_dir, &normalized_sha)?;
+    let normalized_sha = normalize_digest(digest)?;
+    let bytes = read_blob(store_dir, &normalized_sha)?;
     let short_hex = &normalized_sha
         .strip_prefix("sha256:")
         .unwrap_or(&normalized_sha)[..12];
@@ -388,10 +388,7 @@ pub fn stage_executable_blob(
         return Err(format!("invalid process name {name:?}"));
     }
 
-    let run_dir = blob_cache_dir
-        .parent()
-        .unwrap_or(blob_cache_dir)
-        .join("run");
+    let run_dir = store_dir.parent().unwrap_or(store_dir).join("run");
     fs::create_dir_all(&run_dir)
         .map_err(|e| format!("create executable blob run dir {}: {e}", run_dir.display()))?;
 
@@ -433,37 +430,33 @@ pub fn stage_executable_blob(
     Ok((normalized_sha, target_path))
 }
 
-pub const DEFAULT_SUBPROCESS_BLOB_NAME: &str = "mesh-blob-worker";
+pub const PROBE_PROGRAM_NAME: &str = "mesh-blob-worker";
 
-/// Canonical cross-platform polyglot E2E test subprocess blob (`sh` on macOS/Linux, `cmd.exe` on Windows)
-/// sharing an identical SHA-256 digest across all OS/arch nodes in the fleet.
-/// Continuously exercises SHA-256 blobs, Key-Value store, Subprocess supervision, Mesh connectivity, and A/B rollback.
-pub fn default_subprocess_blob_bytes() -> &'static [u8] {
+/// Canonical cross-platform polyglot probe test process blob (`sh` on macOS/Linux, `cmd.exe` on Windows)
+/// sharing an identical SHA-256 digest across all OS/arch nodes in the mesh.
+/// Continuously exercises SHA-256 blobs, Key-Value store, Process supervision, Mesh connectivity, and A/B rollback.
+pub fn probe_program_bytes() -> &'static [u8] {
     b":; while true; do if [ -n \"$APP_LISTEN\" ]; then \"$APP_BIN\" test-tick --listen \"$APP_LISTEN\"; fi; sleep 5; done; exit 0;\r\n@echo off\r\n:dialtone_blob_loop\r\nif defined APP_LISTEN \"%APP_BIN%\" test-tick --listen \"%APP_LISTEN%\"\r\nping -n 6 127.0.0.1 >NUL\r\ngoto dialtone_blob_loop\r\n"
 }
 
-/// Automatically store, verify, and stage the default cross-platform subprocess blob in `blob_cache_dir`
-/// and ensure its `ManagedProcessSpec` is registered in `specs`.
-pub fn ensure_default_subprocess_blob(
-    blob_cache_dir: &Path,
-    specs: &mut Vec<ManagedProcessSpec>,
+/// Automatically store, verify, and stage the default cross-platform process blob in `store_dir`
+/// and ensure its `ProcessSpec` is registered in `specs`.
+pub fn ensure_probe_program(
+    store_dir: &Path,
+    specs: &mut Vec<ProcessSpec>,
     ticket_uri: Option<&str>,
-) -> Result<ManagedProcessSpec, String> {
-    let payload = default_subprocess_blob_bytes();
-    let (sha256, _) = crate::blob::store_verified_blob(blob_cache_dir, payload, None)?;
-    let (verified_sha, staged_path) =
-        stage_executable_blob(blob_cache_dir, DEFAULT_SUBPROCESS_BLOB_NAME, &sha256)?;
+) -> Result<ProcessSpec, String> {
+    let payload = probe_program_bytes();
+    let (digest, _) = crate::blob::put_blob(store_dir, payload, None)?;
+    let (verified_sha, staged_path) = stage_program(store_dir, PROBE_PROGRAM_NAME, &digest)?;
 
     let mut env_vars = vec![
         "DIALTONE_MESH_DEPLOY=1".to_string(),
-        "WORKER_ROLE=mesh-blob-worker".to_string(),
+        "PROCESS_ROLE=mesh-blob-worker".to_string(),
     ];
     if let Some(t_uri) = ticket_uri.map(str::trim).filter(|s| !s.is_empty()) {
         env_vars.push(format!("DIALTONE_BLOB_TICKET={t_uri}"));
-    } else if let Some(existing) = specs
-        .iter()
-        .find(|p| p.name == DEFAULT_SUBPROCESS_BLOB_NAME)
-    {
+    } else if let Some(existing) = specs.iter().find(|p| p.name == PROBE_PROGRAM_NAME) {
         for kv in &existing.env {
             if kv.starts_with("DIALTONE_BLOB_TICKET=") {
                 env_vars.push(kv.clone());
@@ -471,12 +464,9 @@ pub fn ensure_default_subprocess_blob(
         }
     }
 
-    if let Some(existing) = specs
-        .iter_mut()
-        .find(|p| p.name == DEFAULT_SUBPROCESS_BLOB_NAME)
-    {
+    if let Some(existing) = specs.iter_mut().find(|p| p.name == PROBE_PROGRAM_NAME) {
         existing.path = staged_path.to_string_lossy().to_string();
-        existing.sha256 = verified_sha;
+        existing.digest = verified_sha;
         if existing.desired_state.trim().is_empty() {
             existing.desired_state = "running".to_string();
         }
@@ -484,10 +474,10 @@ pub fn ensure_default_subprocess_blob(
         return Ok(existing.clone());
     }
 
-    let spec = ManagedProcessSpec {
-        name: DEFAULT_SUBPROCESS_BLOB_NAME.to_string(),
+    let spec = ProcessSpec {
+        name: PROBE_PROGRAM_NAME.to_string(),
         path: staged_path.to_string_lossy().to_string(),
-        sha256: verified_sha,
+        digest: verified_sha,
         desired_state: "running".to_string(),
         args: Vec::new(),
         env: env_vars,
@@ -506,33 +496,33 @@ pub fn ensure_default_subprocess_blob(
 struct SupervisedChild {
     child: Child,
     path: String,
-    sha256: String,
+    digest: String,
 }
 
 #[derive(Debug)]
-pub struct ManagedProcessSupervisor {
+pub struct Supervisor {
     children: HashMap<String, SupervisedChild>,
 }
 
-impl Default for ManagedProcessSupervisor {
+impl Default for Supervisor {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ManagedProcessSupervisor {
+impl Supervisor {
     pub fn new() -> Self {
         Self {
             children: HashMap::new(),
         }
     }
 
-    pub fn reconcile(&mut self, specs: &mut [ManagedProcessSpec]) -> Result<(), String> {
+    pub fn reconcile(&mut self, specs: &mut [ProcessSpec]) -> Result<(), String> {
         for spec in specs.iter_mut() {
             if spec.desired_state == "running" {
                 let mut needs_spawn = true;
                 if let Some(entry) = self.children.get_mut(&spec.name) {
-                    if entry.path != spec.path || entry.sha256 != spec.sha256 {
+                    if entry.path != spec.path || entry.digest != spec.digest {
                         let _ = entry.child.kill();
                         let _ = entry.child.wait();
                         self.children.remove(&spec.name);
@@ -586,7 +576,7 @@ impl ManagedProcessSupervisor {
                     }
                     let child = cmd
                         .spawn()
-                        .map_err(|e| format!("spawn managed process {}: {e}", spec.name))?;
+                        .map_err(|e| format!("spawn process {}: {e}", spec.name))?;
                     spec.pid = Some(child.id());
                     spec.status = Some("running".to_string());
                     self.children.insert(
@@ -594,7 +584,7 @@ impl ManagedProcessSupervisor {
                         SupervisedChild {
                             child,
                             path: spec.path.clone(),
-                            sha256: spec.sha256.clone(),
+                            digest: spec.digest.clone(),
                         },
                     );
                 }
@@ -629,7 +619,7 @@ impl ManagedProcessSupervisor {
     }
 }
 
-impl Drop for ManagedProcessSupervisor {
+impl Drop for Supervisor {
     fn drop(&mut self) {
         self.shutdown_all();
     }
@@ -638,7 +628,7 @@ impl Drop for ManagedProcessSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blob::store_verified_blob;
+    use crate::blob::put_blob;
     use std::env;
 
     #[test]
@@ -652,10 +642,10 @@ mod tests {
         let canonical_file = dir.join("25-daemon-intent.conf");
         fs::write(&canonical_file, "drifted-content").unwrap();
 
-        let spec = ManagedProcessSpec {
+        let spec = ProcessSpec {
             name: "rtcore".to_string(),
             path: "/usr/local/bin/rtcore".to_string(),
-            sha256: "sha256:unknown".to_string(),
+            digest: "sha256:unknown".to_string(),
             desired_state: "stopped".to_string(),
             args: vec![
                 "--nats".to_string(),
@@ -702,10 +692,10 @@ mod tests {
         } else {
             ("/bin/sleep".to_string(), vec!["5".to_string()])
         };
-        let mut specs = vec![ManagedProcessSpec {
-            name: "sleep-worker".to_string(),
+        let mut specs = vec![ProcessSpec {
+            name: "sleep-process".to_string(),
             path: sleep_path,
-            sha256: "sha256:unknown".to_string(),
+            digest: "sha256:unknown".to_string(),
             desired_state: "running".to_string(),
             args: sleep_args,
             env: Vec::new(),
@@ -716,10 +706,10 @@ mod tests {
             restart_count: 0,
             service_unit: None,
         }];
-        hydrate_managed_process_hashes(&mut specs, &[], &HashMap::new());
-        assert!(specs[0].sha256.starts_with("sha256:") && specs[0].sha256 != "sha256:unknown");
+        hydrate_process_digests(&mut specs, &[], &HashMap::new());
+        assert!(specs[0].digest.starts_with("sha256:") && specs[0].digest != "sha256:unknown");
 
-        let mut sup = ManagedProcessSupervisor::new();
+        let mut sup = Supervisor::new();
         sup.reconcile(&mut specs).unwrap();
         assert_eq!(specs[0].status.as_deref(), Some("running"));
         assert!(specs[0].pid.is_some());
@@ -742,19 +732,19 @@ mod tests {
         } else {
             b"#!/bin/sh\nsleep 30\n"
         };
-        let (sha256, _) = store_verified_blob(&blob_dir, script_bytes, None).unwrap();
+        let (digest, _) = put_blob(&blob_dir, script_bytes, None).unwrap();
         let (verified_sha, staged_path) =
-            stage_executable_blob(&blob_dir, "telemetry-blob-worker", &sha256).unwrap();
-        assert_eq!(verified_sha, sha256);
+            stage_program(&blob_dir, "stats-blob-process", &digest).unwrap();
+        assert_eq!(verified_sha, digest);
         assert!(staged_path.exists());
 
-        let mut specs = vec![ManagedProcessSpec {
-            name: "telemetry-blob-worker".to_string(),
+        let mut specs = vec![ProcessSpec {
+            name: "stats-blob-process".to_string(),
             path: staged_path.to_string_lossy().to_string(),
-            sha256: verified_sha,
+            digest: verified_sha,
             desired_state: "running".to_string(),
             args: Vec::new(),
-            env: vec!["WORKER_ROLE=telemetry".to_string()],
+            env: vec!["PROCESS_ROLE=stats".to_string()],
             cwd: None,
             startup_grace_secs: Some(2),
             status: None,
@@ -763,20 +753,20 @@ mod tests {
             service_unit: None,
         }];
 
-        let mut sup = ManagedProcessSupervisor::new();
+        let mut sup = Supervisor::new();
         sup.reconcile(&mut specs).unwrap();
-        let pid1 = specs[0].pid.expect("blob subprocess should have pid");
+        let pid1 = specs[0].pid.expect("blob process should have pid");
         assert_eq!(specs[0].status.as_deref(), Some("running"));
         assert_eq!(specs[0].restart_count, 0);
 
-        // Simulate crash/kill of the blob subprocess and verify reconcile automatically respawns it
-        assert!(sup.kill_child("telemetry-blob-worker"));
+        // Simulate crash/kill of the blob process and verify reconcile automatically respawns it
+        assert!(sup.kill_child("stats-blob-process"));
         sup.reconcile(&mut specs).unwrap();
         let pid2 = specs[0]
             .pid
-            .expect("blob subprocess should respawn with a pid");
+            .expect("blob process should respawn with a pid");
         assert_eq!(specs[0].status.as_deref(), Some("running"));
-        assert_ne!(pid1, pid2, "respawned blob subprocess receives a new pid");
+        assert_ne!(pid1, pid2, "respawned blob process receives a new pid");
         assert_eq!(specs[0].restart_count, 1);
 
         // Stop cleanly

@@ -153,7 +153,8 @@ pub struct IrohTransportDiagnostics {
     pub relay_urls: Vec<String>,
     pub persistent_identity: bool,
     pub identity_key_path: Option<String>,
-    pub endpoint_id: String,
+    #[serde(alias = "endpoint_id")] // compat
+    pub node_id: String,
     pub address_lookup_modes: Vec<String>,
     pub ticket_addr_modes: Vec<String>,
     #[serde(default)]
@@ -318,7 +319,7 @@ pub fn build_diagnostics(
     config: &IrohTransportConfig,
     advertised_addr: &EndpointAddr,
     key_path: Option<&Path>,
-    endpoint_id: &str,
+    node_id: &str,
 ) -> IrohTransportDiagnostics {
     let mut ticket_addr_modes = Vec::new();
     let advertised_relay_urls: Vec<String> = advertised_addr
@@ -358,7 +359,7 @@ pub fn build_diagnostics(
         relay_urls: config.relay_urls.clone(),
         persistent_identity: key_path.is_some(),
         identity_key_path: key_path.map(|p| p.to_string_lossy().to_string()),
-        endpoint_id: endpoint_id.to_string(),
+        node_id: node_id.to_string(),
         address_lookup_modes: config.active_lookup_modes(),
         ticket_addr_modes,
         exclude_tailnet: config.exclude_tailnet,
@@ -373,7 +374,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn secret_key_persists_with_0600_and_produces_stable_endpoint_id() {
+    fn secret_key_persists_with_0600_and_produces_stable_node_id() {
         let path = env::temp_dir().join(format!("dialtone-secret-key-test-{}", std::process::id()));
         let _ = fs::remove_file(&path);
 

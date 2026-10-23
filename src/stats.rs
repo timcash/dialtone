@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct NetworkInterfaceTelemetry {
+pub struct NetStats {
     pub name: String,
     pub up: bool,
     pub rx_bytes_per_sec: u64,
@@ -26,7 +26,7 @@ pub struct MetricVariabilityStats {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct TelemetryWindowSummary {
+pub struct StatsSummary {
     pub window_secs: u64,
     pub sample_count: usize,
     pub published_at_unix: u64,
@@ -102,18 +102,18 @@ struct WindowSamplePoint {
 }
 
 #[derive(Clone, Debug)]
-pub struct TelemetryRollingWindow {
+pub struct StatsWindow {
     window_secs: u64,
     samples: VecDeque<WindowSamplePoint>,
 }
 
-impl Default for TelemetryRollingWindow {
+impl Default for StatsWindow {
     fn default() -> Self {
         Self::new(30)
     }
 }
 
-impl TelemetryRollingWindow {
+impl StatsWindow {
     pub fn new(window_secs: u64) -> Self {
         Self {
             window_secs: window_secs.max(5),
@@ -124,7 +124,7 @@ impl TelemetryRollingWindow {
     pub fn record_sample(
         &mut self,
         now_unix: u64,
-        host: &HostResourceTelemetry,
+        host: &Stats,
         peer_rtts_ms: &BTreeMap<String, f64>,
         total_process_restarts: u32,
     ) {
@@ -164,7 +164,7 @@ impl TelemetryRollingWindow {
         }
     }
 
-    pub fn summarize(&self, now_unix: u64) -> TelemetryWindowSummary {
+    pub fn summarize(&self, now_unix: u64) -> StatsSummary {
         let cpu_vals: Vec<f64> = self.samples.iter().map(|s| s.cpu_percent).collect();
         let mem_vals: Vec<f64> = self.samples.iter().map(|s| s.mem_percent).collect();
         let net_vals: Vec<f64> = self.samples.iter().map(|s| s.net_combined_kbps).collect();
@@ -243,7 +243,7 @@ impl TelemetryRollingWindow {
         let thrashing_score = round_tenth(score.min(100.0));
         let thrashing_detected = thrashing_score >= 25.0;
 
-        TelemetryWindowSummary {
+        StatsSummary {
             window_secs: self.window_secs,
             sample_count: self.samples.len(),
             published_at_unix: now_unix,
@@ -266,7 +266,7 @@ fn default_cpu_cores() -> u32 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct HostResourceTelemetry {
+pub struct Stats {
     #[serde(default = "default_cpu_cores")]
     pub cpu_cores: u32,
     pub cpu_percent: f64,
@@ -276,19 +276,20 @@ pub struct HostResourceTelemetry {
     pub disk_used_bytes: u64,
     pub disk_total_bytes: u64,
     pub disk_percent: f64,
-    pub interfaces: Vec<NetworkInterfaceTelemetry>,
-    pub telemetry_summary: String,
+    pub interfaces: Vec<NetStats>,
+    #[serde(alias = "telemetry_summary")] // compat
+    pub stats_line: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary_stats: Option<TelemetryWindowSummary>,
+    pub summary_stats: Option<StatsSummary>,
 }
 
-impl Default for HostResourceTelemetry {
+impl Default for Stats {
     fn default() -> Self {
-        sample_live_host_resources("local", None, 0)
+        sample_stats("local", None, 0)
     }
 }
 
-struct OsTelemetrySamplerState {
+struct StatsSampler {
     #[cfg(target_os = "macos")]
     prev_macos_cpu_ticks: Option<[u32; 4]>,
     #[cfg(target_os = "windows")]
@@ -298,13 +299,13 @@ struct OsTelemetrySamplerState {
     prev_net_sample: Option<(u64, u64, Instant)>,
     #[cfg(target_os = "windows")]
     win_net_accum: (Option<u64>, Option<u64>, u64, u64),
-    last_cached: Option<(Instant, HostResourceTelemetry)>,
+    last_cached: Option<(Instant, Stats)>,
 }
 
-fn sampler_state() -> &'static Mutex<OsTelemetrySamplerState> {
-    static STATE: OnceLock<Mutex<OsTelemetrySamplerState>> = OnceLock::new();
+fn sampler_state() -> &'static Mutex<StatsSampler> {
+    static STATE: OnceLock<Mutex<StatsSampler>> = OnceLock::new();
     STATE.get_or_init(|| {
-        Mutex::new(OsTelemetrySamplerState {
+        Mutex::new(StatsSampler {
             #[cfg(target_os = "macos")]
             prev_macos_cpu_ticks: None,
             #[cfg(target_os = "windows")]
@@ -350,7 +351,7 @@ fn read_macos_cpu_ticks() -> Option<[u32; 4]> {
 }
 
 #[cfg(target_os = "macos")]
-fn sample_macos_cpu_percent(state: &mut OsTelemetrySamplerState) -> f64 {
+fn sample_macos_cpu_percent(state: &mut StatsSampler) -> f64 {
     let first = match read_macos_cpu_ticks() {
         Some(t) => t,
         None => return 0.0,
@@ -473,10 +474,7 @@ fn sample_unix_disk() -> (u64, u64, f64) {
 }
 
 #[cfg(target_os = "macos")]
-fn sample_macos_network(
-    state: &mut OsTelemetrySamplerState,
-    bound_ip: Option<&str>,
-) -> NetworkInterfaceTelemetry {
+fn sample_macos_network(state: &mut StatsSampler, bound_ip: Option<&str>) -> NetStats {
     let mut best_name = "en0".to_string();
     let mut best_rx = 0u64;
     let mut best_tx = 0u64;
@@ -542,7 +540,7 @@ fn sample_macos_network(
     };
 
     let ip_label = bound_ip.unwrap_or("physical-lan");
-    NetworkInterfaceTelemetry {
+    NetStats {
         name: format!("{best_name} ({ip_label})"),
         up: best_rx + best_tx > 0,
         rx_bytes_per_sec: rx_rate,
@@ -612,7 +610,7 @@ fn read_windows_cpu_ticks() -> Option<(u64, u64, u64)> {
 }
 
 #[cfg(target_os = "windows")]
-fn sample_windows_cpu_percent(state: &mut OsTelemetrySamplerState) -> f64 {
+fn sample_windows_cpu_percent(state: &mut StatsSampler) -> f64 {
     let first = match read_windows_cpu_ticks() {
         Some(t) => t,
         None => return 0.0,
@@ -701,10 +699,7 @@ fn sample_windows_disk() -> (u64, u64, f64) {
 }
 
 #[cfg(target_os = "windows")]
-fn sample_windows_network(
-    state: &mut OsTelemetrySamplerState,
-    bound_ip: Option<&str>,
-) -> NetworkInterfaceTelemetry {
+fn sample_windows_network(state: &mut StatsSampler, bound_ip: Option<&str>) -> NetStats {
     let mut raw_rx = 0u64;
     let mut raw_tx = 0u64;
     if let Some(out) = crate::run_cmd("netstat", &["-e"]) {
@@ -771,7 +766,7 @@ fn sample_windows_network(
     };
 
     let ip_label = bound_ip.unwrap_or("physical-lan");
-    NetworkInterfaceTelemetry {
+    NetStats {
         name: format!("nic0 ({ip_label})"),
         up: total_rx + total_tx > 0,
         rx_bytes_per_sec: rx_rate,
@@ -808,7 +803,7 @@ fn read_linux_cpu_ticks() -> Option<(u64, u64)> {
 }
 
 #[cfg(target_os = "linux")]
-fn sample_linux_cpu_percent(state: &mut OsTelemetrySamplerState) -> f64 {
+fn sample_linux_cpu_percent(state: &mut StatsSampler) -> f64 {
     let first = match read_linux_cpu_ticks() {
         Some(t) => t,
         None => return 0.0,
@@ -869,10 +864,7 @@ fn sample_linux_memory() -> (u64, u64, f64) {
 }
 
 #[cfg(target_os = "linux")]
-fn sample_linux_network(
-    state: &mut OsTelemetrySamplerState,
-    bound_ip: Option<&str>,
-) -> NetworkInterfaceTelemetry {
+fn sample_linux_network(state: &mut StatsSampler, bound_ip: Option<&str>) -> NetStats {
     let mut best_name = "eth0".to_string();
     let mut best_rx = 0u64;
     let mut best_tx = 0u64;
@@ -921,7 +913,7 @@ fn sample_linux_network(
         (0, 0)
     };
     let ip_label = bound_ip.unwrap_or("physical-lan");
-    NetworkInterfaceTelemetry {
+    NetStats {
         name: format!("{best_name} ({ip_label})"),
         up: best_rx + best_tx > 0,
         rx_bytes_per_sec: rx_rate,
@@ -932,11 +924,7 @@ fn sample_linux_network(
     }
 }
 
-pub fn sample_live_host_resources(
-    node: &str,
-    bound_ip: Option<&str>,
-    _counter: u64,
-) -> HostResourceTelemetry {
+pub fn sample_stats(node: &str, bound_ip: Option<&str>, _counter: u64) -> Stats {
     let cores = default_cpu_cores();
     let ip_label = bound_ip.unwrap_or("physical-lan");
 
@@ -948,7 +936,7 @@ pub fn sample_live_host_resources(
                     let base_nic = nic.name.split_whitespace().next().unwrap_or("nic0");
                     nic.name = format!("{base_nic} ({ip_label})");
                 }
-                out.telemetry_summary = format!(
+                out.stats_line = format!(
                     "node={node} cores={cores} cpu={:.1}% mem={:.1}% disk={:.1}% ip={ip_label} tailnet=off",
                     out.cpu_percent, out.mem_percent, out.disk_percent
                 );
@@ -998,7 +986,7 @@ pub fn sample_live_host_resources(
             (cpu, mem, disk, net)
         };
 
-        let sample = HostResourceTelemetry {
+        let sample = Stats {
             cpu_cores: cores,
             cpu_percent,
             mem_used_bytes,
@@ -1008,7 +996,7 @@ pub fn sample_live_host_resources(
             disk_total_bytes,
             disk_percent,
             interfaces: vec![nic],
-            telemetry_summary: format!(
+            stats_line: format!(
                 "node={node} cores={cores} cpu={cpu_percent:.1}% mem={mem_percent:.1}% disk={disk_percent:.1}% ip={ip_label} tailnet=off"
             ),
             summary_stats: None,
@@ -1017,7 +1005,7 @@ pub fn sample_live_host_resources(
         return sample;
     }
 
-    HostResourceTelemetry {
+    Stats {
         cpu_cores: cores,
         cpu_percent: 0.0,
         mem_used_bytes: 0,
@@ -1027,7 +1015,7 @@ pub fn sample_live_host_resources(
         disk_total_bytes: 1,
         disk_percent: 0.0,
         interfaces: Vec::new(),
-        telemetry_summary: format!("node={node} cores={cores} ip={ip_label} tailnet=off"),
+        stats_line: format!("node={node} cores={cores} ip={ip_label} tailnet=off"),
         summary_stats: None,
     }
 }
@@ -1037,8 +1025,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn live_host_resources_reports_real_os_metrics_not_synthetic_defaults() {
-        let res = sample_live_host_resources("node-alpha", Some("127.0.0.1"), 1);
+    fn live_stats_reports_real_os_metrics_not_synthetic_defaults() {
+        let res = sample_stats("node-alpha", Some("127.0.0.1"), 1);
         assert!(res.cpu_cores >= 1);
         assert!((0.0..=100.0).contains(&res.cpu_percent));
         assert!(res.mem_total_bytes > 1024 * 1024 * 100);
@@ -1054,7 +1042,7 @@ mod tests {
 
     #[test]
     fn rolling_window_computes_variability_and_detects_thrashing() {
-        let mut win = TelemetryRollingWindow::new(30);
+        let mut win = StatsWindow::new(30);
         let mut rtts = BTreeMap::new();
         rtts.insert("node-beta".to_string(), 12.0);
 
@@ -1062,7 +1050,7 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            let host = HostResourceTelemetry {
+            let host = Stats {
                 cpu_cores: 8,
                 cpu_percent: cpu,
                 mem_used_bytes: 4_000_000_000,
@@ -1071,7 +1059,7 @@ mod tests {
                 disk_used_bytes: 50_000_000_000,
                 disk_total_bytes: 100_000_000_000,
                 disk_percent: 50.0,
-                interfaces: vec![NetworkInterfaceTelemetry {
+                interfaces: vec![NetStats {
                     name: "en0".to_string(),
                     up: true,
                     rx_bytes_per_sec: 100_000,
@@ -1080,7 +1068,7 @@ mod tests {
                     tx_total_bytes: 500_000,
                     link_speed_mbps: Some(1000),
                 }],
-                telemetry_summary: String::new(),
+                stats_line: String::new(),
                 summary_stats: None,
             };
             win.record_sample(1000 + (idx as u64) * 5, &host, &rtts, 0);

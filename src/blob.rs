@@ -12,9 +12,11 @@ use crate::node::{build_endpoint_builder, IrohTransportConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlobTransportReport {
-    pub sha256: String,
+    #[serde(alias = "sha256")] // compat
+    pub digest: String,
     pub blake3_hash: String,
-    pub provider_endpoint_id: String,
+    #[serde(alias = "provider_endpoint_id")] // compat
+    pub provider_node_id: String,
     pub ticket_uri: String,
     pub bytes: u64,
     pub transferred_bytes: u64,
@@ -27,7 +29,8 @@ pub struct BlobTransportReport {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TieredBlobFetchRequest {
-    pub sha256: String,
+    #[serde(alias = "sha256")] // compat
+    pub digest: String,
     pub uri: String,
     pub provider_node: String,
     pub expected_bytes: u64,
@@ -36,7 +39,8 @@ pub struct TieredBlobFetchRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TieredBlobFetchPlan {
-    pub sha256: String,
+    #[serde(alias = "sha256")] // compat
+    pub digest: String,
     pub uri_scheme: String,
     pub provider_node: String,
     pub method: String,
@@ -47,76 +51,76 @@ pub struct TieredBlobFetchPlan {
     pub message: String,
 }
 
-pub fn compute_sha256(bytes: &[u8]) -> String {
+pub fn digest_of(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     format!("sha256:{}", crate::hex_encode(&digest))
 }
 
-pub fn normalize_sha256(raw: &str) -> Result<String, String> {
+pub fn normalize_digest(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim().to_ascii_lowercase();
     let hex = trimmed.strip_prefix("sha256:").unwrap_or(&trimmed);
     if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!("invalid sha256 digest: {raw:?}"));
+        return Err(format!("invalid digest digest: {raw:?}"));
     }
     Ok(format!("sha256:{hex}"))
 }
 
-pub fn blob_cache_path(cache_root: &Path, sha256: &str) -> Result<PathBuf, String> {
-    let normalized = normalize_sha256(sha256)?;
+pub fn blob_path(store_dir: &Path, digest: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_digest(digest)?;
     let hex = normalized.strip_prefix("sha256:").unwrap_or(&normalized);
-    Ok(cache_root.join(&hex[..2]).join(hex))
+    Ok(store_dir.join(&hex[..2]).join(hex))
 }
 
-pub fn has_cached_blob(cache_root: &Path, sha256: &str) -> bool {
-    let Ok(normalized) = normalize_sha256(sha256) else {
+pub fn has_blob(store_dir: &Path, digest: &str) -> bool {
+    let Ok(normalized) = normalize_digest(digest) else {
         return false;
     };
-    let Ok(path) = blob_cache_path(cache_root, &normalized) else {
+    let Ok(path) = blob_path(store_dir, &normalized) else {
         return false;
     };
     let Ok(bytes) = fs::read(&path) else {
         return false;
     };
-    compute_sha256(&bytes) == normalized
+    digest_of(&bytes) == normalized
 }
 
-pub fn read_cached_blob(cache_root: &Path, sha256: &str) -> Result<Vec<u8>, String> {
-    let normalized = normalize_sha256(sha256)?;
-    let path = blob_cache_path(cache_root, &normalized)?;
+pub fn read_blob(store_dir: &Path, digest: &str) -> Result<Vec<u8>, String> {
+    let normalized = normalize_digest(digest)?;
+    let path = blob_path(store_dir, &normalized)?;
     let bytes = fs::read(&path).map_err(|e| format!("read cached blob {}: {e}", path.display()))?;
-    let observed = compute_sha256(&bytes);
+    let observed = digest_of(&bytes);
     if observed != normalized {
         return Err(format!(
-            "cached blob sha256 mismatch: expected {normalized}, observed {observed}"
+            "cached blob digest mismatch: expected {normalized}, observed {observed}"
         ));
     }
     Ok(bytes)
 }
 
-pub fn store_verified_blob(
-    cache_root: &Path,
+pub fn put_blob(
+    store_dir: &Path,
     bytes: &[u8],
-    expected_sha256: Option<&str>,
+    expected_digest: Option<&str>,
 ) -> Result<(String, PathBuf), String> {
-    let observed = compute_sha256(bytes);
-    if let Some(expected) = expected_sha256 {
-        let expected = normalize_sha256(expected)?;
+    let observed = digest_of(bytes);
+    if let Some(expected) = expected_digest {
+        let expected = normalize_digest(expected)?;
         if observed != expected {
             return Err(format!(
-                "blob sha256 mismatch: expected {expected}, observed {observed}"
+                "blob digest mismatch: expected {expected}, observed {observed}"
             ));
         }
     }
-    let blob_path = blob_cache_path(cache_root, &observed)?;
+    let blob_path = blob_path(store_dir, &observed)?;
     if let Some(parent) = blob_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("create blob dir {}: {e}", parent.display()))?;
     }
     // Content-addressed: an intact existing copy is already correct, so skip the rewrite.
     // This keeps the file's mtime at "first stored" (gossiped as the node's newest blob)
-    // instead of churning it on every E2E tick; a corrupted copy is still repaired.
+    // instead of churning it on every probe tick; a corrupted copy is still repaired.
     let intact = fs::read(&blob_path)
-        .map(|existing| compute_sha256(&existing) == observed)
+        .map(|existing| digest_of(&existing) == observed)
         .unwrap_or(false);
     if !intact {
         fs::write(&blob_path, bytes)
@@ -130,19 +134,19 @@ pub fn store_verified_blob(
 /// 2. Native `iroh-blobs://ticket/...` fetch over QUIC.
 /// 3. Bounded HTTP peer-bridge fallback only when explicitly enabled.
 pub fn evaluate_tiered_blob_fetch(
-    cache_root: &Path,
+    store_dir: &Path,
     req: &TieredBlobFetchRequest,
 ) -> Result<TieredBlobFetchPlan, String> {
-    let sha256 = normalize_sha256(&req.sha256)?;
+    let digest = normalize_digest(&req.digest)?;
     let scheme = req
         .uri
         .split_once("://")
         .map(|(s, _)| s.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    if has_cached_blob(cache_root, &sha256) {
+    if has_blob(store_dir, &digest) {
         return Ok(TieredBlobFetchPlan {
-            sha256,
+            digest,
             uri_scheme: scheme,
             provider_node: req.provider_node.clone(),
             method: "local-cache".to_string(),
@@ -157,7 +161,7 @@ pub fn evaluate_tiered_blob_fetch(
 
     if req.uri.starts_with("iroh-blobs://ticket/") {
         return Ok(TieredBlobFetchPlan {
-            sha256,
+            digest,
             uri_scheme: "iroh-blobs".to_string(),
             provider_node: req.provider_node.clone(),
             method: "iroh-blobs-ticket".to_string(),
@@ -176,7 +180,7 @@ pub fn evaluate_tiered_blob_fetch(
         && req.http_fallback_enabled
     {
         return Ok(TieredBlobFetchPlan {
-            sha256,
+            digest,
             uri_scheme: scheme,
             provider_node: req.provider_node.clone(),
             method: "http-peer-fallback".to_string(),
@@ -184,7 +188,7 @@ pub fn evaluate_tiered_blob_fetch(
             transferred_bytes: req.expected_bytes,
             native_ticket_attempted: false,
             fallback_used: true,
-            message: "explicit HTTP bootstrap fallback enabled".to_string(),
+            message: "explicit HTTP seed fallback enabled".to_string(),
         });
     }
 
@@ -195,8 +199,8 @@ pub fn evaluate_tiered_blob_fetch(
 }
 
 /// Format a native `iroh-blobs` ticket URI with its canonical SHA-256 verification anchor.
-pub fn format_blob_ticket_uri(ticket: &BlobTicket, sha256: &str) -> String {
-    format!("iroh-blobs://ticket/{}#{}", ticket, sha256)
+pub fn format_blob_ticket_uri(ticket: &BlobTicket, digest: &str) -> String {
+    format!("iroh-blobs://ticket/{}#{}", ticket, digest)
 }
 
 pub fn parse_blob_ticket_uri(uri: &str) -> Result<(BlobTicket, String), String> {
@@ -204,14 +208,14 @@ pub fn parse_blob_ticket_uri(uri: &str) -> Result<(BlobTicket, String), String> 
         .trim()
         .strip_prefix("iroh-blobs://ticket/")
         .ok_or_else(|| format!("URI {uri:?} does not start with iroh-blobs://ticket/"))?;
-    let (ticket_str, sha256_str) = rest
+    let (ticket_str, digest_str) = rest
         .split_once('#')
         .ok_or_else(|| format!("URI {uri:?} missing #sha256:<digest> fragment"))?;
     let ticket: BlobTicket = ticket_str
         .parse()
         .map_err(|e| format!("parse iroh-blobs ticket: {e}"))?;
-    let sha256 = normalize_sha256(sha256_str)?;
-    Ok((ticket, sha256))
+    let digest = normalize_digest(digest_str)?;
+    Ok((ticket, digest))
 }
 
 /// Live end-to-end native `iroh-blobs` transfer between a provider endpoint and
@@ -226,7 +230,7 @@ pub async fn transfer_blob_via_iroh_ticket(
     let provider_cache = work_dir.join("provider-cache");
     let fetcher_cache = work_dir.join("fetcher-cache");
 
-    let (sha256, cached_path) = store_verified_blob(&provider_cache, payload, None)?;
+    let (digest, cached_path) = put_blob(&provider_cache, payload, None)?;
     let cached_bytes = fs::read(&cached_path)
         .map_err(|e| format!("read cached blob {}: {e}", cached_path.display()))?;
 
@@ -242,7 +246,7 @@ pub async fn transfer_blob_via_iroh_ticket(
         .await
         .map_err(|e| format!("import blob into MemStore: {e}"))?;
     let ticket = BlobTicket::new(provider_endpoint.addr(), tag.hash, tag.format);
-    let ticket_uri = format_blob_ticket_uri(&ticket, &sha256);
+    let ticket_uri = format_blob_ticket_uri(&ticket, &digest);
     let blake3_hash = tag.hash.to_string();
 
     let blobs_proto = BlobsProtocol::new(&store, None);
@@ -250,7 +254,7 @@ pub async fn transfer_blob_via_iroh_ticket(
         .accept(iroh_blobs::ALPN, blobs_proto)
         .spawn();
 
-    let (parsed_ticket, expected_sha256) = parse_blob_ticket_uri(&ticket_uri)?;
+    let (parsed_ticket, expected_digest) = parse_blob_ticket_uri(&ticket_uri)?;
     let fetcher_endpoint = build_endpoint_builder(config)?
         .bind()
         .await
@@ -283,17 +287,17 @@ pub async fn transfer_blob_via_iroh_ticket(
         .map_err(|e| format!("export downloaded blob: {e}"))?;
     let downloaded_bytes =
         fs::read(&exported_tmp).map_err(|e| format!("read exported blob: {e}"))?;
-    let (verified_sha256, _target_path) =
-        store_verified_blob(&fetcher_cache, &downloaded_bytes, Some(&expected_sha256))?;
+    let (verified_digest, _target_path) =
+        put_blob(&fetcher_cache, &downloaded_bytes, Some(&expected_digest))?;
 
     fetcher_endpoint.close().await;
     let _ = router.shutdown().await;
     let _ = fs::remove_dir_all(work_dir);
 
     Ok(BlobTransportReport {
-        sha256: verified_sha256,
+        digest: verified_digest,
         blake3_hash,
-        provider_endpoint_id: provider_id.to_string(),
+        provider_node_id: provider_id.to_string(),
         ticket_uri,
         bytes: downloaded_bytes.len() as u64,
         transferred_bytes: downloaded_bytes.len() as u64,
@@ -346,16 +350,18 @@ async fn observe_remote_info(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedBlobTicketReport {
     pub status: String,
-    pub sha256: String,
+    #[serde(alias = "sha256")] // compat
+    pub digest: String,
     pub blake3_hash: String,
     pub bytes: u64,
     pub path: String,
-    pub provider_endpoint_id: String,
+    #[serde(alias = "provider_endpoint_id")] // compat
+    pub provider_node_id: String,
     pub ticket_uri: String,
 }
 
 #[derive(Clone)]
-pub struct LiveBlobBridge {
+pub struct Store {
     pub endpoint: iroh::Endpoint,
     pub store: MemStore,
     pub memory_lookup: MemoryLookup,
@@ -363,30 +369,30 @@ pub struct LiveBlobBridge {
     pub runtime_handle: tokio::runtime::Handle,
 }
 
-impl std::fmt::Debug for LiveBlobBridge {
+impl std::fmt::Debug for Store {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LiveBlobBridge")
-            .field("endpoint_id", &self.endpoint.id().to_string())
+        f.debug_struct("Store")
+            .field("node_id", &self.endpoint.id().to_string())
             .finish()
     }
 }
 
-impl LiveBlobBridge {
-    pub fn share_verified_blob(
+impl Store {
+    pub fn share_blob(
         &self,
-        cache_root: &Path,
+        store_dir: &Path,
         bytes: &[u8],
-        expected_sha256: Option<&str>,
+        expected_digest: Option<&str>,
     ) -> Result<SharedBlobTicketReport, String> {
-        let (sha256, blob_path) = store_verified_blob(cache_root, bytes, expected_sha256)?;
+        let (digest, blob_path) = put_blob(store_dir, bytes, expected_digest)?;
         let store = self.store.clone();
         let endpoint = self.endpoint.clone();
         let transport_config = self.transport_config.clone();
         let handle = self.runtime_handle.clone();
         let payload = bytes.to_vec();
-        let sha_clone = sha256.clone();
+        let sha_clone = digest.clone();
 
-        let (blake3_hash, provider_endpoint_id, ticket_uri) = std::thread::scope(|s| {
+        let (blake3_hash, provider_node_id, ticket_uri) = std::thread::scope(|s| {
             s.spawn(move || {
                 handle.block_on(async move {
                     let tag = store
@@ -403,31 +409,31 @@ impl LiveBlobBridge {
                 })
             })
             .join()
-            .map_err(|_| "blob bridge share worker panicked".to_string())?
+            .map_err(|_| "blob bridge share process panicked".to_string())?
         })?;
 
         Ok(SharedBlobTicketReport {
             status: "shared".to_string(),
-            sha256,
+            digest,
             blake3_hash,
             bytes: bytes.len() as u64,
             path: blob_path.to_string_lossy().to_string(),
-            provider_endpoint_id,
+            provider_node_id,
             ticket_uri,
         })
     }
 
-    pub fn pull_verified_blob_ticket(
+    pub fn pull_blob(
         &self,
-        cache_root: &Path,
+        store_dir: &Path,
         ticket_uri: &str,
         force_network: bool,
     ) -> Result<BlobTransportReport, String> {
-        let (parsed_ticket, expected_sha256) = parse_blob_ticket_uri(ticket_uri)?;
+        let (parsed_ticket, expected_digest) = parse_blob_ticket_uri(ticket_uri)?;
         let provider_id = parsed_ticket.addr().id;
 
-        if !force_network && has_cached_blob(cache_root, &expected_sha256) {
-            let cached_bytes = read_cached_blob(cache_root, &expected_sha256)?;
+        if !force_network && has_blob(store_dir, &expected_digest) {
+            let cached_bytes = read_blob(store_dir, &expected_digest)?;
             let store = self.store.clone();
             let handle = self.runtime_handle.clone();
             let bytes_clone = cached_bytes.clone();
@@ -442,12 +448,12 @@ impl LiveBlobBridge {
                     })
                 })
                 .join()
-                .map_err(|_| "blob bridge cache worker panicked".to_string())?
+                .map_err(|_| "blob bridge cache process panicked".to_string())?
             })?;
             return Ok(BlobTransportReport {
-                sha256: expected_sha256,
+                digest: expected_digest,
                 blake3_hash,
-                provider_endpoint_id: provider_id.to_string(),
+                provider_node_id: provider_id.to_string(),
                 ticket_uri: ticket_uri.to_string(),
                 bytes: cached_bytes.len() as u64,
                 transferred_bytes: 0,
@@ -465,8 +471,8 @@ impl LiveBlobBridge {
         let endpoint = self.endpoint.clone();
         let transport_config = self.transport_config.clone();
         let handle = self.runtime_handle.clone();
-        let cache_root_buf = cache_root.to_path_buf();
-        let expected_sha_clone = expected_sha256.clone();
+        let store_dir_buf = store_dir.to_path_buf();
+        let expected_sha_clone = expected_digest.clone();
         let ticket_uri_owned = ticket_uri.to_string();
 
         std::thread::scope(|s| {
@@ -523,15 +529,12 @@ impl LiveBlobBridge {
                     let _ = store.blobs().add_slice(&downloaded_bytes).await;
                     fetcher_ep.close().await;
 
-                    let (verified_sha256, _) = store_verified_blob(
-                        &cache_root_buf,
-                        &downloaded_bytes,
-                        Some(&expected_sha_clone),
-                    )?;
+                    let (verified_digest, _) =
+                        put_blob(&store_dir_buf, &downloaded_bytes, Some(&expected_sha_clone))?;
                     Ok(BlobTransportReport {
-                        sha256: verified_sha256,
+                        digest: verified_digest,
                         blake3_hash: parsed_ticket.hash().to_string(),
-                        provider_endpoint_id: provider_id.to_string(),
+                        provider_node_id: provider_id.to_string(),
                         ticket_uri: ticket_uri_owned,
                         bytes: downloaded_bytes.len() as u64,
                         transferred_bytes: downloaded_bytes.len() as u64,
@@ -544,7 +547,7 @@ impl LiveBlobBridge {
                 })
             })
             .join()
-            .map_err(|_| "blob bridge pull worker panicked".to_string())?
+            .map_err(|_| "blob bridge pull process panicked".to_string())?
         })
     }
 }
@@ -557,13 +560,13 @@ mod tests {
     #[test]
     fn sha256_verification_rejects_mismatched_digest() {
         let dir = env::temp_dir().join(format!("dialtone-blob-sha-test-{}", std::process::id()));
-        let err = store_verified_blob(
+        let err = put_blob(
             &dir,
-            b"dialtone-artifact",
+            b"dialtone-blob",
             Some("sha256:0000000000000000000000000000000000000000000000000000000000000000"),
         )
         .unwrap_err();
-        assert!(err.contains("blob sha256 mismatch"));
+        assert!(err.contains("blob digest mismatch"));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -571,7 +574,7 @@ mod tests {
     fn restoring_an_intact_blob_keeps_mtime_but_repairs_a_corrupted_copy() {
         let dir = env::temp_dir().join(format!("dialtone-blob-restore-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let (_, path) = store_verified_blob(&dir, b"dialtone-program", None).unwrap();
+        let (_, path) = put_blob(&dir, b"dialtone-program", None).unwrap();
 
         let first_stored =
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
@@ -581,14 +584,14 @@ mod tests {
             .unwrap()
             .set_modified(first_stored)
             .unwrap();
-        store_verified_blob(&dir, b"dialtone-program", None).unwrap();
+        put_blob(&dir, b"dialtone-program", None).unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().modified().unwrap(),
             first_stored
         );
 
         fs::write(&path, b"corrupted").unwrap();
-        store_verified_blob(&dir, b"dialtone-program", None).unwrap();
+        put_blob(&dir, b"dialtone-program", None).unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"dialtone-program");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -598,12 +601,12 @@ mod tests {
         let dir = env::temp_dir().join(format!("dialtone-tiered-blob-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let payload = b"cached-payload-bytes";
-        let (sha, _) = store_verified_blob(&dir, payload, None).unwrap();
+        let (sha, _) = put_blob(&dir, payload, None).unwrap();
 
         let cache_hit = evaluate_tiered_blob_fetch(
             &dir,
             &TieredBlobFetchRequest {
-                sha256: sha.clone(),
+                digest: sha.clone(),
                 uri: format!("iroh-blobs://ticket/fake#{sha}"),
                 provider_node: "node-beta".to_string(),
                 expected_bytes: 20,
@@ -619,7 +622,7 @@ mod tests {
         let native_plan = evaluate_tiered_blob_fetch(
             &dir,
             &TieredBlobFetchRequest {
-                sha256: uncached_sha.to_string(),
+                digest: uncached_sha.to_string(),
                 uri: format!("iroh-blobs://ticket/blob123#{uncached_sha}"),
                 provider_node: "node-beta".to_string(),
                 expected_bytes: 4096,
@@ -633,7 +636,7 @@ mod tests {
         let rejected = evaluate_tiered_blob_fetch(
             &dir,
             &TieredBlobFetchRequest {
-                sha256: uncached_sha.to_string(),
+                digest: uncached_sha.to_string(),
                 uri: "http://node-beta:8787/api/artifacts/blob".to_string(),
                 provider_node: "node-beta".to_string(),
                 expected_bytes: 4096,
@@ -646,7 +649,7 @@ mod tests {
         let fallback_plan = evaluate_tiered_blob_fetch(
             &dir,
             &TieredBlobFetchRequest {
-                sha256: uncached_sha.to_string(),
+                digest: uncached_sha.to_string(),
                 uri: "http://node-beta:8787/api/artifacts/blob".to_string(),
                 provider_node: "node-beta".to_string(),
                 expected_bytes: 4096,
@@ -665,8 +668,8 @@ mod tests {
             "dialtone-live-blob-transfer-{}",
             std::process::id()
         ));
-        let payload = b"dialtone content-addressed artifact payload over iroh-blobs QUIC";
-        let expected_sha = compute_sha256(payload);
+        let payload = b"dialtone content-addressed blob payload over iroh-blobs QUIC";
+        let expected_sha = digest_of(payload);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let report = rt
@@ -677,7 +680,7 @@ mod tests {
             ))
             .unwrap();
 
-        assert_eq!(report.sha256, expected_sha);
+        assert_eq!(report.digest, expected_sha);
         assert_eq!(report.bytes, payload.len() as u64);
         assert!(report.ticket_uri.starts_with("iroh-blobs://ticket/"));
         assert!(report

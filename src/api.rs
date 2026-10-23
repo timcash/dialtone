@@ -12,37 +12,36 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::blob::{
-    evaluate_tiered_blob_fetch, has_cached_blob, read_cached_blob, store_verified_blob,
-    BlobTransportReport, LiveBlobBridge, TieredBlobFetchRequest,
+    evaluate_tiered_blob_fetch, has_blob, put_blob, read_blob, BlobTransportReport, Store,
+    TieredBlobFetchRequest,
 };
 use crate::deploy::{
     evaluate_deploy_build_decision, execute_verified_rollback, generate_deploy_plan,
     install_persistent_os_daemon, plan_rollback, probe_build_cache, render_install_v1_sh,
     validate_manifest_contract, BuildCacheRecord, BuildProbeRequest, DeployManifest, DeploySlot,
 };
-use crate::hud::render_dashboard_html;
+use crate::hud::render_hud;
 use crate::mesh::{
     build_mesh_rtt_matrix, cached_local_public_ip_geo, default_arch, default_config_path,
     default_os, default_state_dir, monotonic_now_ms, node_capabilities_for, node_role_for,
-    normalize_channel_name, now_unix, prune_stale_peers, resolve_fleet_node_locations,
-    save_mesh_config, secret_channel_fingerprint, validate_channel_password, BootStageStatus,
-    DialtoneHeartbeat, MeshControlCommand, NodeE2eTestReport, PersistentMeshConfig,
-    DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS, HEARTBEAT_INTERVAL_SECS,
-    SUMMARY_HEARTBEAT_INTERVAL_SECS,
+    normalize_channel_name, now_unix, place_nodes, prune_stale_peers, save_mesh_config,
+    secret_channel_fingerprint, validate_secret, Beat, BootStageStatus, MeshConfig,
+    MeshControlCommand, ProbeReport, BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME,
+    DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
 };
 use crate::node::IrohTransportDiagnostics;
 use crate::record::{
     paginate_kv_records, plan_alert_ack, AlertRecord, EventRecord, KeyValueRecord, KvPageMeta,
     ServiceLogRecord,
 };
-use crate::service::ServiceAdvertisement;
+use crate::service::Service;
 use crate::service::{
-    CatalogPolicy, DialtoneMetadata, InstalledBinary, KeyLeaseStatus, ManagedProcessSpec,
+    CatalogPolicy, DialtoneMetadata, InstalledProgram, KeyLeaseStatus, ProcessSpec,
 };
-use crate::stats::{sample_live_host_resources, HostResourceTelemetry};
+use crate::stats::{sample_stats, Stats};
 use crate::supervisor::{
-    default_subprocess_blob_bytes, ensure_default_subprocess_blob, plan_process_intent,
-    stage_executable_blob, ManagedProcessSupervisor, DEFAULT_SUBPROCESS_BLOB_NAME,
+    ensure_probe_program, plan_process_intent, probe_program_bytes, stage_program, Supervisor,
+    PROBE_PROGRAM_NAME,
 };
 use crate::supervisor::{upsert_command_intent, CursorJobRecord, RobotCommandIntentRecord};
 
@@ -129,10 +128,10 @@ pub fn default_boot_stages(listen: &str, blob_dir: &std::path::Path) -> Vec<Boot
         },
         BootStageStatus {
             step: 3,
-            id: "blob_store".to_string(),
+            id: "store".to_string(),
             title: "Content-Addressed Blob Store (iroh-blobs)".to_string(),
             status: "ready".to_string(),
-            detail: format!("SHA-256 CAS ready at {}", blob_dir.display()),
+            detail: format!("Store ready at {}", blob_dir.display()),
             updated_at_unix: now,
         },
         BootStageStatus {
@@ -146,10 +145,10 @@ pub fn default_boot_stages(listen: &str, blob_dir: &std::path::Path) -> Vec<Boot
         BootStageStatus {
             step: 5,
             id: "gossip_mesh".to_string(),
-            title: "Gossip Mesh & Channel Password Gate".to_string(),
+            title: "Gossip Mesh & Channel Secret Gate".to_string(),
             status: "ready".to_string(),
             detail:
-                "Protected 'dialtone' channel (enter password in Web UI or run 'dialtone join <PASSWORD>')"
+                "Protected 'dialtone' channel (enter secret in Web UI or run 'dialtone join <SECRET>')"
                     .to_string(),
             updated_at_unix: now,
         },
@@ -157,38 +156,43 @@ pub fn default_boot_stages(listen: &str, blob_dir: &std::path::Path) -> Vec<Boot
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DaemonRuntimeState {
+pub struct NodeState {
     pub node: String,
     pub mode: String,
     pub listen: String,
-    pub blob_cache_dir: PathBuf,
+    #[serde(alias = "blob_cache_dir")] // compat
+    pub store_dir: PathBuf,
     pub allowed_deploy_roots: Vec<String>,
     #[serde(skip)]
     pub api_token: String,
     #[serde(default)]
     pub boot_stages: Vec<BootStageStatus>,
     #[serde(default)]
-    pub mesh_config: PersistentMeshConfig,
+    pub mesh_config: MeshConfig,
     #[serde(skip)]
     pub control_tx: Option<tokio::sync::mpsc::UnboundedSender<MeshControlCommand>>,
     #[serde(skip)]
-    pub blob_bridge: Option<LiveBlobBridge>,
+    #[serde(alias = "blob_bridge")] // compat
+    pub store: Option<Store>,
     #[serde(skip)]
-    pub supervisor: Arc<Mutex<ManagedProcessSupervisor>>,
+    pub supervisor: Arc<Mutex<Supervisor>>,
     pub metadata: DialtoneMetadata,
     pub iroh_runtime: IrohTransportDiagnostics,
-    pub nodes: Vec<DialtoneHeartbeat>,
+    pub nodes: Vec<Beat>,
     #[serde(default)]
     pub mesh_rtt_ms: std::collections::BTreeMap<String, f64>,
-    pub installed_binaries: Vec<InstalledBinary>,
-    pub managed_processes: Vec<ManagedProcessSpec>,
+    #[serde(alias = "installed_binaries")] // compat
+    pub installed_programs: Vec<InstalledProgram>,
+    #[serde(alias = "managed_processes")] // compat
+    pub processes: Vec<ProcessSpec>,
     pub deploy_slots: Vec<DeploySlot>,
     pub deploy_manifests: Vec<DeployManifest>,
     pub deploy_build_caches: Vec<BuildCacheRecord>,
     pub blob_fetches: Vec<BlobTransportReport>,
-    pub service_endpoints: Vec<ServiceAdvertisement>,
+    pub service_endpoints: Vec<Service>,
     pub key_leases: Vec<KeyLeaseStatus>,
-    pub host_resources: HostResourceTelemetry,
+    #[serde(alias = "host_resources")] // compat
+    pub stats: Stats,
     pub events: Vec<EventRecord>,
     pub logs: Vec<ServiceLogRecord>,
     pub alerts: Vec<AlertRecord>,
@@ -198,10 +202,11 @@ pub struct DaemonRuntimeState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kv_page: Option<KvPageMeta>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub e2e_test: Option<NodeE2eTestReport>,
+    #[serde(alias = "e2e_test")] // compat
+    pub probe: Option<ProbeReport>,
 }
 
-impl DaemonRuntimeState {
+impl NodeState {
     pub fn record_log(
         &mut self,
         service: &str,
@@ -254,63 +259,63 @@ impl DaemonRuntimeState {
                         target_node: peer.node.clone(),
                         status: "active".to_string(),
                         severity: "warning".to_string(),
-                        source: "summary_heartbeat".to_string(),
+                        source: "summary_beat".to_string(),
                         summary: format!(
                             "Node {} thrashing detected (score {:.1}): {}",
                             peer.node,
                             summary.thrashing_score,
                             summary.thrashing_reasons.join(", ")
                         ),
-                        telemetry_ref: format!("dialtone://{}/telemetry/summary", peer.node),
+                        stats_ref: format!("dialtone://{}/stats/summary", peer.node),
                         last_seen_unix: now,
                         acknowledged_by: None,
                     });
                 }
             }
-            if peer.host_resources.disk_percent >= 85.0 {
+            if peer.stats.disk_percent >= 85.0 {
                 live_alerts.push(AlertRecord {
                     id: format!("alert-{}-disk", peer.node),
                     target_node: peer.node.clone(),
                     status: "active".to_string(),
                     severity: "warning".to_string(),
-                    source: "telemetry".to_string(),
+                    source: "stats".to_string(),
                     summary: format!(
                         "Node {} disk usage high ({:.1}%)",
-                        peer.node, peer.host_resources.disk_percent
+                        peer.node, peer.stats.disk_percent
                     ),
-                    telemetry_ref: format!("dialtone://{}/telemetry/disk", peer.node),
+                    stats_ref: format!("dialtone://{}/stats/disk", peer.node),
                     last_seen_unix: now,
                     acknowledged_by: None,
                 });
             }
-            if peer.host_resources.cpu_percent >= 85.0 {
+            if peer.stats.cpu_percent >= 85.0 {
                 live_alerts.push(AlertRecord {
                     id: format!("alert-{}-cpu", peer.node),
                     target_node: peer.node.clone(),
                     status: "active".to_string(),
                     severity: "warning".to_string(),
-                    source: "telemetry".to_string(),
+                    source: "stats".to_string(),
                     summary: format!(
                         "Node {} CPU usage high ({:.1}%)",
-                        peer.node, peer.host_resources.cpu_percent
+                        peer.node, peer.stats.cpu_percent
                     ),
-                    telemetry_ref: format!("dialtone://{}/telemetry/cpu", peer.node),
+                    stats_ref: format!("dialtone://{}/stats/cpu", peer.node),
                     last_seen_unix: now,
                     acknowledged_by: None,
                 });
             }
-            if peer.host_resources.mem_percent >= 85.0 {
+            if peer.stats.mem_percent >= 85.0 {
                 live_alerts.push(AlertRecord {
                     id: format!("alert-{}-mem", peer.node),
                     target_node: peer.node.clone(),
                     status: "active".to_string(),
                     severity: "warning".to_string(),
-                    source: "telemetry".to_string(),
+                    source: "stats".to_string(),
                     summary: format!(
                         "Node {} memory usage high ({:.1}%)",
-                        peer.node, peer.host_resources.mem_percent
+                        peer.node, peer.stats.mem_percent
                     ),
-                    telemetry_ref: format!("dialtone://{}/telemetry/mem", peer.node),
+                    stats_ref: format!("dialtone://{}/stats/mem", peer.node),
                     last_seen_unix: now,
                     acknowledged_by: None,
                 });
@@ -322,15 +327,15 @@ impl DaemonRuntimeState {
                 target_node: self.node.clone(),
                 status: "active".to_string(),
                 severity: "info".to_string(),
-                source: "telemetry".to_string(),
+                source: "stats".to_string(),
                 summary: format!(
-                    "Node {} telemetry nominal (CPU {:.1}%, MEM {:.1}%, DISK {:.1}%)",
+                    "Node {} stats nominal (CPU {:.1}%, MEM {:.1}%, DISK {:.1}%)",
                     self.node,
-                    self.host_resources.cpu_percent,
-                    self.host_resources.mem_percent,
-                    self.host_resources.disk_percent
+                    self.stats.cpu_percent,
+                    self.stats.mem_percent,
+                    self.stats.disk_percent
                 ),
-                telemetry_ref: format!("dialtone://{}/telemetry", self.node),
+                stats_ref: format!("dialtone://{}/stats", self.node),
                 last_seen_unix: now,
                 acknowledged_by: None,
             });
@@ -338,13 +343,13 @@ impl DaemonRuntimeState {
         self.alerts = live_alerts;
     }
 
-    pub fn reconcile_live_processes(&mut self) {
+    pub fn reconcile_processes(&mut self) {
         let mut started_logs = Vec::new();
         let listen_kv = format!("APP_LISTEN={}", self.listen);
         let sup_arc = self.supervisor.clone();
         if let Ok(mut sup) = sup_arc.lock() {
-            for spec in self.managed_processes.iter_mut() {
-                if spec.name == DEFAULT_SUBPROCESS_BLOB_NAME
+            for spec in self.processes.iter_mut() {
+                if spec.name == PROBE_PROGRAM_NAME
                     && !spec.env.iter().any(|kv| kv.starts_with("APP_LISTEN="))
                 {
                     spec.env.push(listen_kv.clone());
@@ -355,9 +360,9 @@ impl DaemonRuntimeState {
                     if spec.desired_state == "running" && spec.pid.is_some() && spec.pid != prev_pid
                     {
                         let msg = format!(
-                            "Supervised blob process '{}' active (sha256={}, pid={}, path={})",
+                            "Supervised blob process '{}' active (digest={}, pid={}, path={})",
                             spec.name,
-                            spec.sha256,
+                            spec.digest,
                             spec.pid.unwrap_or(0),
                             spec.path
                         );
@@ -366,7 +371,7 @@ impl DaemonRuntimeState {
                     }
                 } else {
                     spec.pid = None;
-                    spec.status = Some("missing_binary".to_string());
+                    spec.status = Some("missing_program".to_string());
                 }
             }
         }
@@ -374,124 +379,112 @@ impl DaemonRuntimeState {
             self.record_log(&svc, "INFO", "supervisor", msg);
         }
         let self_node = self.node.clone();
-        let procs_snapshot = self.managed_processes.clone();
-        let e2e_snapshot = self.e2e_test.clone();
-        if let Some(self_hb) = self.nodes.iter_mut().find(|n| n.node == self_node) {
-            self_hb.managed_processes = procs_snapshot;
-            if e2e_snapshot.is_some() {
-                self_hb.e2e_test = e2e_snapshot;
+        let procs_snapshot = self.processes.clone();
+        let probe_snapshot = self.probe.clone();
+        if let Some(self_beat) = self.nodes.iter_mut().find(|n| n.node == self_node) {
+            self_beat.processes = procs_snapshot;
+            if probe_snapshot.is_some() {
+                self_beat.probe = probe_snapshot;
             }
             if let Some(local_geo) = cached_local_public_ip_geo() {
-                self_hb.geo_location = Some(local_geo);
+                self_beat.geo_location = Some(local_geo);
             }
         }
         self.mesh_rtt_ms = build_mesh_rtt_matrix(&self.nodes);
-        resolve_fleet_node_locations(&mut self.nodes, &self.mesh_rtt_ms);
+        place_nodes(&mut self.nodes, &self.mesh_rtt_ms);
     }
 
-    /// Execute one end-to-end 5-capability verification cycle driven by the supervised subprocess blob:
-    /// 1. SHA-256 content-addressed blob storage & verification (`sha_blobs_ok`)
+    /// Execute one end-to-end 5-capability verification cycle driven by the supervised process blob:
+    /// 1. SHA-256 content-addressed blob storage & verification (`blobs_ok`)
     /// 2. Key-Value store write, read & pagination (`key_value_ok`)
-    /// 3. Subprocess supervision & process-intent planning (`sub_processes_ok`)
+    /// 3. Process supervision & process-intent planning (`processes_ok`)
     /// 4. Encrypted gossip mesh connectivity & QUIC transport audit (`mesh_connectivity_ok`)
     /// 5. A-to-B deployment slot rollback preview & verified slot flip (`ab_rollback_ok`)
-    pub fn run_e2e_capability_tick(&mut self) -> NodeE2eTestReport {
+    pub fn run_probe(&mut self) -> ProbeReport {
         let now = now_unix();
         let next_cycle = self
-            .e2e_test
+            .probe
             .as_ref()
             .map(|r| r.cycle.saturating_add(1))
             .unwrap_or(1);
 
-        // 1. SHA Blobs: store & verify both the executable subprocess blob and cycle attestation blob in CAS
-        let exec_payload = default_subprocess_blob_bytes();
-        let (exec_blob_sha256, worker_blob_cas_path, exec_blob_ok) =
-            match store_verified_blob(&self.blob_cache_dir, exec_payload, None) {
-                Ok((sha, cas_path)) => {
-                    let read_ok = read_cached_blob(&self.blob_cache_dir, &sha)
+        // 1. BLB: put and verify the probe program blob and this cycle's probe record blob in the store
+        let exec_payload = probe_program_bytes();
+        let (program_digest, store_path, exec_blob_ok) =
+            match put_blob(&self.store_dir, exec_payload, None) {
+                Ok((sha, store_path)) => {
+                    let read_ok = read_blob(&self.store_dir, &sha)
                         .map(|b| b == exec_payload)
                         .unwrap_or(false);
-                    (sha, cas_path.to_string_lossy().to_string(), read_ok)
+                    (sha, store_path.to_string_lossy().to_string(), read_ok)
                 }
                 Err(_) => (String::new(), String::new(), false),
             };
 
-        let blob_payload = format!("dialtone-e2e-sha-blob-node={}", self.node);
-        let (verified_blob_sha256, cycle_blob_ok) =
-            match store_verified_blob(&self.blob_cache_dir, blob_payload.as_bytes(), None) {
+        let blob_payload = format!("dialtone-probe-sha-blob-node={}", self.node);
+        let (verified_digest, cycle_blob_ok) =
+            match put_blob(&self.store_dir, blob_payload.as_bytes(), None) {
                 Ok((sha, _)) => {
-                    let read_ok = read_cached_blob(&self.blob_cache_dir, &sha)
+                    let read_ok = read_blob(&self.store_dir, &sha)
                         .map(|b| b == blob_payload.as_bytes())
                         .unwrap_or(false);
                     (sha, read_ok)
                 }
                 Err(_) => (String::new(), false),
             };
-        let sha_blobs_ok = exec_blob_ok && cycle_blob_ok;
+        let blobs_ok = exec_blob_ok && cycle_blob_ok;
 
         // 2. Sub-Processes: load executable from SHA-256 blob store -> stage to run dir -> supervise & verify PID
-        let staged_from_cas_ok = if !exec_blob_sha256.is_empty() {
-            stage_executable_blob(
-                &self.blob_cache_dir,
-                DEFAULT_SUBPROCESS_BLOB_NAME,
-                &exec_blob_sha256,
-            )
-            .is_ok()
+        let staged_from_store_ok = if !program_digest.is_empty() {
+            stage_program(&self.store_dir, PROBE_PROGRAM_NAME, &program_digest).is_ok()
         } else {
             false
         };
-        let _ =
-            ensure_default_subprocess_blob(&self.blob_cache_dir, &mut self.managed_processes, None);
-        self.reconcile_live_processes();
-        let worker_proc = self
-            .managed_processes
+        let _ = ensure_probe_program(&self.store_dir, &mut self.processes, None);
+        self.reconcile_processes();
+        let probe_proc = self
+            .processes
             .iter()
-            .find(|p| p.name == DEFAULT_SUBPROCESS_BLOB_NAME)
+            .find(|p| p.name == PROBE_PROGRAM_NAME)
             .or_else(|| {
-                self.managed_processes
+                self.processes
                     .iter()
                     .find(|p| p.status.as_deref() == Some("running"))
             })
             .cloned();
-        let (
-            worker_name,
-            worker_sha256,
-            worker_pid,
-            worker_staged_path,
-            worker_blob_ticket,
-            sub_processes_ok,
-        ) = if let Some(ref proc) = worker_proc {
-            let running = proc.status.as_deref() == Some("running") && proc.pid.is_some();
-            let intent_ok = plan_process_intent(&self.node, &self.node, proc, "restart").is_ok();
-            let ticket = proc
-                .env
-                .iter()
-                .find_map(|kv| kv.strip_prefix("DIALTONE_BLOB_TICKET="))
-                .unwrap_or("")
-                .to_string();
-            (
-                proc.name.clone(),
-                proc.sha256.clone(),
-                proc.pid,
-                proc.path.clone(),
-                ticket,
-                staged_from_cas_ok && running && intent_ok,
-            )
-        } else {
-            (
-                DEFAULT_SUBPROCESS_BLOB_NAME.to_string(),
-                String::new(),
-                None,
-                String::new(),
-                String::new(),
-                false,
-            )
-        };
+        let (program_name, program_digest, pid, staged_path, ticket, processes_ok) =
+            if let Some(ref proc) = probe_proc {
+                let running = proc.status.as_deref() == Some("running") && proc.pid.is_some();
+                let intent_ok =
+                    plan_process_intent(&self.node, &self.node, proc, "restart").is_ok();
+                let ticket = proc
+                    .env
+                    .iter()
+                    .find_map(|kv| kv.strip_prefix("DIALTONE_BLOB_TICKET="))
+                    .unwrap_or("")
+                    .to_string();
+                (
+                    proc.name.clone(),
+                    proc.digest.clone(),
+                    proc.pid,
+                    proc.path.clone(),
+                    ticket,
+                    staged_from_store_ok && running && intent_ok,
+                )
+            } else {
+                (
+                    PROBE_PROGRAM_NAME.to_string(),
+                    String::new(),
+                    None,
+                    String::new(),
+                    String::new(),
+                    false,
+                )
+            };
 
         // 3. Mesh Connectivity: verify bound QUIC endpoint & active gossip peer table
         let mesh_peers_seen = self.nodes.len();
-        let mesh_connectivity_ok =
-            !self.iroh_runtime.endpoint_id.is_empty() && mesh_peers_seen >= 1;
+        let mesh_connectivity_ok = !self.iroh_runtime.node_id.is_empty() && mesh_peers_seen >= 1;
 
         // 4. A-to-B Rollback: stage verified slot A & slot B blobs, plan rollback, and flip A <-> B
         let slot_a_bytes = format!("dialtone-slot-A-binary-{}", self.node);
@@ -499,37 +492,37 @@ impl DaemonRuntimeState {
         let mut ab_rollback_ok = false;
         let mut active_slot = "A".to_string();
         if let (Ok((sha_a, path_a)), Ok((sha_b, path_b))) = (
-            store_verified_blob(&self.blob_cache_dir, slot_a_bytes.as_bytes(), None),
-            store_verified_blob(&self.blob_cache_dir, slot_b_bytes.as_bytes(), None),
+            put_blob(&self.store_dir, slot_a_bytes.as_bytes(), None),
+            put_blob(&self.store_dir, slot_b_bytes.as_bytes(), None),
         ) {
             let path_a_str = path_a.to_string_lossy().to_string();
             let path_b_str = path_b.to_string_lossy().to_string();
             if !self
                 .deploy_slots
                 .iter()
-                .any(|s| s.name == "dialtone-e2e-slot")
+                .any(|s| s.name == "dialtone-probe-slot")
             {
                 self.deploy_slots.push(DeploySlot {
-                    name: "dialtone-e2e-slot".to_string(),
+                    name: "dialtone-probe-slot".to_string(),
                     active: true,
                     path: path_a_str.clone(),
-                    sha256: sha_a.clone(),
+                    digest: sha_a.clone(),
                     previous_path: Some(path_b_str.clone()),
-                    previous_sha256: Some(sha_b.clone()),
+                    previous_digest: Some(sha_b.clone()),
                     status: "active-A".to_string(),
                 });
             }
             if let Some(slot) = self
                 .deploy_slots
                 .iter_mut()
-                .find(|s| s.name == "dialtone-e2e-slot")
+                .find(|s| s.name == "dialtone-probe-slot")
             {
                 if let Ok(plan) = plan_rollback(&self.node, slot) {
                     if plan.eligible
                         && plan.side_effect_free_preview
                         && execute_verified_rollback(slot).is_ok()
                     {
-                        active_slot = if slot.sha256 == sha_a {
+                        active_slot = if slot.digest == sha_a {
                             "A".to_string()
                         } else {
                             "B".to_string()
@@ -541,17 +534,17 @@ impl DaemonRuntimeState {
             }
         }
 
-        // 5. Key-Value Store: write live E2E status record & verify paginated read-back
-        let kv_key = format!("e2e/{}/status", self.node);
+        // 5. Key-Value Store: write live probe status record & verify paginated read-back
+        let kv_key = format!("probe/{}/status", self.node);
         let kv_val = json!({
             "node": self.node,
             "cycle": next_cycle,
-            "sha_blobs": sha_blobs_ok,
-            "sub_processes": sub_processes_ok,
+            "sha_blobs": blobs_ok,
+            "processes": processes_ok,
             "mesh_connectivity": mesh_connectivity_ok,
             "ab_rollback": ab_rollback_ok,
             "active_slot": active_slot,
-            "worker_pid": worker_pid,
+            "pid": pid,
             "updated_at_unix": now
         });
         if let Some(existing_kv) = self.kv.iter_mut().find(|r| r.key == kv_key) {
@@ -568,37 +561,37 @@ impl DaemonRuntimeState {
             .map(|(records, _)| records.iter().any(|r| r.key == kv_key))
             .unwrap_or(false);
 
-        let passed_count = (sha_blobs_ok as u8)
+        let passed_count = (blobs_ok as u8)
             + (key_value_ok as u8)
-            + (sub_processes_ok as u8)
+            + (processes_ok as u8)
             + (mesh_connectivity_ok as u8)
             + (ab_rollback_ok as u8);
 
-        let report = NodeE2eTestReport {
-            worker_name,
-            worker_sha256,
-            worker_pid,
-            worker_blob_cas_path,
-            worker_staged_path,
-            worker_blob_ticket,
+        let report = ProbeReport {
+            program_name,
+            program_digest,
+            pid,
+            store_path,
+            staged_path,
+            ticket,
             cycle: next_cycle,
             updated_at_unix: now,
             passed_count,
             total_count: 5,
-            sha_blobs_ok,
+            blobs_ok,
             key_value_ok,
-            sub_processes_ok,
+            processes_ok,
             mesh_connectivity_ok,
             ab_rollback_ok,
             active_slot,
-            verified_blob_sha256,
+            verified_digest,
             kv_key,
             mesh_peers_seen,
         };
-        self.e2e_test = Some(report.clone());
+        self.probe = Some(report.clone());
         let self_node = self.node.clone();
-        if let Some(self_hb) = self.nodes.iter_mut().find(|n| n.node == self_node) {
-            self_hb.e2e_test = Some(report.clone());
+        if let Some(self_beat) = self.nodes.iter_mut().find(|n| n.node == self_node) {
+            self_beat.probe = Some(report.clone());
         }
         report
     }
@@ -607,13 +600,12 @@ impl DaemonRuntimeState {
         node: &str,
         mode: &str,
         listen: &str,
-        blob_cache_dir: PathBuf,
+        store_dir: PathBuf,
         iroh_runtime: IrohTransportDiagnostics,
     ) -> Self {
         let now = now_unix();
-        let host_resources =
-            sample_live_host_resources(node, iroh_runtime.bound_non_tailnet_ipv4.as_deref(), 1);
-        let service_endpoints = vec![ServiceAdvertisement {
+        let stats = sample_stats(node, iroh_runtime.bound_non_tailnet_ipv4.as_deref(), 1);
+        let service_endpoints = vec![Service {
             name: "dialtone-control".to_string(),
             kind: "http-control-plane".to_string(),
             protocol: "http".to_string(),
@@ -623,19 +615,19 @@ impl DaemonRuntimeState {
             advertised_by: node.to_string(),
             role: mode.to_string(),
             mesh: "dialtone-iroh-gossip".to_string(),
-            subjects: vec!["dialtone.iroh.heartbeat.v1".to_string()],
+            subjects: vec!["dialtone.iroh.beat.v1".to_string()],
         }];
 
-        let self_hb = DialtoneHeartbeat {
-            schema: "dialtone.iroh.heartbeat.v1".to_string(),
+        let self_beat = Beat {
+            schema: "dialtone.iroh.beat.v1".to_string(),
             node: node.to_string(),
-            endpoint_id: iroh_runtime.endpoint_id.clone(),
+            node_id: iroh_runtime.node_id.clone(),
             ticket: format!("iroh-gossip-v1:{node}"),
             counter: 1,
             updated_at_unix: now,
-            heartbeat_kind: "summary".to_string(),
-            heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
-            summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+            kind: "summary".to_string(),
+            beat_interval_secs: BEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_INTERVAL_SECS,
             sent_mono_ms: monotonic_now_ms(),
             rtt_probe_requested: true,
             peer_echoes: HashMap::new(),
@@ -646,31 +638,31 @@ impl DaemonRuntimeState {
             arch: default_arch(),
             role: node_role_for(node),
             capabilities: node_capabilities_for(node),
-            host_resources: host_resources.clone(),
+            stats: stats.clone(),
             service_endpoints: service_endpoints.clone(),
-            managed_processes: Vec::new(),
+            processes: Vec::new(),
             iroh_transport: iroh_runtime.clone(),
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
             geo_location: cached_local_public_ip_geo(),
-            e2e_test: None,
-            blob_store: None,
+            probe: None,
+            store: None,
         };
 
-        let mut installed_binaries = Vec::new();
+        let mut installed_programs = Vec::new();
         if let Ok(exe_path) = std::env::current_exe() {
             if let Ok(bytes) = fs::read(&exe_path) {
-                let sha256 = crate::blob::compute_sha256(&bytes);
-                installed_binaries.push(InstalledBinary {
+                let digest = crate::blob::digest_of(&bytes);
+                installed_programs.push(InstalledProgram {
                     name: "dialtone".to_string(),
                     path: exe_path.to_string_lossy().to_string(),
-                    sha256,
+                    digest,
                 });
             }
         }
 
-        let boot_stages = default_boot_stages(listen, &blob_cache_dir);
-        let mesh_config = PersistentMeshConfig {
+        let boot_stages = default_boot_stages(listen, &store_dir);
+        let mesh_config = MeshConfig {
             node_name: Some(node.to_string()),
             listen_addr: Some(listen.to_string()),
             channel: DEFAULT_CHANNEL_NAME.to_string(),
@@ -678,13 +670,13 @@ impl DaemonRuntimeState {
             secret_key: None,
             derived_keys: None,
             channel_fingerprint: "unconfigured".to_string(),
-            bootstrap_tickets: Vec::new(),
-            seed_peers: Vec::new(),
-            allowed_endpoint_ids: Vec::new(),
+            invites: Vec::new(),
+            seeds: Vec::new(),
+            allowlist: Vec::new(),
             used_invite_nonces: Vec::new(),
             daemon_installed: false,
             daemon_service_path: None,
-            managed_processes: Vec::new(),
+            processes: Vec::new(),
             updated_at_unix: now,
         };
         let api_token = load_or_create_api_token().unwrap_or_else(|_| "dtk-live-token".to_string());
@@ -694,26 +686,26 @@ impl DaemonRuntimeState {
             mode: mode.to_string(),
             listen: listen.to_string(),
             api_token,
-            blob_cache_dir,
+            store_dir,
             allowed_deploy_roots: vec!["/opt/dialtone/".to_string(), "/tmp/".to_string()],
             boot_stages,
             mesh_config,
             control_tx: None,
-            blob_bridge: None,
-            supervisor: Arc::new(Mutex::new(ManagedProcessSupervisor::new())),
+            store: None,
+            supervisor: Arc::new(Mutex::new(Supervisor::new())),
             metadata: DialtoneMetadata::default(),
             iroh_runtime,
-            nodes: vec![self_hb],
+            nodes: vec![self_beat],
             mesh_rtt_ms: std::collections::BTreeMap::new(),
-            installed_binaries,
-            managed_processes: Vec::new(),
+            installed_programs,
+            processes: Vec::new(),
             deploy_slots: Vec::new(),
             deploy_manifests: Vec::new(),
             deploy_build_caches: Vec::new(),
             blob_fetches: Vec::new(),
             service_endpoints,
             key_leases: Vec::new(),
-            host_resources: host_resources.clone(),
+            stats: stats.clone(),
             events: Vec::new(),
             logs: Vec::new(),
             alerts: Vec::new(),
@@ -731,18 +723,18 @@ impl DaemonRuntimeState {
                     updated_at_unix: now,
                 },
                 KeyValueRecord {
-                    key: "mesh/heartbeat_interval_secs".to_string(),
-                    value: json!(HEARTBEAT_INTERVAL_SECS),
+                    key: "mesh/beat_interval_secs".to_string(),
+                    value: json!(BEAT_INTERVAL_SECS),
                     updated_at_unix: now,
                 },
                 KeyValueRecord {
-                    key: "mesh/summary_heartbeat_interval_secs".to_string(),
-                    value: json!(SUMMARY_HEARTBEAT_INTERVAL_SECS),
+                    key: "mesh/summary_interval_secs".to_string(),
+                    value: json!(SUMMARY_INTERVAL_SECS),
                     updated_at_unix: now,
                 },
             ],
             kv_page: None,
-            e2e_test: None,
+            probe: None,
         };
         st.record_event(
             "mesh.boot",
@@ -752,9 +744,9 @@ impl DaemonRuntimeState {
                 node,
                 default_os(),
                 default_arch(),
-                host_resources.cpu_cores,
-                host_resources.mem_percent,
-                host_resources.disk_percent
+                stats.cpu_cores,
+                stats.mem_percent,
+                stats.disk_percent
             ),
         );
         st.record_log(
@@ -762,16 +754,16 @@ impl DaemonRuntimeState {
             "INFO",
             "stdout",
             format!(
-                "started live telemetry & gossip runtime on http://{} (hb={}s, summary={}s, cpu={:.1}%, mem={:.1}%, disk={:.1}%)",
+                "started live stats & gossip runtime on http://{} (beat={}s, summary={}s, cpu={:.1}%, mem={:.1}%, disk={:.1}%)",
                 listen,
-                HEARTBEAT_INTERVAL_SECS,
-                SUMMARY_HEARTBEAT_INTERVAL_SECS,
-                host_resources.cpu_percent,
-                host_resources.mem_percent,
-                host_resources.disk_percent
+                BEAT_INTERVAL_SECS,
+                SUMMARY_INTERVAL_SECS,
+                stats.cpu_percent,
+                stats.mem_percent,
+                stats.disk_percent
             ),
         );
-        resolve_fleet_node_locations(&mut st.nodes, &st.mesh_rtt_ms);
+        place_nodes(&mut st.nodes, &st.mesh_rtt_ms);
         st.refresh_live_alerts();
         st
     }
@@ -780,7 +772,7 @@ impl DaemonRuntimeState {
         node: &str,
         mode: &str,
         listen: &str,
-        blob_cache_dir: PathBuf,
+        store_dir: PathBuf,
         iroh_runtime: IrohTransportDiagnostics,
     ) -> Self {
         let now = now_unix();
@@ -788,7 +780,7 @@ impl DaemonRuntimeState {
             "sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d".to_string();
         let prev_sha =
             "sha256:a1892e88f06224d9bd720a5f5a2c9fd70184c4eaf887f96e7df89f229484ffb1".to_string();
-        let service_endpoints = vec![ServiceAdvertisement {
+        let service_endpoints = vec![Service {
             name: "robot-v4-nats".to_string(),
             kind: "nats-jetstream".to_string(),
             protocol: "nats".to_string(),
@@ -804,18 +796,18 @@ impl DaemonRuntimeState {
             ],
         }];
 
-        let mut peer_heartbeats = Vec::new();
+        let mut peer_beats = Vec::new();
         for peer_name in ["node-alpha", "node-beta", "edge-1", "pendant-1"] {
-            peer_heartbeats.push(DialtoneHeartbeat {
-                schema: "dialtone.iroh.heartbeat.v1".to_string(),
+            peer_beats.push(Beat {
+                schema: "dialtone.iroh.beat.v1".to_string(),
                 node: peer_name.to_string(),
-                endpoint_id: iroh_runtime.endpoint_id.clone(),
+                node_id: iroh_runtime.node_id.clone(),
                 ticket: format!("iroh-gossip-v1:{peer_name}"),
                 counter: 1,
                 updated_at_unix: now,
-                heartbeat_kind: "summary".to_string(),
-                heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
-                summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+                kind: "summary".to_string(),
+                beat_interval_secs: BEAT_INTERVAL_SECS,
+                summary_interval_secs: SUMMARY_INTERVAL_SECS,
                 sent_mono_ms: monotonic_now_ms(),
                 rtt_probe_requested: false,
                 peer_echoes: HashMap::new(),
@@ -826,27 +818,23 @@ impl DaemonRuntimeState {
                 arch: default_arch(),
                 role: node_role_for(peer_name),
                 capabilities: node_capabilities_for(peer_name),
-                host_resources: sample_live_host_resources(
-                    peer_name,
-                    iroh_runtime.bound_non_tailnet_ipv4.as_deref(),
-                    1,
-                ),
+                stats: sample_stats(peer_name, iroh_runtime.bound_non_tailnet_ipv4.as_deref(), 1),
                 service_endpoints: if peer_name == node {
                     service_endpoints.clone()
                 } else {
                     Vec::new()
                 },
-                managed_processes: Vec::new(),
+                processes: Vec::new(),
                 iroh_transport: iroh_runtime.clone(),
                 observed_remote_addrs: Vec::new(),
                 tailnet_used: false,
                 geo_location: None,
-                e2e_test: None,
-                blob_store: None,
+                probe: None,
+                store: None,
             });
         }
-        let seeded_rtt = build_mesh_rtt_matrix(&peer_heartbeats);
-        resolve_fleet_node_locations(&mut peer_heartbeats, &seeded_rtt);
+        let seeded_rtt = build_mesh_rtt_matrix(&peer_beats);
+        place_nodes(&mut peer_beats, &seeded_rtt);
 
         let metadata = DialtoneMetadata {
             catalogs: vec![
@@ -877,8 +865,8 @@ impl DaemonRuntimeState {
             ..Default::default()
         };
 
-        let boot_stages = default_boot_stages(listen, &blob_cache_dir);
-        let mesh_config = PersistentMeshConfig {
+        let boot_stages = default_boot_stages(listen, &store_dir);
+        let mesh_config = MeshConfig {
             node_name: Some(node.to_string()),
             listen_addr: Some(listen.to_string()),
             channel: DEFAULT_CHANNEL_NAME.to_string(),
@@ -886,13 +874,13 @@ impl DaemonRuntimeState {
             secret_key: None,
             derived_keys: None,
             channel_fingerprint: secret_channel_fingerprint("dialtone:seeded"),
-            bootstrap_tickets: Vec::new(),
-            seed_peers: Vec::new(),
-            allowed_endpoint_ids: Vec::new(),
+            invites: Vec::new(),
+            seeds: Vec::new(),
+            allowlist: Vec::new(),
             used_invite_nonces: Vec::new(),
             daemon_installed: false,
             daemon_service_path: None,
-            managed_processes: Vec::new(),
+            processes: Vec::new(),
             updated_at_unix: now,
         };
         let api_token =
@@ -903,26 +891,26 @@ impl DaemonRuntimeState {
             mode: mode.to_string(),
             listen: listen.to_string(),
             api_token,
-            blob_cache_dir,
+            store_dir,
             allowed_deploy_roots: vec!["/opt/dialtone/".to_string(), "/tmp/".to_string()],
             boot_stages,
             mesh_config,
             control_tx: None,
-            blob_bridge: None,
-            supervisor: Arc::new(Mutex::new(ManagedProcessSupervisor::new())),
+            store: None,
+            supervisor: Arc::new(Mutex::new(Supervisor::new())),
             metadata,
             iroh_runtime,
-            nodes: peer_heartbeats,
+            nodes: peer_beats,
             mesh_rtt_ms: seeded_rtt,
-            installed_binaries: vec![InstalledBinary {
+            installed_programs: vec![InstalledProgram {
                 name: "robot-v4-cartesiand".to_string(),
                 path: "/opt/dialtone/bin/robot-v4-cartesiand".to_string(),
-                sha256: sample_sha.clone(),
+                digest: sample_sha.clone(),
             }],
-            managed_processes: vec![ManagedProcessSpec {
+            processes: vec![ProcessSpec {
                 name: "robot-edge-motion-server".to_string(),
                 path: "/opt/dialtone/bin/robot-v4-cartesiand".to_string(),
-                sha256: sample_sha.clone(),
+                digest: sample_sha.clone(),
                 desired_state: "running".to_string(),
                 args: vec![
                     "--nats".to_string(),
@@ -940,9 +928,9 @@ impl DaemonRuntimeState {
                 name: "edge-1-motion-server".to_string(),
                 active: true,
                 path: "/opt/dialtone/slots/a/robot-v4-cartesiand".to_string(),
-                sha256: sample_sha,
+                digest: sample_sha,
                 previous_path: Some("/opt/dialtone/slots/b/robot-v4-cartesiand".to_string()),
-                previous_sha256: Some(prev_sha),
+                previous_digest: Some(prev_sha),
                 status: "ready".to_string(),
             }],
             deploy_manifests: Vec::new(),
@@ -959,7 +947,7 @@ impl DaemonRuntimeState {
                 expires_at_unix: None,
                 warning: None,
             }],
-            host_resources: HostResourceTelemetry::default(),
+            stats: Stats::default(),
             events: vec![EventRecord {
                 id: "evt-1".to_string(),
                 kind: "mesh.boot".to_string(),
@@ -983,9 +971,9 @@ impl DaemonRuntimeState {
                 target_node: "edge-1".to_string(),
                 status: "active".to_string(),
                 severity: "info".to_string(),
-                source: "telemetry".to_string(),
-                summary: "Edge-1 telemetry nominal".to_string(),
-                telemetry_ref: "dialtone://edge-1/edge/telemetry".to_string(),
+                source: "stats".to_string(),
+                summary: "Edge-1 stats nominal".to_string(),
+                stats_ref: "dialtone://edge-1/edge/stats".to_string(),
                 last_seen_unix: now,
                 acknowledged_by: None,
             }],
@@ -1015,12 +1003,12 @@ impl DaemonRuntimeState {
                 },
             ],
             kv_page: None,
-            e2e_test: None,
+            probe: None,
         }
     }
 }
 
-pub(crate) fn masked_mesh_config(cfg: &PersistentMeshConfig) -> PersistentMeshConfig {
+pub(crate) fn masked_mesh_config(cfg: &MeshConfig) -> MeshConfig {
     let mut c = cfg.clone();
     c.secret_key = None;
     c.derived_keys = None;
@@ -1029,16 +1017,16 @@ pub(crate) fn masked_mesh_config(cfg: &PersistentMeshConfig) -> PersistentMeshCo
 
 pub fn serve_http_blocking(
     listener: TcpListener,
-    state: Arc<Mutex<DaemonRuntimeState>>,
+    state: Arc<Mutex<NodeState>>,
     max_requests: Option<usize>,
 ) -> Result<(), String> {
-    let active_workers = Arc::new(AtomicUsize::new(0));
+    let active_processes = Arc::new(AtomicUsize::new(0));
     let mut handled = 0usize;
     let mut join_handles = Vec::new();
 
     for stream in listener.incoming() {
         let mut stream = stream.map_err(|e| format!("accept connection: {e}"))?;
-        if active_workers.load(Ordering::SeqCst) >= MAX_CONCURRENT_HTTP_CONNECTIONS {
+        if active_processes.load(Ordering::SeqCst) >= MAX_CONCURRENT_HTTP_CONNECTIONS {
             let _ = write_json(
                 &mut stream,
                 503,
@@ -1046,15 +1034,15 @@ pub fn serve_http_blocking(
             );
             continue;
         }
-        active_workers.fetch_add(1, Ordering::SeqCst);
+        active_processes.fetch_add(1, Ordering::SeqCst);
         let state_clone = state.clone();
-        let active_clone = active_workers.clone();
-        let worker = thread::spawn(move || {
+        let active_clone = active_processes.clone();
+        let process = thread::spawn(move || {
             let _ = handle_connection(stream, &state_clone);
             active_clone.fetch_sub(1, Ordering::SeqCst);
         });
         if max_requests.is_some() {
-            join_handles.push(worker);
+            join_handles.push(process);
         }
         handled += 1;
         if let Some(limit) = max_requests {
@@ -1126,10 +1114,7 @@ fn read_http_request(stream: &mut TcpStream) -> Result<Option<(String, String)>,
     Ok(Some((head, body)))
 }
 
-fn handle_connection(
-    mut stream: TcpStream,
-    state: &Arc<Mutex<DaemonRuntimeState>>,
-) -> Result<(), String> {
+fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Result<(), String> {
     let _ = stream.set_read_timeout(Some(HTTP_IO_TIMEOUT));
     let _ = stream.set_write_timeout(Some(HTTP_IO_TIMEOUT));
 
@@ -1172,15 +1157,15 @@ fn handle_connection(
     }
     let now = now_unix();
     let self_name = st.node.clone();
-    if let Some(self_hb) = st.nodes.iter_mut().find(|n| n.node == self_name) {
-        self_hb.updated_at_unix = now;
+    if let Some(self_beat) = st.nodes.iter_mut().find(|n| n.node == self_name) {
+        self_beat.updated_at_unix = now;
     }
     prune_stale_peers(&mut st.nodes, now, DEFAULT_PEER_TTL_SECS);
 
     match (method, path) {
         ("GET", "/") | ("GET", "/nodes") | ("GET", "/peer") | ("GET", "/hud") => {
-            st.reconcile_live_processes();
-            let html = render_dashboard_html(&st, query.get("peer-id").map(String::as_str));
+            st.reconcile_processes();
+            let html = render_hud(&st, query.get("peer-id").map(String::as_str));
             write_response(
                 &mut stream,
                 200,
@@ -1209,7 +1194,7 @@ fn handle_connection(
                 "mode": st.mode,
                 "listen": st.listen,
                 "local_url": format!("http://{}", st.listen),
-                "blob_cache_dir": st.blob_cache_dir,
+                "store_dir": st.store_dir,
                 "boot_stages": st.boot_stages,
                 "mesh_config": masked_mesh_config(&st.mesh_config),
                 "iroh_runtime": st.iroh_runtime
@@ -1219,9 +1204,9 @@ fn handle_connection(
         ("POST", "/api/mesh/join") | ("POST", "/api/config/join") => {
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
             let channel = normalize_channel_name(parsed.get("channel").and_then(Value::as_str));
-            let raw_password = parsed
-                .get("password")
-                .or_else(|| parsed.get("channel_password"))
+            let raw_secret = parsed
+                .get("secret")
+                .or_else(|| parsed.get("channel_secret"))
                 .or_else(|| parsed.get("secret_key"))
                 .or_else(|| parsed.get("secret"))
                 .or_else(|| parsed.get("key"))
@@ -1230,7 +1215,7 @@ fn handle_connection(
                 .trim()
                 .to_string();
             let raw_ticket = parsed
-                .get("bootstrap_ticket")
+                .get("invite")
                 .or_else(|| parsed.get("ticket"))
                 .and_then(Value::as_str)
                 .unwrap_or("")
@@ -1243,7 +1228,7 @@ fn handle_connection(
                 .filter(|s| !s.is_empty())
                 .map(String::from);
 
-            let validated_password = match validate_channel_password(&raw_password) {
+            let validated_secret = match validate_secret(&raw_secret) {
                 Ok(p) => p,
                 Err(err) => {
                     return write_json(&mut stream, 400, &json!({ "error": err }));
@@ -1254,18 +1239,16 @@ fn handle_connection(
                 st.node = nn.clone();
             }
 
-            let keys = st
-                .mesh_config
-                .apply_channel_password(&channel, &validated_password);
+            let keys = st.mesh_config.apply_secret(&channel, &validated_secret);
             let fp = keys.fingerprint();
             let topic_id = keys.topic_id;
 
             if raw_ticket.starts_with(crate::mesh::INVITE_TICKET_PREFIX) {
-                let parsed_invite = match raw_ticket.parse::<crate::mesh::InviteTicket>() {
+                let parsed_invite = match raw_ticket.parse::<crate::mesh::Invite>() {
                     Ok(inv) => inv,
                     Err(err) => return write_json(&mut stream, 400, &json!({ "error": err })),
                 };
-                let self_ep = st.iroh_runtime.endpoint_id.clone();
+                let self_ep = st.iroh_runtime.node_id.clone();
                 if let Err(err) = crate::mesh::redeem_invite_ticket(
                     &parsed_invite,
                     &keys,
@@ -1275,13 +1258,11 @@ fn handle_connection(
                 ) {
                     return write_json(&mut stream, 400, &json!({ "error": err }));
                 }
-            } else if !raw_ticket.is_empty()
-                && !st.mesh_config.bootstrap_tickets.contains(&raw_ticket)
-            {
-                st.mesh_config.bootstrap_tickets.push(raw_ticket.clone());
+            } else if !raw_ticket.is_empty() && !st.mesh_config.invites.contains(&raw_ticket) {
+                st.mesh_config.invites.push(raw_ticket.clone());
             }
 
-            let tickets = st.mesh_config.bootstrap_tickets.clone();
+            let tickets = st.mesh_config.invites.clone();
             st.mesh_config.node_name = Some(st.node.clone());
             st.mesh_config.listen_addr = Some(st.listen.clone());
             st.mesh_config.updated_at_unix = now;
@@ -1289,7 +1270,7 @@ fn handle_connection(
 
             if let Some(stage5) = st.boot_stages.iter_mut().find(|s| s.step == 5) {
                 stage5.status = "ready".to_string();
-                stage5.detail = format!("Joined password-protected channel '{}' ({fp})", channel);
+                stage5.detail = format!("Joined secret-protected channel '{}' ({fp})", channel);
                 stage5.updated_at_unix = now;
             }
 
@@ -1300,7 +1281,7 @@ fn handle_connection(
                 severity: "info".to_string(),
                 source: node_src,
                 message: format!(
-                    "Joined password-protected gossip channel '{}' ({fp})",
+                    "Joined secret-protected gossip channel '{}' ({fp})",
                     channel
                 ),
                 timestamp_unix: now,
@@ -1312,7 +1293,7 @@ fn handle_connection(
                 let _ = tx.send(MeshControlCommand::JoinMesh {
                     channel: channel.clone(),
                     keys,
-                    bootstrap_tickets: tickets,
+                    invites: tickets,
                     node_name: new_node_name,
                 });
             }
@@ -1373,7 +1354,7 @@ fn handle_connection(
             write_json(&mut stream, 200, &manifest)
         }
         ("GET", "/api/state") => {
-            st.reconcile_live_processes();
+            st.reconcile_processes();
             let include_kv = query
                 .get("include_kv")
                 .map(|v| v != "false" && v != "0")
@@ -1392,29 +1373,29 @@ fn handle_connection(
             }
         }
         ("GET", "/api/mesh") | ("GET", "/api/gossip") => {
-            st.reconcile_live_processes();
-            let (sha_blob_keys, sha_blob_bytes) = count_blob_cache_stats(&st.blob_cache_dir);
+            st.reconcile_processes();
+            let (blob_keys, blob_bytes) = count_store(&st.store_dir);
             let body = json!({
                 "schema": "dialtone.gossip.v1",
                 "mesh": "dialtone-iroh-gossip",
                 "self_node": st.node,
-                "heartbeat_interval_secs": HEARTBEAT_INTERVAL_SECS,
-                "summary_interval_secs": SUMMARY_HEARTBEAT_INTERVAL_SECS,
+                "beat_interval_secs": BEAT_INTERVAL_SECS,
+                "summary_interval_secs": SUMMARY_INTERVAL_SECS,
                 "self_iroh_runtime": st.iroh_runtime,
                 "boot_stages": st.boot_stages,
                 "mesh_config": masked_mesh_config(&st.mesh_config),
                 "blob_stats": {
-                    "sha_blob_keys": sha_blob_keys,
-                    "sha_blob_bytes": sha_blob_bytes,
+                    "blob_keys": blob_keys,
+                    "blob_bytes": blob_bytes,
                     "blob_fetches": st.blob_fetches.len(),
                     "kv_keys": st.kv.len(),
                     "key_leases": st.key_leases.len(),
-                    "installed_binaries": st.installed_binaries.len(),
+                    "installed_programs": st.installed_programs.len(),
                     "deploy_manifests": st.deploy_manifests.len()
                 },
                 "nodes": st.nodes,
                 "mesh_rtt_ms": st.mesh_rtt_ms,
-                "managed_processes": st.managed_processes,
+                "processes": st.processes,
                 "service_endpoints": st.service_endpoints
             });
             write_json(&mut stream, 200, &body)
@@ -1424,23 +1405,23 @@ fn handle_connection(
                 "schema": "dialtone.iroh_runtime.v1",
                 "owner": "dialtone-rust-daemon",
                 "steady_state_data_plane": "iroh-quic",
-                "http_plane_role": "local-bootstrap-control-only",
+                "http_plane_role": "local-seed-control-only",
                 "node": st.node,
                 "diagnostics": st.iroh_runtime
             });
             write_json(&mut stream, 200, &body)
         }
         ("HEAD", "/api/artifacts/blob") => {
-            let sha = query.get("sha256").cloned().unwrap_or_default();
-            if has_cached_blob(&st.blob_cache_dir, &sha) {
+            let sha = query.get("digest").cloned().unwrap_or_default();
+            if has_blob(&st.store_dir, &sha) {
                 write_response(&mut stream, 200, "application/octet-stream", b"", true)
             } else {
                 write_response(&mut stream, 404, "application/octet-stream", b"", true)
             }
         }
         ("GET", "/api/artifacts/blob") => {
-            let sha = query.get("sha256").cloned().unwrap_or_default();
-            match read_cached_blob(&st.blob_cache_dir, &sha) {
+            let sha = query.get("digest").cloned().unwrap_or_default();
+            match read_blob(&st.store_dir, &sha) {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes, false)
                 }
@@ -1454,43 +1435,39 @@ fn handle_connection(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let expected_sha = parsed
-                .get("sha256")
+                .get("digest")
                 .and_then(Value::as_str)
                 .map(String::from);
             match crate::base64_decode(b64) {
                 Ok(raw_bytes) => {
-                    let maybe_bridge = st.blob_bridge.clone();
-                    let cache_dir = st.blob_cache_dir.clone();
+                    let maybe_bridge = st.store.clone();
+                    let store_dir = st.store_dir.clone();
                     let node_name = st.node.clone();
                     drop(st);
                     if let Some(bridge) = maybe_bridge {
-                        match bridge.share_verified_blob(
-                            &cache_dir,
-                            &raw_bytes,
-                            expected_sha.as_deref(),
-                        ) {
+                        match bridge.share_blob(&store_dir, &raw_bytes, expected_sha.as_deref()) {
                             Ok(rep) => write_json(
                                 &mut stream,
                                 200,
                                 &json!({
                                     "status": rep.status,
                                     "node": node_name,
-                                    "sha256": rep.sha256,
+                                    "digest": rep.digest,
                                     "blake3_hash": rep.blake3_hash,
                                     "path": rep.path,
                                     "bytes": rep.bytes,
-                                    "provider_endpoint_id": rep.provider_endpoint_id,
+                                    "provider_node_id": rep.provider_node_id,
                                     "ticket_uri": rep.ticket_uri
                                 }),
                             ),
                             Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
                         }
                     } else {
-                        match store_verified_blob(&cache_dir, &raw_bytes, expected_sha.as_deref()) {
+                        match put_blob(&store_dir, &raw_bytes, expected_sha.as_deref()) {
                             Ok((sha, path)) => write_json(
                                 &mut stream,
                                 200,
-                                &json!({ "sha256": sha, "path": path, "bytes": raw_bytes.len() }),
+                                &json!({ "digest": sha, "path": path, "bytes": raw_bytes.len() }),
                             ),
                             Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
                         }
@@ -1520,16 +1497,16 @@ fn handle_connection(
                     &json!({ "error": "ticket_uri is required (iroh-blobs://ticket/...#sha256:...)" }),
                 );
             }
-            let Some(bridge) = st.blob_bridge.clone() else {
+            let Some(bridge) = st.store.clone() else {
                 return write_json(
                     &mut stream,
                     503,
                     &json!({ "error": "live iroh-blobs bridge is not initialized on this node" }),
                 );
             };
-            let cache_dir = st.blob_cache_dir.clone();
+            let store_dir = st.store_dir.clone();
             drop(st);
-            match bridge.pull_verified_blob_ticket(&cache_dir, &ticket_uri, force) {
+            match bridge.pull_blob(&store_dir, &ticket_uri, force) {
                 Ok(report) => {
                     if let Ok(mut st_after) = state.lock() {
                         st_after.blob_fetches.push(report.clone());
@@ -1544,7 +1521,7 @@ fn handle_connection(
                 serde_json::from_str::<TieredBlobFetchRequest>(body_part).map_err(|e| e.to_string())
             } else {
                 Ok(TieredBlobFetchRequest {
-                    sha256: query.get("sha256").cloned().unwrap_or_default(),
+                    digest: query.get("digest").cloned().unwrap_or_default(),
                     uri: query.get("uri").cloned().unwrap_or_default(),
                     provider_node: query
                         .get("provider")
@@ -1557,7 +1534,7 @@ fn handle_connection(
                         .unwrap_or(false),
                 })
             };
-            match req.and_then(|r| evaluate_tiered_blob_fetch(&st.blob_cache_dir, &r)) {
+            match req.and_then(|r| evaluate_tiered_blob_fetch(&st.store_dir, &r)) {
                 Ok(plan) => write_json(&mut stream, 200, &plan),
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
@@ -1645,14 +1622,14 @@ fn handle_connection(
             }
         }
         ("GET", "/api/processes") => {
-            st.reconcile_live_processes();
+            st.reconcile_processes();
             write_json(
                 &mut stream,
                 200,
                 &json!({
-                    "schema": "dialtone.managed_processes.v1",
+                    "schema": "dialtone.processes.v1",
                     "node": st.node,
-                    "managed_processes": st.managed_processes
+                    "processes": st.processes
                 }),
             )
         }
@@ -1707,8 +1684,8 @@ fn handle_connection(
                 .filter(|s| !s.is_empty())
                 .map(String::from);
 
-            let mut sha256 = parsed
-                .get("sha256")
+            let mut digest = parsed
+                .get("digest")
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .trim()
@@ -1729,33 +1706,33 @@ fn handle_connection(
                     Ok(b) => b,
                     Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
                 };
-                let exp = if sha256.is_empty() {
+                let exp = if digest.is_empty() {
                     None
                 } else {
-                    Some(sha256.as_str())
+                    Some(digest.as_str())
                 };
-                if let Some(ref bridge) = st.blob_bridge {
-                    match bridge.share_verified_blob(&st.blob_cache_dir, &raw, exp) {
+                if let Some(ref bridge) = st.store {
+                    match bridge.share_blob(&st.store_dir, &raw, exp) {
                         Ok(rep) => {
-                            sha256 = rep.sha256;
+                            digest = rep.digest;
                             resolved_ticket_uri = Some(rep.ticket_uri);
                         }
                         Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
                     }
                 } else {
-                    match store_verified_blob(&st.blob_cache_dir, &raw, exp) {
-                        Ok((verified_sha, _)) => sha256 = verified_sha,
+                    match put_blob(&st.store_dir, &raw, exp) {
+                        Ok((verified_sha, _)) => digest = verified_sha,
                         Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
                     }
                 }
             }
 
             if let Some(ref t_uri) = resolved_ticket_uri {
-                if sha256.is_empty() || !has_cached_blob(&st.blob_cache_dir, &sha256) {
-                    if let Some(ref bridge) = st.blob_bridge {
-                        match bridge.pull_verified_blob_ticket(&st.blob_cache_dir, t_uri, false) {
+                if digest.is_empty() || !has_blob(&st.store_dir, &digest) {
+                    if let Some(ref bridge) = st.store {
+                        match bridge.pull_blob(&st.store_dir, t_uri, false) {
                             Ok(rep) => {
-                                sha256 = rep.sha256.clone();
+                                digest = rep.digest.clone();
                                 st.blob_fetches.push(rep);
                             }
                             Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
@@ -1764,26 +1741,24 @@ fn handle_connection(
                 }
             }
 
-            if sha256.is_empty() {
-                if let Some(existing) = st.managed_processes.iter().find(|p| p.name == name) {
-                    sha256 = existing.sha256.clone();
+            if digest.is_empty() {
+                if let Some(existing) = st.processes.iter().find(|p| p.name == name) {
+                    digest = existing.digest.clone();
                 }
             }
-            if sha256.is_empty() {
+            if digest.is_empty() {
                 return write_json(
                     &mut stream,
                     400,
-                    &json!({ "error": "sha256, bytes_base64, or ticket_uri is required to configure a blob subprocess" }),
+                    &json!({ "error": "digest, bytes_base64, or ticket_uri is required to configure a blob process" }),
                 );
             }
 
             if deploy_to_mesh && resolved_ticket_uri.is_none() {
-                if let (Some(ref bridge), Ok(cached_bytes)) = (
-                    &st.blob_bridge,
-                    read_cached_blob(&st.blob_cache_dir, &sha256),
-                ) {
-                    if let Ok(rep) =
-                        bridge.share_verified_blob(&st.blob_cache_dir, &cached_bytes, Some(&sha256))
+                if let (Some(ref bridge), Ok(cached_bytes)) =
+                    (&st.store, read_blob(&st.store_dir, &digest))
+                {
+                    if let Ok(rep) = bridge.share_blob(&st.store_dir, &cached_bytes, Some(&digest))
                     {
                         resolved_ticket_uri = Some(rep.ticket_uri);
                     }
@@ -1797,23 +1772,22 @@ fn handle_connection(
                 env_vars.push(format!("DIALTONE_BLOB_TICKET={t_uri}"));
             }
 
-            let (verified_sha, staged_path) =
-                match stage_executable_blob(&st.blob_cache_dir, &name, &sha256) {
-                    Ok(v) => v,
-                    Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
-                };
+            let (verified_sha, staged_path) = match stage_program(&st.store_dir, &name, &digest) {
+                Ok(v) => v,
+                Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
+            };
 
             let prev_restart_count = st
-                .managed_processes
+                .processes
                 .iter()
-                .find(|p| p.name == name && p.sha256 == verified_sha)
+                .find(|p| p.name == name && p.digest == verified_sha)
                 .map(|p| p.restart_count)
                 .unwrap_or(0);
 
-            let mut spec = ManagedProcessSpec {
+            let mut spec = ProcessSpec {
                 name: name.clone(),
                 path: staged_path.to_string_lossy().to_string(),
-                sha256: verified_sha.clone(),
+                digest: verified_sha.clone(),
                 desired_state: desired_state.clone(),
                 args,
                 env: env_vars,
@@ -1834,34 +1808,30 @@ fn handle_connection(
                 return write_json(&mut stream, 400, &json!({ "error": err }));
             }
 
-            if let Some(existing) = st.managed_processes.iter_mut().find(|p| p.name == name) {
+            if let Some(existing) = st.processes.iter_mut().find(|p| p.name == name) {
                 *existing = spec.clone();
             } else {
-                st.managed_processes.push(spec.clone());
+                st.processes.push(spec.clone());
             }
 
-            if let Some(existing_cfg) = st
-                .mesh_config
-                .managed_processes
-                .iter_mut()
-                .find(|p| p.name == name)
+            if let Some(existing_cfg) = st.mesh_config.processes.iter_mut().find(|p| p.name == name)
             {
                 *existing_cfg = spec.clone();
             } else {
-                st.mesh_config.managed_processes.push(spec.clone());
+                st.mesh_config.processes.push(spec.clone());
             }
             st.mesh_config.updated_at_unix = now_unix();
             let _ = save_mesh_config(&default_config_path(), &st.mesh_config);
 
             let self_node = st.node.clone();
-            let procs_snapshot = st.managed_processes.clone();
-            if let Some(self_hb) = st.nodes.iter_mut().find(|n| n.node == self_node) {
-                self_hb.managed_processes = procs_snapshot;
+            let procs_snapshot = st.processes.clone();
+            if let Some(self_beat) = st.nodes.iter_mut().find(|n| n.node == self_node) {
+                self_beat.processes = procs_snapshot;
             }
 
             println!(
-                "[SUPERVISOR] Configured blob subprocess '{}' (sha256={}, desired_state={}, status={:?}, pid={:?})",
-                spec.name, spec.sha256, spec.desired_state, spec.status, spec.pid
+                "[SUPERVISOR] Configured blob process '{}' (digest={}, desired_state={}, status={:?}, pid={:?})",
+                spec.name, spec.digest, spec.desired_state, spec.status, spec.pid
             );
 
             write_json(
@@ -1883,20 +1853,20 @@ fn handle_connection(
                 .get("action")
                 .cloned()
                 .unwrap_or_else(|| "restart".to_string());
-            if let Some(proc) = st.managed_processes.first() {
+            if let Some(proc) = st.processes.first() {
                 match plan_process_intent(&st.node, &target_node, proc, &action) {
                     Ok(plan) => write_json(&mut stream, 200, &plan),
                     Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
                 }
             } else {
-                write_json(&mut stream, 404, &json!({ "error": "no managed process" }))
+                write_json(&mut stream, 404, &json!({ "error": "no process" }))
             }
         }
         ("POST", "/api/e2e/tick") | ("GET", "/api/e2e/status") => {
-            let report = if method == "POST" || st.e2e_test.is_none() {
-                st.run_e2e_capability_tick()
+            let report = if method == "POST" || st.probe.is_none() {
+                st.run_probe()
             } else {
-                st.e2e_test.clone().unwrap_or_default()
+                st.probe.clone().unwrap_or_default()
             };
             write_json(
                 &mut stream,
@@ -1904,7 +1874,7 @@ fn handle_connection(
                 &json!({
                     "status": "ok",
                     "node": st.node,
-                    "e2e_test": report,
+                    "probe": report,
                     "deploy_slots": st.deploy_slots
                 }),
             )
@@ -1979,7 +1949,7 @@ fn handle_connection(
 fn handle_websocket_upgrade(
     mut stream: TcpStream,
     ws_key: &str,
-    state: &Arc<Mutex<DaemonRuntimeState>>,
+    state: &Arc<Mutex<NodeState>>,
 ) -> Result<(), String> {
     let mut input = ws_key.as_bytes().to_vec();
     input.extend_from_slice(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
@@ -2013,7 +1983,7 @@ fn handle_websocket_upgrade(
     stream.write_all(&frame).map_err(|e| e.to_string())
 }
 
-pub fn count_blob_cache_stats(blob_dir: &std::path::Path) -> (usize, u64) {
+pub fn count_store(blob_dir: &std::path::Path) -> (usize, u64) {
     let mut keys = 0usize;
     let mut bytes = 0u64;
     if let Ok(top_entries) = fs::read_dir(blob_dir) {
@@ -2042,8 +2012,8 @@ pub fn count_blob_cache_stats(blob_dir: &std::path::Path) -> (usize, u64) {
     (keys, bytes)
 }
 
-/// SHA-256 digest (the CAS file name) of the most recently written blob in `blob_dir`, if any.
-pub fn latest_blob_sha256(blob_dir: &std::path::Path) -> Option<String> {
+/// Digest (the store file name) of the most recently written blob in `blob_dir`, if any.
+pub fn latest_digest(blob_dir: &std::path::Path) -> Option<String> {
     let is_digest = |name: &str| name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit());
     let mut newest: Option<(std::time::SystemTime, String)> = None;
     let mut consider = |entry: &fs::DirEntry| {
@@ -2233,7 +2203,7 @@ mod tests {
     fn latest_blob_sha256_picks_newest_digest_and_ignores_non_digest_files() {
         let dir = env::temp_dir().join(format!("dialtone-latest-blob-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        assert_eq!(latest_blob_sha256(&dir), None);
+        assert_eq!(latest_digest(&dir), None);
 
         let older = "a".repeat(64);
         let newer = "b".repeat(64);
@@ -2256,7 +2226,7 @@ mod tests {
         set_mtime(dir.join("bb").join(&newer), base + Duration::from_secs(60));
         set_mtime(dir.join("notes.txt"), base + Duration::from_secs(120));
 
-        assert_eq!(latest_blob_sha256(&dir), Some(format!("sha256:{newer}")));
+        assert_eq!(latest_digest(&dir), Some(format!("sha256:{newer}")));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2271,7 +2241,7 @@ mod tests {
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-123");
 
-        let state = Arc::new(Mutex::new(DaemonRuntimeState::new_seeded(
+        let state = Arc::new(Mutex::new(NodeState::new_seeded(
             "node-alpha",
             "hub",
             &addr.to_string(),
@@ -2284,7 +2254,7 @@ mod tests {
             serve_http_blocking(listener, state_bg, Some(6)).unwrap();
         });
 
-        // 1. GET / dashboard UI
+        // 1. GET / hud UI
         let resp_ui = raw_http_request(addr, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
         assert!(resp_ui.contains("200 OK"));
         assert!(resp_ui.contains("Dialtone Iroh 1.3 Mesh Control Plane"));
@@ -2350,7 +2320,7 @@ mod tests {
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-auth");
 
-        let mut seeded = DaemonRuntimeState::new_seeded(
+        let mut seeded = NodeState::new_seeded(
             "node-alpha",
             "hub",
             &addr.to_string(),
@@ -2388,7 +2358,7 @@ mod tests {
         );
         let resp_ok = raw_http_request(addr, &req_ok);
         assert!(resp_ok.contains("200 OK"));
-        assert!(resp_ok.contains("\"sha256\""));
+        assert!(resp_ok.contains("\"digest\""));
 
         handle.join().unwrap();
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -2405,7 +2375,7 @@ mod tests {
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-conc");
 
-        let state = Arc::new(Mutex::new(DaemonRuntimeState::new_seeded(
+        let state = Arc::new(Mutex::new(NodeState::new_seeded(
             "node-alpha",
             "hub",
             &addr.to_string(),
@@ -2442,37 +2412,32 @@ mod tests {
     }
 
     #[test]
-    fn e2e_capability_tick_verifies_all_five_capabilities_and_flips_ab_slot() {
-        let tmp_dir = env::temp_dir().join(format!("dialtone-e2e-tick-{}", std::process::id()));
+    fn probe_capability_tick_verifies_all_five_capabilities_and_flips_ab_slot() {
+        let tmp_dir = env::temp_dir().join(format!("dialtone-probe-tick-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let cfg = IrohTransportConfig::local_offline();
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
-        let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-e2e");
+        let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-probe");
 
-        let mut st = DaemonRuntimeState::new_seeded(
-            "node-alpha",
-            "hub",
-            "127.0.0.1:0",
-            tmp_dir.clone(),
-            diag,
-        );
+        let mut st =
+            NodeState::new_seeded("node-alpha", "hub", "127.0.0.1:0", tmp_dir.clone(), diag);
 
-        let report1 = st.run_e2e_capability_tick();
+        let report1 = st.run_probe();
         assert_eq!(report1.cycle, 1);
-        assert!(report1.sha_blobs_ok);
+        assert!(report1.blobs_ok);
         assert!(report1.key_value_ok);
-        assert!(report1.sub_processes_ok);
+        assert!(report1.processes_ok);
         assert!(report1.mesh_connectivity_ok);
         assert!(report1.ab_rollback_ok);
         assert_eq!(report1.passed_count, 5);
         assert_eq!(report1.total_count, 5);
         assert_eq!(report1.active_slot, "B");
-        assert!(!report1.worker_blob_cas_path.is_empty());
-        assert!(!report1.worker_staged_path.is_empty());
-        assert!(std::path::Path::new(&report1.worker_blob_cas_path).exists());
-        assert!(std::path::Path::new(&report1.worker_staged_path).exists());
+        assert!(!report1.store_path.is_empty());
+        assert!(!report1.staged_path.is_empty());
+        assert!(std::path::Path::new(&report1.store_path).exists());
+        assert!(std::path::Path::new(&report1.staged_path).exists());
 
-        let report2 = st.run_e2e_capability_tick();
+        let report2 = st.run_probe();
         assert_eq!(report2.cycle, 2);
         assert_eq!(report2.passed_count, 5);
         assert_eq!(report2.active_slot, "A");

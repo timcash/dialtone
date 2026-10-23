@@ -31,7 +31,8 @@ pub struct AlertRecord {
     pub severity: String,
     pub source: String,
     pub summary: String,
-    pub telemetry_ref: String,
+    #[serde(alias = "telemetry_ref")] // compat
+    pub stats_ref: String,
     pub last_seen_unix: u64,
     pub acknowledged_by: Option<String>,
 }
@@ -44,7 +45,8 @@ pub struct AlertAckPlan {
     pub note: String,
     pub prior_status: String,
     pub planned_status: String,
-    pub telemetry_ref: String,
+    #[serde(alias = "telemetry_ref")] // compat
+    pub stats_ref: String,
     pub daemon_owned_evidence: bool,
     pub side_effect_free_preview: bool,
     pub message: String,
@@ -65,7 +67,7 @@ pub fn plan_alert_ack(
         note: note.trim().to_string(),
         prior_status: alert.status.clone(),
         planned_status: "acknowledged".to_string(),
-        telemetry_ref: alert.telemetry_ref.clone(),
+        stats_ref: alert.stats_ref.clone(),
         daemon_owned_evidence: true,
         side_effect_free_preview: true,
         message: format!(
@@ -159,7 +161,9 @@ pub fn evaluate_proof_case(
             daemon_owned: true,
             renderer_headed: true,
             warnings: Vec::new(),
-            reason: "all telemetry, logs, events, artifacts, and active binary hashes verified in same session".to_string(),
+            reason:
+                "all stats, logs, events, blobs, and active binary hashes verified in same session"
+                    .to_string(),
         }),
         "missing" => Ok(ProofValidationReport {
             proof_case: "missing".to_string(),
@@ -167,8 +171,8 @@ pub fn evaluate_proof_case(
             accepted: false,
             daemon_owned: true,
             renderer_headed: true,
-            warnings: vec!["missing required session telemetry sidecar".to_string()],
-            reason: "rejected: required session artifact missing".to_string(),
+            warnings: vec!["missing required session stats sidecar".to_string()],
+            reason: "rejected: required session blob missing".to_string(),
         }),
         "stale" => Ok(ProofValidationReport {
             proof_case: "stale".to_string(),
@@ -185,7 +189,7 @@ pub fn evaluate_proof_case(
             accepted: false,
             daemon_owned: true,
             renderer_headed: true,
-            warnings: vec!["artifact test_session_id mismatch".to_string()],
+            warnings: vec!["blob test_session_id mismatch".to_string()],
             reason: "rejected: cross-session evidence contamination".to_string(),
         }),
         "non-daemon-fallback" => Ok(ProofValidationReport {
@@ -194,7 +198,9 @@ pub fn evaluate_proof_case(
             accepted: false,
             daemon_owned: false,
             renderer_headed: true,
-            warnings: vec!["evidence collected via SSH/scp fallback instead of dialtone mesh".to_string()],
+            warnings: vec![
+                "evidence collected via SSH/scp fallback instead of dialtone mesh".to_string(),
+            ],
             reason: "rejected: non-daemon fallback is not accepted steady-state proof".to_string(),
         }),
         "no-renderer-fallback" => Ok(ProofValidationReport {
@@ -203,7 +209,10 @@ pub fn evaluate_proof_case(
             accepted: false,
             daemon_owned: true,
             renderer_headed: false,
-            warnings: vec!["warning no-renderer fallback binary active; REQUIRE_HEADED_RENDERER=1 violated".to_string()],
+            warnings: vec![
+                "warning no-renderer fallback binary active; REQUIRE_HEADED_RENDERER=1 violated"
+                    .to_string(),
+            ],
             reason: "rejected: headless fallback binary cannot satisfy visual proof".to_string(),
         }),
         "peer-build-deps-missing" => Ok(ProofValidationReport {

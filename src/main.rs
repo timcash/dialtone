@@ -7,36 +7,32 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dialtone::api::{
-    count_blob_cache_stats, default_boot_stages, latest_blob_sha256, load_or_create_api_token,
-    serve_http_blocking, validate_listen_addr_security, DaemonRuntimeState,
+    count_store, default_boot_stages, latest_digest, load_or_create_api_token, serve_http_blocking,
+    validate_listen_addr_security, NodeState,
 };
-use dialtone::blob::{
-    evaluate_tiered_blob_fetch, store_verified_blob, LiveBlobBridge, TieredBlobFetchRequest,
-};
+use dialtone::blob::{evaluate_tiered_blob_fetch, put_blob, Store, TieredBlobFetchRequest};
 use dialtone::deploy::{
     evaluate_deploy_build_decision, generate_deploy_plan, install_persistent_os_daemon,
     plan_rollback, render_os_service_unit,
 };
 use dialtone::mesh::{
     allow_peer_in_config_with_addrs, build_mesh_rtt_matrix, cached_local_public_ip_geo,
-    compute_rtt_ms_from_echo, create_invite_ticket, decrypt_heartbeat_from_gossip, default_arch,
-    default_blob_cache_dir, default_config_path, default_fleet_seed_peers, default_os,
-    derive_standby_topic_id, detect_default_node_name, encrypt_heartbeat_for_gossip,
-    generate_channel_password, is_allowed_peer_in_list, load_mesh_config, monotonic_now_ms,
-    node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
-    observe_peer_remote_addrs, parse_duration_secs, redeem_invite_ticket,
-    resolve_fleet_node_locations, revoke_peer_in_config, save_mesh_config,
-    sign_heartbeat_with_keys, spawn_background_public_ip_geo_probe, validate_channel_password,
-    DerivedChannelKeys, DialtoneHeartbeat, GossipTicket, MeshControlCommand, NodeBlobStoreStats,
-    PeerRttEcho, DEFAULT_CHANNEL_NAME, DIALTONE_HEARTBEAT_SCHEMA, HEARTBEAT_INTERVAL_SECS,
-    INVITE_TICKET_PREFIX, SUMMARY_HEARTBEAT_EVERY_N_TICKS, SUMMARY_HEARTBEAT_INTERVAL_SECS,
+    compute_rtt_ms_from_echo, create_invite_ticket, default_arch, default_config_path, default_os,
+    default_seeds, default_store_dir, derive_standby_topic_id, detect_default_node_name,
+    is_allowed_peer_in_list, load_mesh_config, monotonic_now_ms, new_secret, node_capabilities_for,
+    node_role_for, normalize_channel_name, now_unix, observe_peer_remote_addrs, open_beat,
+    parse_duration_secs, place_nodes, redeem_invite_ticket, revoke_peer_in_config,
+    save_mesh_config, seal_beat, sign_beat, spawn_background_public_ip_geo_probe, validate_secret,
+    Beat, ChannelKeys, MeshControlCommand, PeerRttEcho, SeedList, StoreStats, BEAT_INTERVAL_SECS,
+    BEAT_SCHEMA, DEFAULT_CHANNEL_NAME, INVITE_TICKET_PREFIX, SUMMARY_EVERY_N_BEATS,
+    SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
     load_or_create_secret_key_at, IrohRelayPolicy, IrohTransportConfig, IrohTransportDiagnostics,
 };
 use dialtone::record::{evaluate_proof_case, plan_alert_ack};
-use dialtone::stats::{sample_live_host_resources, TelemetryRollingWindow};
+use dialtone::stats::{sample_stats, StatsWindow};
 use dialtone::supervisor::plan_process_intent;
 use dialtone::{collect_node_diagnostics, run_self_test};
 use futures_lite::StreamExt;
@@ -55,15 +51,15 @@ fn print_usage() {
          Running `dialtone` with no arguments boots in dependency order and prints the local Web HUD URL.\n\n\
          actions:\n\
          \x20 up | start | hub         Boot in dependency order: Local Web HUD -> Blob Store -> Iroh QUIC -> Gossip Mesh\n\
-         \x20 join <password>          Unlock & join the 'dialtone' gossip channel with a password (live or persistent)\n\
-         \x20 gen-password             Generate a CSPRNG high-entropy channel password (dt-...)\n\
-         \x20 peers [allow|revoke|list] [<endpoint_id>] Manage the local peer allowlist in ~/.dialtone/config.json\n\
+         \x20 join <secret>          Unlock & join the 'dialtone' gossip channel with a secret (live or persistent)\n\
+         \x20 gen-password             Generate a CSPRNG high-entropy channel secret (dt-...)\n\
+         \x20 peers [allow|revoke|list] [<node_id>] Manage the local peer allowlist in ~/.dialtone/config.json\n\
          \x20 blobs [share|pull] <arg> Share a local file/payload or pull an iroh-blobs://ticket/... via the running daemon\n\
-         \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use bootstrap invite ticket\n\
+         \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use seed invite ticket\n\
          \x20 daemon [install|status]  Install or inspect persistent OS background daemon (survives restarts)\n\
-         \x20 test-tick                Execute one 5-capability E2E verification tick (BLB, KVS, PRC, MSH, A/B) on local daemon\n\
+         \x20 test-tick                Execute one 5-capability probe verification tick (BLB, KVS, PRC, MSH, A/B) on local daemon\n\
          \x20 fleet-test               Verify live daemon security posture, multi-node convergence & QUIC blob transfer\n\
-         \x20 index                    Run HTTP dashboard, registration, and state API server\n\
+         \x20 index                    Run HTTP hud, registration, and state API server\n\
          \x20 node                     Run headless Iroh 1.3 gossip + blob mesh peer node\n\
          \x20 status                   Bind persistent Iroh 1.3 endpoint and print transport JSON\n\
          \x20 self-test | ci           Run full 7-capability live verification suite\n\
@@ -85,10 +81,10 @@ fn print_usage() {
          \x20 --listen <addr>          Local Web HUD listen address (default: 127.0.0.1:8788)\n\
          \x20 --api-token <token>      Explicit API bearer token for POST routes (default: ~/.dialtone/api-token)\n\
          \x20 --channel <name>         Gossip channel name (default: dialtone)\n\
-         \x20 --password <pass>        Password required to unlock & authenticate the gossip channel\n\
-         \x20 --bootstrap-ticket <t>   Bootstrap Iroh gossip or invite ticket (repeatable)\n\
+         \x20 --password <pass>        Secret required to unlock & authenticate the gossip channel\n\
+         \x20 --bootstrap-ticket <t>   Seed Iroh gossip or invite ticket (repeatable)\n\
          \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 300s; default: 15m)\n\
-         \x20 --peer <endpoint_id>     Optional target EndpointId for 'dialtone invite' or 'dialtone peers'\n\
+         \x20 --peer <node_id>     Optional target EndpointId for 'dialtone invite' or 'dialtone peers'\n\
          \x20 --addr <ip:port>         Static direct peer SocketAddr for 'dialtone peers allow' (repeatable)\n\
          \x20 --expect-peers <count>   Expected converged peer count for 'dialtone fleet-test'\n\
          \x20 --timeout <duration>     Timeout for 'dialtone fleet-test' (default: 15s)\n\
@@ -110,8 +106,8 @@ fn print_usage() {
          \x20 --intent-action <a>      start | stop | restart\n\
          \x20 --proof-case <c>         valid | missing | stale | cross-session | non-daemon-fallback |\n\
          \x20                          no-renderer-fallback | peer-build-deps-missing\n\
-         \x20 --sha256 <digest>        SHA-256 digest for blob-fetch-report\n\
-         \x20 --uri <uri>              Artifact URI for blob-fetch-report\n\
+         \x20 --digest <digest>        SHA-256 digest for blob-fetch-report\n\
+         \x20 --uri <uri>              Blob URI for blob-fetch-report\n\
          \x20 --http-fallback-enabled  Allow HTTP peer-bridge fallback for blob-fetch-report\n\
          \x20 --actor <name>           Actor name for alert-ack-fixture\n\
          \x20 --note <text>            Note for alert-ack-fixture\n\
@@ -145,13 +141,13 @@ struct CliOptions {
     build_case: Option<String>,
     intent_action: String,
     proof_case: String,
-    sha256: String,
+    digest: String,
     uri: String,
     http_fallback_enabled: bool,
     actor: String,
     note: String,
     os_kind: String,
-    bootstrap_tickets: Vec<String>,
+    invites: Vec<String>,
     transport: IrohTransportConfig,
 }
 
@@ -171,7 +167,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| normalize_channel_name(Some(&saved.channel)));
-    let env_password = env::var("DIALTONE_PASSWORD")
+    let env_secret = env::var("DIALTONE_PASSWORD")
         .or_else(|_| env::var("DIALTONE_CHANNEL_PASSWORD"))
         .or_else(|_| env::var("DIALTONE_SECRET_KEY"))
         .ok()
@@ -187,7 +183,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             .ok()
             .filter(|s| !s.trim().is_empty()),
         channel: default_channel,
-        secret_key: env_password.or(saved.secret_key),
+        secret_key: env_secret.or(saved.secret_key),
         install_daemon: false,
         daemon_subcmd: "install".to_string(),
         peers_subcmd: "list".to_string(),
@@ -204,7 +200,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         build_case: None,
         intent_action: "restart".to_string(),
         proof_case: "valid".to_string(),
-        sha256: "sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d"
+        digest: "sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d"
             .to_string(),
         uri: "iroh-blobs://ticket/blob123#sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d"
             .to_string(),
@@ -218,7 +214,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         } else {
             "linux".to_string()
         },
-        bootstrap_tickets: saved.bootstrap_tickets,
+        invites: saved.invites,
         transport: IrohTransportConfig::default(),
     };
 
@@ -238,7 +234,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.action = "fleet-test".to_string();
                 action_set = true;
             }
-            "gen-password" | "generate-password" if !action_set => {
+            "gen-password" | "generate-secret" if !action_set => {
                 opts.action = "gen-password".to_string();
                 action_set = true;
             }
@@ -362,7 +358,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 let ch = args.get(idx).ok_or("missing --channel value")?;
                 opts.channel = normalize_channel_name(Some(ch));
             }
-            "--password" | "--channel-password" | "--pass" | "--secret-key" | "--mesh-key"
+            "--password" | "--channel-secret" | "--pass" | "--secret-key" | "--mesh-key"
             | "--key" | "--secret" => {
                 idx += 1;
                 opts.secret_key = Some(args.get(idx).ok_or("missing --password value")?.clone());
@@ -407,8 +403,8 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     .get(idx)
                     .ok_or("missing --bootstrap-ticket value")?
                     .clone();
-                if !opts.bootstrap_tickets.contains(&t) {
-                    opts.bootstrap_tickets.push(t);
+                if !opts.invites.contains(&t) {
+                    opts.invites.push(t);
                 }
             }
             "--no-tailnet" => {
@@ -450,9 +446,9 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 idx += 1;
                 opts.proof_case = args.get(idx).ok_or("missing --proof-case value")?.clone();
             }
-            "--sha256" => {
+            "--digest" => {
                 idx += 1;
-                opts.sha256 = args.get(idx).ok_or("missing --sha256 value")?.clone();
+                opts.digest = args.get(idx).ok_or("missing --digest value")?.clone();
             }
             "--uri" => {
                 idx += 1;
@@ -516,10 +512,10 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
     Ok(opts)
 }
 
-async fn build_seeded_state(opts: &CliOptions) -> Result<DaemonRuntimeState, String> {
+async fn build_seeded_state(opts: &CliOptions) -> Result<NodeState, String> {
     let diag = collect_node_diagnostics(&opts.transport).await?;
     let blob_dir = env::temp_dir().join("dialtone-blobs");
-    Ok(DaemonRuntimeState::new_seeded(
+    Ok(NodeState::new_seeded(
         &opts.node,
         &opts.action,
         &opts.listen,
@@ -528,56 +524,55 @@ async fn build_seeded_state(opts: &CliOptions) -> Result<DaemonRuntimeState, Str
     ))
 }
 
-fn upsert_heartbeat(nodes: &mut Vec<DialtoneHeartbeat>, mut hb: DialtoneHeartbeat) {
+fn merge_beat(nodes: &mut Vec<Beat>, mut beat: Beat) {
     if let Some(existing) = nodes
         .iter_mut()
-        .find(|n| n.node == hb.node || n.endpoint_id == hb.endpoint_id)
+        .find(|n| n.node == beat.node || n.node_id == beat.node_id)
     {
-        if hb.summary_stats.is_none() {
-            hb.summary_stats = existing.summary_stats.clone();
+        if beat.summary_stats.is_none() {
+            beat.summary_stats = existing.summary_stats.clone();
         }
-        if hb.geo_location.is_none() {
-            hb.geo_location = existing.geo_location.clone();
+        if beat.geo_location.is_none() {
+            beat.geo_location = existing.geo_location.clone();
         }
-        if hb.e2e_test.is_none() {
-            hb.e2e_test = existing.e2e_test.clone();
+        if beat.probe.is_none() {
+            beat.probe = existing.probe.clone();
         }
         for (k, v) in &existing.peer_rtt_ms {
-            hb.peer_rtt_ms.entry(k.clone()).or_insert(*v);
+            beat.peer_rtt_ms.entry(k.clone()).or_insert(*v);
         }
-        if hb.heartbeat_kind == "rtt_echo" {
-            hb.heartbeat_kind = existing.heartbeat_kind.clone();
+        if beat.kind == "rtt_echo" {
+            beat.kind = existing.kind.clone();
         }
-        *existing = hb;
+        *existing = beat;
     } else {
-        if hb.heartbeat_kind == "rtt_echo" {
-            hb.heartbeat_kind = "regular".to_string();
+        if beat.kind == "rtt_echo" {
+            beat.kind = "regular".to_string();
         }
-        nodes.push(hb);
+        nodes.push(beat);
     }
 }
 
-fn build_self_heartbeat(
+fn self_beat(
     node: &str,
-    endpoint_id: &str,
+    node_id: &str,
     ticket: String,
     counter: u64,
     diag: IrohTransportDiagnostics,
-) -> DialtoneHeartbeat {
-    let resources =
-        sample_live_host_resources(node, diag.bound_non_tailnet_ipv4.as_deref(), counter);
-    let blob_dir = default_blob_cache_dir();
-    let (sha_blob_keys, sha_blob_bytes) = count_blob_cache_stats(&blob_dir);
-    DialtoneHeartbeat {
-        schema: DIALTONE_HEARTBEAT_SCHEMA.to_string(),
+) -> Beat {
+    let resources = sample_stats(node, diag.bound_non_tailnet_ipv4.as_deref(), counter);
+    let blob_dir = default_store_dir();
+    let (blob_keys, blob_bytes) = count_store(&blob_dir);
+    Beat {
+        schema: BEAT_SCHEMA.to_string(),
         node: node.to_string(),
-        endpoint_id: endpoint_id.to_string(),
+        node_id: node_id.to_string(),
         ticket,
         counter,
         updated_at_unix: now_unix(),
-        heartbeat_kind: "regular".to_string(),
-        heartbeat_interval_secs: HEARTBEAT_INTERVAL_SECS,
-        summary_interval_secs: SUMMARY_HEARTBEAT_INTERVAL_SECS,
+        kind: "regular".to_string(),
+        beat_interval_secs: BEAT_INTERVAL_SECS,
+        summary_interval_secs: SUMMARY_INTERVAL_SECS,
         sent_mono_ms: monotonic_now_ms(),
         rtt_probe_requested: false,
         peer_echoes: std::collections::HashMap::new(),
@@ -587,24 +582,24 @@ fn build_self_heartbeat(
         arch: default_arch(),
         role: node_role_for(node),
         capabilities: node_capabilities_for(node),
-        host_resources: resources,
+        stats: resources,
         service_endpoints: Vec::new(),
-        managed_processes: Vec::new(),
+        processes: Vec::new(),
         iroh_transport: diag,
         observed_remote_addrs: vec!["local:self".to_string()],
         tailnet_used: false,
         geo_location: cached_local_public_ip_geo(),
-        e2e_test: None,
-        blob_store: Some(NodeBlobStoreStats {
-            sha_blob_keys: sha_blob_keys as u64,
-            sha_blob_bytes,
-            latest_sha256: latest_blob_sha256(&blob_dir),
+        probe: None,
+        store: Some(StoreStats {
+            blob_keys: blob_keys as u64,
+            blob_bytes,
+            latest_digest: latest_digest(&blob_dir),
         }),
         channel_mac: None,
     }
 }
 
-fn build_peer_echoes(
+fn echoes_for_peers(
     last_rx_from_peer: &std::collections::HashMap<String, (u64, u64)>,
     now_mono_ms: u64,
 ) -> std::collections::HashMap<String, PeerRttEcho> {
@@ -644,7 +639,7 @@ fn bind_local_web_listener(requested: &str, explicit: bool) -> Result<TcpListene
 }
 
 fn update_boot_stage(
-    state: &Option<Arc<Mutex<DaemonRuntimeState>>>,
+    state: &Option<Arc<Mutex<NodeState>>>,
     step: u8,
     status: &str,
     detail: String,
@@ -712,8 +707,8 @@ fn local_daemon_http_json(
 fn try_join_running_local_daemon(
     listen_addr: &str,
     channel: &str,
-    password: &str,
-    bootstrap_tickets: &[String],
+    secret: &str,
+    invites: &[String],
     node: Option<&str>,
     api_token: &str,
 ) -> Option<serde_json::Value> {
@@ -723,8 +718,8 @@ fn try_join_running_local_daemon(
         "/api/mesh/join",
         Some(&json!({
             "channel": channel,
-            "password": password,
-            "bootstrap_ticket": bootstrap_tickets.first().cloned().unwrap_or_default(),
+            "secret": secret,
+            "invite": invites.first().cloned().unwrap_or_default(),
             "node": node
         })),
         api_token,
@@ -733,10 +728,10 @@ fn try_join_running_local_daemon(
     .ok()
 }
 
-async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), String> {
+async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> {
     let verbose_boot = serve_http || !opts.once;
     let config_path = default_config_path();
-    let blob_dir = default_blob_cache_dir();
+    let blob_dir = default_store_dir();
 
     if !opts.once {
         spawn_background_public_ip_geo_probe();
@@ -756,18 +751,18 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     if opts.secret_key.is_none() && saved_cfg.secret_key.is_some() {
         opts.secret_key = saved_cfg.secret_key.clone();
     }
-    for t in &saved_cfg.bootstrap_tickets {
-        if !opts.bootstrap_tickets.contains(t) {
-            opts.bootstrap_tickets.push(t.clone());
+    for t in &saved_cfg.invites {
+        if !opts.invites.contains(t) {
+            opts.invites.push(t.clone());
         }
     }
     let mut active_channel = normalize_channel_name(Some(&opts.channel));
-    let validated_password = opts
+    let validated_secret = opts
         .secret_key
         .as_deref()
-        .and_then(|raw| validate_channel_password(raw).ok());
-    let mut active_keys: Option<DerivedChannelKeys> = if let Some(ref pass) = validated_password {
-        Some(saved_cfg.apply_channel_password(&active_channel, pass))
+        .and_then(|raw| validate_secret(raw).ok());
+    let mut active_keys: Option<ChannelKeys> = if let Some(ref pass) = validated_secret {
+        Some(saved_cfg.apply_secret(&active_channel, pass))
     } else if saved_cfg.channel == active_channel {
         saved_cfg.active_channel_keys()
     } else {
@@ -777,7 +772,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
 
     if opts.install_daemon {
         if let Ok(rep) =
-            install_persistent_os_daemon(&opts.node, &opts.listen, validated_password.as_deref())
+            install_persistent_os_daemon(&opts.node, &opts.listen, validated_secret.as_deref())
         {
             saved_cfg.daemon_installed = true;
             saved_cfg.daemon_service_path = Some(rep.service_unit_path.clone());
@@ -817,7 +812,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         relay_urls: opts.transport.relay_urls.clone(),
         persistent_identity: true,
         identity_key_path: Some(default_secret_key_path().to_string_lossy().to_string()),
-        endpoint_id: "booting-iroh-endpoint".to_string(),
+        node_id: "booting-iroh-endpoint".to_string(),
         address_lookup_modes: opts.transport.active_lookup_modes(),
         ticket_addr_modes: vec!["relay".to_string(), "direct-ip".to_string()],
         exclude_tailnet: opts.transport.exclude_tailnet,
@@ -826,7 +821,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         advertised_ip_addrs: Vec::new(),
     };
 
-    let shared_state: Option<Arc<Mutex<DaemonRuntimeState>>> = if serve_http {
+    let shared_state: Option<Arc<Mutex<NodeState>>> = if serve_http {
         // Persist the requested address, not an auto-fallback port that was only free this boot.
         let requested_listen = opts.listen.clone();
         let listener = bind_local_web_listener(&opts.listen, opts.listen_explicit)?;
@@ -835,7 +830,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         local_web_url = format!("http://{bound_addr}");
 
         let mut runtime_state = if opts.action == "index" {
-            DaemonRuntimeState::new_seeded(
+            NodeState::new_seeded(
                 &opts.node,
                 &opts.action,
                 &opts.listen,
@@ -843,7 +838,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                 placeholder_diag.clone(),
             )
         } else {
-            DaemonRuntimeState::new_live(
+            NodeState::new_live(
                 &opts.node,
                 &opts.action,
                 &opts.listen,
@@ -874,55 +869,53 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         saved_cfg.channel = active_channel.clone();
         saved_cfg.configured = has_mesh_credentials;
         saved_cfg.channel_fingerprint = fp;
-        saved_cfg.bootstrap_tickets = opts.bootstrap_tickets.clone();
+        saved_cfg.invites = opts.invites.clone();
         saved_cfg.updated_at_unix = now_unix();
-        // `index` is a read-only dashboard preview: never overwrite the daemon's saved config.
+        // `index` is a read-only hud preview: never overwrite the daemon's saved config.
         if opts.action != "index" {
             let _ = save_mesh_config(&config_path, &saved_cfg);
         }
         runtime_state.mesh_config = saved_cfg.clone();
 
-        for mut saved_proc in saved_cfg.managed_processes.clone() {
-            if let Ok((verified_sha, staged_path)) = dialtone::supervisor::stage_executable_blob(
-                &blob_dir,
-                &saved_proc.name,
-                &saved_proc.sha256,
-            ) {
-                saved_proc.sha256 = verified_sha;
+        for mut saved_proc in saved_cfg.processes.clone() {
+            if let Ok((verified_sha, staged_path)) =
+                dialtone::supervisor::stage_program(&blob_dir, &saved_proc.name, &saved_proc.digest)
+            {
+                saved_proc.digest = verified_sha;
                 saved_proc.path = staged_path.to_string_lossy().to_string();
             }
             if let Some(existing) = runtime_state
-                .managed_processes
+                .processes
                 .iter_mut()
                 .find(|p| p.name == saved_proc.name)
             {
                 *existing = saved_proc;
             } else {
-                runtime_state.managed_processes.push(saved_proc);
+                runtime_state.processes.push(saved_proc);
             }
         }
         if !opts.once {
-            let _ = dialtone::supervisor::ensure_default_subprocess_blob(
+            let _ = dialtone::supervisor::ensure_probe_program(
                 &blob_dir,
-                &mut runtime_state.managed_processes,
+                &mut runtime_state.processes,
                 None,
             );
         }
-        runtime_state.reconcile_live_processes();
+        runtime_state.reconcile_processes();
 
         if !opts.once {
-            let mut boot_hb = build_self_heartbeat(
+            let mut boot_beat = self_beat(
                 &opts.node,
                 "initializing-endpoint",
                 "iroh-gossip-v1:booting".to_string(),
                 0,
                 placeholder_diag,
             );
-            boot_hb.managed_processes = runtime_state.managed_processes.clone();
+            boot_beat.processes = runtime_state.processes.clone();
             if let Some(ref keys) = active_keys {
-                sign_heartbeat_with_keys(&mut boot_hb, keys);
+                sign_beat(&mut boot_beat, keys);
             }
-            runtime_state.nodes = vec![boot_hb];
+            runtime_state.nodes = vec![boot_beat];
         }
 
         let state = Arc::new(Mutex::new(runtime_state));
@@ -944,7 +937,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         );
         println!("  DIALTONE // 3D SCI-FI TACTICAL HUD & CONFIGURATION WEBAPP ONLINE");
         println!("  -> Open Local Web UI : {local_web_url}");
-        println!("  -> Join Channel CLI  : dialtone join <PASSWORD>");
+        println!("  -> Join Channel CLI  : dialtone join <SECRET>");
         println!("  -> Survive Restarts  : dialtone daemon install");
         println!(
             "================================================================================"
@@ -959,14 +952,14 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     // =========================================================================
     std::fs::create_dir_all(&blob_dir)
         .map_err(|e| format!("create blob store {}: {e}", blob_dir.display()))?;
-    let probe_bytes = format!("dialtone-cas-ready-{}", opts.node);
-    let (probe_sha, _) = store_verified_blob(&blob_dir, probe_bytes.as_bytes(), None)?;
+    let probe_bytes = format!("dialtone-store-ready-{}", opts.node);
+    let (probe_sha, _) = put_blob(&blob_dir, probe_bytes.as_bytes(), None)?;
     update_boot_stage(
         &shared_state,
         3,
         "ready",
         format!(
-            "SHA-256 CAS active at {} (self-check {})",
+            "Store active at {} (self-check {})",
             blob_dir.display(),
             &probe_sha[..18]
         ),
@@ -990,7 +983,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         .bind()
         .await
         .map_err(|e| format!("bind iroh endpoint: {e}"))?;
-    let endpoint_id = endpoint.id().to_string();
+    let node_id = endpoint.id().to_string();
 
     if opts.transport.relay_mode != IrohRelayPolicy::Disabled && !opts.once {
         let _ = tokio::time::timeout(Duration::from_secs(4), endpoint.online()).await;
@@ -1007,7 +1000,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         .spawn();
 
     if let Some(st_arc) = &shared_state {
-        let bridge = LiveBlobBridge {
+        let bridge = Store {
             endpoint: endpoint.clone(),
             store: blobs_mem_store.clone(),
             memory_lookup: memory_lookup.clone(),
@@ -1016,33 +1009,28 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         };
         let default_ticket = if !opts.once {
             bridge
-                .share_verified_blob(
-                    &blob_dir,
-                    dialtone::supervisor::default_subprocess_blob_bytes(),
-                    None,
-                )
+                .share_blob(&blob_dir, dialtone::supervisor::probe_program_bytes(), None)
                 .ok()
                 .map(|r| r.ticket_uri)
         } else {
             None
         };
         if let Ok(mut st) = st_arc.lock() {
-            st.blob_bridge = Some(bridge);
+            st.store = Some(bridge);
             if !opts.once {
-                let _ = dialtone::supervisor::ensure_default_subprocess_blob(
+                let _ = dialtone::supervisor::ensure_probe_program(
                     &blob_dir,
-                    &mut st.managed_processes,
+                    &mut st.processes,
                     default_ticket.as_deref(),
                 );
-                st.reconcile_live_processes();
-                let _ = st.run_e2e_capability_tick();
+                st.reconcile_processes();
+                let _ = st.run_probe();
             }
         }
     }
 
     let advertised = advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
-    let diagnostics =
-        build_diagnostics(&opts.transport, &advertised, Some(&key_path), &endpoint_id);
+    let diagnostics = build_diagnostics(&opts.transport, &advertised, Some(&key_path), &node_id);
 
     update_boot_stage(
         &shared_state,
@@ -1050,7 +1038,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         "ready",
         format!(
             "Bound endpoint {}.. on physical IP {}",
-            &endpoint_id[..12],
+            &node_id[..12],
             diagnostics
                 .bound_non_tailnet_ipv4
                 .as_deref()
@@ -1060,7 +1048,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     if verbose_boot {
         println!(
             "[BOOT 4/5] Iroh 1.3 QUIC Endpoint (No-Tailnet NIC) ....... [READY] id={}.. ip={}",
-            &endpoint_id[..16],
+            &node_id[..16],
             diagnostics
                 .bound_non_tailnet_ipv4
                 .as_deref()
@@ -1069,18 +1057,18 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     }
 
     // =========================================================================
-    // [BOOT 5/5] Gossip Mesh & Channel Password (iroh-gossip)
+    // [BOOT 5/5] Gossip Mesh & Channel Secret (iroh-gossip)
     // =========================================================================
     let mut invite_peer_addrs = Vec::new();
     if let Some(ref keys) = active_keys {
         let now = now_unix();
-        let raw_tickets_snapshot = opts.bootstrap_tickets.clone();
+        let raw_tickets_snapshot = opts.invites.clone();
         let mut redeemed_any = false;
         for raw_t in &raw_tickets_snapshot {
             if raw_t.starts_with(INVITE_TICKET_PREFIX) {
-                if let Ok(parsed_inv) = raw_t.parse::<dialtone::mesh::InviteTicket>() {
+                if let Ok(parsed_inv) = raw_t.parse::<dialtone::mesh::Invite>() {
                     if let Ok(issuer_addr) =
-                        redeem_invite_ticket(&parsed_inv, keys, &endpoint_id, now, &mut saved_cfg)
+                        redeem_invite_ticket(&parsed_inv, keys, &node_id, now, &mut saved_cfg)
                     {
                         invite_peer_addrs.push(issuer_addr);
                         redeemed_any = true;
@@ -1097,7 +1085,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         (keys.topic_id, keys.fingerprint())
     } else {
         (
-            derive_standby_topic_id(&endpoint_id),
+            derive_standby_topic_id(&node_id),
             format!("{active_channel}:locked-standby"),
         )
     };
@@ -1106,18 +1094,18 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         std::collections::HashMap::new();
     let mut joined_peer_ids: std::collections::HashSet<iroh::EndpointId> =
         std::collections::HashSet::new();
-    let mut bootstrap_ids = Vec::new();
+    let mut seed_ids = Vec::new();
 
-    // Dial fleet seed peers once valid channel keys are active (either via relay or static direct IP).
+    // Dial mesh seed peers once valid channel keys are active (either via relay or static direct IP).
     if has_mesh_credentials && !opts.once {
-        for seed_addr in default_fleet_seed_peers() {
+        for seed_addr in default_seeds() {
             let clean_seed = advertised_endpoint_addr(&seed_addr, &opts.transport);
             if clean_seed.id != endpoint.id()
                 && (opts.transport.relay_mode != IrohRelayPolicy::Disabled
                     || clean_seed.ip_addrs().next().is_some())
             {
                 if joined_peer_ids.insert(clean_seed.id) {
-                    bootstrap_ids.push(clean_seed.id);
+                    seed_ids.push(clean_seed.id);
                 }
                 known_peer_addrs.insert(clean_seed.id, clean_seed.clone());
                 memory_lookup.add_endpoint_info(clean_seed);
@@ -1130,20 +1118,20 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
             let clean_addr = advertised_endpoint_addr(&peer_addr, &opts.transport);
             if clean_addr.id != endpoint.id() {
                 if joined_peer_ids.insert(clean_addr.id) {
-                    bootstrap_ids.push(clean_addr.id);
+                    seed_ids.push(clean_addr.id);
                 }
                 known_peer_addrs.insert(clean_addr.id, clean_addr.clone());
             }
             memory_lookup.add_endpoint_info(clean_addr);
         }
 
-        for raw_ticket in &opts.bootstrap_tickets {
-            if let Ok(parsed) = GossipTicket::from_str(raw_ticket) {
+        for raw_ticket in &opts.invites {
+            if let Ok(parsed) = SeedList::from_str(raw_ticket) {
                 for peer_addr in parsed.peers {
                     let clean_addr = advertised_endpoint_addr(&peer_addr, &opts.transport);
                     if clean_addr.id != endpoint.id() {
                         if joined_peer_ids.insert(clean_addr.id) {
-                            bootstrap_ids.push(clean_addr.id);
+                            seed_ids.push(clean_addr.id);
                         }
                         known_peer_addrs.insert(clean_addr.id, clean_addr.clone());
                     }
@@ -1153,13 +1141,13 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         }
     }
 
-    let initial_ticket = GossipTicket {
+    let initial_ticket = SeedList {
         topic: topic_id,
         peers: vec![advertised.clone()],
     }
     .to_text()?;
 
-    let mut rolling_window = TelemetryRollingWindow::new(SUMMARY_HEARTBEAT_INTERVAL_SECS);
+    let mut rolling_window = StatsWindow::new(SUMMARY_INTERVAL_SECS);
     let mut last_rx_from_peer: std::collections::HashMap<String, (u64, u64)> =
         std::collections::HashMap::new();
     let mut measured_peer_rtt_ms: std::collections::BTreeMap<String, f64> =
@@ -1167,61 +1155,56 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
     let mut last_echo_reply_mono_ms: std::collections::HashMap<String, u64> =
         std::collections::HashMap::new();
 
-    let mut initial_self_hb = build_self_heartbeat(
-        &opts.node,
-        &endpoint_id,
-        initial_ticket,
-        1,
-        diagnostics.clone(),
-    );
-    initial_self_hb.heartbeat_kind = "summary".to_string();
-    initial_self_hb.rtt_probe_requested = true;
+    let mut initial_self_beat =
+        self_beat(&opts.node, &node_id, initial_ticket, 1, diagnostics.clone());
+    initial_self_beat.kind = "summary".to_string();
+    initial_self_beat.rtt_probe_requested = true;
 
     if let Some(st_arc) = &shared_state {
         if let Ok(mut st) = st_arc.lock() {
-            st.reconcile_live_processes();
-            initial_self_hb.managed_processes = st.managed_processes.clone();
-            initial_self_hb.service_endpoints = st.service_endpoints.clone();
-            initial_self_hb.e2e_test = st.e2e_test.clone();
+            st.reconcile_processes();
+            initial_self_beat.processes = st.processes.clone();
+            initial_self_beat.service_endpoints = st.service_endpoints.clone();
+            initial_self_beat.probe = st.probe.clone();
         }
     }
 
-    let init_restarts: u32 = initial_self_hb
-        .managed_processes
+    let init_restarts: u32 = initial_self_beat
+        .processes
         .iter()
         .map(|p| p.restart_count)
         .sum();
     let now_init = now_unix();
     rolling_window.record_sample(
         now_init,
-        &initial_self_hb.host_resources,
+        &initial_self_beat.stats,
         &measured_peer_rtt_ms,
         init_restarts,
     );
-    initial_self_hb.summary_stats = Some(rolling_window.summarize(now_init));
+    initial_self_beat.summary_stats = Some(rolling_window.summarize(now_init));
 
     if let Some(ref keys) = active_keys {
-        sign_heartbeat_with_keys(&mut initial_self_hb, keys);
+        sign_beat(&mut initial_self_beat, keys);
     }
 
     if let Some(st_arc) = &shared_state {
         if let Ok(mut st) = st_arc.lock() {
             st.iroh_runtime = diagnostics.clone();
-            st.host_resources = initial_self_hb.host_resources.clone();
-            st.nodes = vec![initial_self_hb.clone()];
+            st.stats = initial_self_beat.stats.clone();
+            st.nodes = vec![initial_self_beat.clone()];
             st.refresh_live_alerts();
         }
     }
 
     let topic = gossip
-        .subscribe(topic_id, bootstrap_ids.clone())
+        .subscribe(topic_id, seed_ids.clone())
         .await
         .map_err(|e| format!("subscribe gossip topic: {e}"))?;
     let (mut sender, mut receiver) = topic.split();
-    if !bootstrap_ids.is_empty() {
+    if !seed_ids.is_empty() {
         let _ = tokio::time::timeout(
             Duration::from_millis(800),
-            sender.join_peers(bootstrap_ids.clone()),
+            sender.join_peers(seed_ids.clone()),
         )
         .await;
     }
@@ -1232,18 +1215,18 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
             5,
             "ready",
             format!(
-                "Unlocked '{}' channel ({}) with {} seed/bootstrap peers",
+                "Unlocked '{}' channel ({}) with {} seeds",
                 active_channel,
                 channel_fp,
-                bootstrap_ids.len()
+                seed_ids.len()
             ),
         );
         if verbose_boot {
             println!(
-                "[BOOT 5/5] Gossip Mesh & Channel Password ................ [READY] channel={} fp={} peers={}",
+                "[BOOT 5/5] Gossip Mesh & Channel Secret ................ [READY] channel={} fp={} peers={}",
                 active_channel,
                 channel_fp,
-                bootstrap_ids.len()
+                seed_ids.len()
             );
         }
     } else {
@@ -1252,28 +1235,26 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
             5,
             "setup_needed",
             format!(
-                "Channel '{}' is password-protected — enter password at {} or run 'dialtone join <PASSWORD>'",
+                "Channel '{}' is secret-protected — enter secret at {} or run 'dialtone join <SECRET>'",
                 active_channel, local_web_url
             ),
         );
         if verbose_boot {
+            println!("[BOOT 5/5] Gossip Mesh & Channel Secret ................ [SECRET REQUIRED]");
             println!(
-                "[BOOT 5/5] Gossip Mesh & Channel Password ................ [PASSWORD REQUIRED]"
-            );
-            println!(
-                "           -> Enter the '{}' channel password in the Web UI at {}",
+                "           -> Enter the '{}' channel secret in the Web UI at {}",
                 active_channel, local_web_url
             );
-            println!("           -> Or run in terminal: dialtone join <PASSWORD>");
+            println!("           -> Or run in terminal: dialtone join <SECRET>");
         }
     }
 
     let mut counter = 1u64;
     if opts.once {
-        let json = serde_json::to_string_pretty(&initial_self_hb).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(&initial_self_beat).map_err(|e| e.to_string())?;
         println!("{json}");
         if let Some(ref keys) = active_keys {
-            if let Ok(enc) = encrypt_heartbeat_for_gossip(&initial_self_hb, keys) {
+            if let Ok(enc) = seal_beat(&initial_self_beat, keys) {
                 let _ = sender.broadcast(enc.into()).await;
             }
         }
@@ -1281,11 +1262,11 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
         return Ok(());
     }
 
-    let mut last_broadcast_procs = initial_self_hb.managed_processes.clone();
+    let mut last_broadcast_procs = initial_self_beat.processes.clone();
     let mut auto_pulled_peer_blobs: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
     let mut sample_tick = tokio::time::interval(Duration::from_secs(1));
-    let mut hb_tick = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+    let mut beat_tick = tokio::time::interval(Duration::from_secs(BEAT_INTERVAL_SECS));
     loop {
         tokio::select! {
             Some(cmd) = control_rx.recv() => {
@@ -1293,7 +1274,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                     MeshControlCommand::JoinMesh {
                         channel: new_channel,
                         keys: new_keys,
-                        bootstrap_tickets: new_tickets,
+                        invites: new_tickets,
                         node_name: maybe_node,
                     } => {
                         if let Some(nn) = maybe_node {
@@ -1305,7 +1286,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                         active_keys = Some(new_keys);
 
                         let mut new_boot_ids = Vec::new();
-                        for seed_addr in default_fleet_seed_peers() {
+                        for seed_addr in default_seeds() {
                             let clean = advertised_endpoint_addr(&seed_addr, &opts.transport);
                             if clean.id != endpoint.id() {
                                 known_peer_addrs.insert(clean.id, clean.clone());
@@ -1315,7 +1296,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                             }
                         }
                         for raw_t in &new_tickets {
-                            if let Ok(parsed) = GossipTicket::from_str(raw_t) {
+                            if let Ok(parsed) = SeedList::from_str(raw_t) {
                                 for p_addr in parsed.peers {
                                     let clean = advertised_endpoint_addr(&p_addr, &opts.transport);
                                     if clean.id != endpoint.id() {
@@ -1334,7 +1315,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                             let (new_s, new_r) = new_topic.split();
                             sender = new_s;
                             receiver = new_r;
-                            bootstrap_ids = new_boot_ids.clone();
+                            seed_ids = new_boot_ids.clone();
                             if !new_boot_ids.is_empty() {
                                 let _ = tokio::time::timeout(
                                     Duration::from_millis(800),
@@ -1354,21 +1335,21 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
             }
             _ = sample_tick.tick() => {
                 let bound_ip = diagnostics.bound_non_tailnet_ipv4.as_deref();
-                let res = sample_live_host_resources(&opts.node, bound_ip, counter);
+                let res = sample_stats(&opts.node, bound_ip, counter);
                 let mut total_restarts = 0u32;
                 let mut procs_changed = None;
                 if let Some(st_arc) = &shared_state {
                     if let Ok(mut st) = st_arc.lock() {
-                        st.reconcile_live_processes();
+                        st.reconcile_processes();
                         total_restarts = st
-                            .managed_processes
+                            .processes
                             .iter()
                             .map(|p| p.restart_count)
                             .sum();
-                        if st.managed_processes != last_broadcast_procs {
-                            last_broadcast_procs = st.managed_processes.clone();
+                        if st.processes != last_broadcast_procs {
+                            last_broadcast_procs = st.processes.clone();
                             procs_changed = Some((
-                                st.managed_processes.clone(),
+                                st.processes.clone(),
                                 st.service_endpoints.clone(),
                             ));
                         }
@@ -1385,57 +1366,57 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
 
                 if let Some(st_arc) = &shared_state {
                     if let Ok(mut st) = st_arc.lock() {
-                        st.host_resources = res.clone();
+                        st.stats = res.clone();
                         let self_name = st.node.clone();
                         if let Some(self_entry) = st.nodes.iter_mut().find(|n| n.node == self_name) {
-                            self_entry.host_resources = res.clone();
+                            self_entry.stats = res.clone();
                             self_entry.peer_rtt_ms = measured_peer_rtt_ms.clone();
                             self_entry.summary_stats = Some(local_summary.clone());
                             if let Some(local_geo) = cached_local_public_ip_geo() {
                                 self_entry.geo_location = Some(local_geo);
                             }
                             if let Some((ref mp, ref se)) = procs_changed {
-                                self_entry.managed_processes = mp.clone();
+                                self_entry.processes = mp.clone();
                                 self_entry.service_endpoints = se.clone();
                             }
                         }
                         let rtt = build_mesh_rtt_matrix(&st.nodes);
-                        resolve_fleet_node_locations(&mut st.nodes, &rtt);
+                        place_nodes(&mut st.nodes, &rtt);
                         st.mesh_rtt_ms = rtt;
                         st.refresh_live_alerts();
                     }
                 }
 
                 // If supervised processes changed state (spawned, stopped, or crashed/respawned),
-                // broadcast an immediate heartbeat so peers observe the transition within ~1s.
+                // broadcast an immediate beat so peers observe the transition within ~1s.
                 if let (Some((mp, se)), Some(ref keys)) = (procs_changed, &active_keys) {
                     let adv = advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
-                    let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &endpoint_id);
+                    let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &node_id);
                     let mut ticket_peers = vec![adv];
                     ticket_peers.extend(known_peer_addrs.values().cloned());
-                    if let Ok(current_ticket) = (GossipTicket {
+                    if let Ok(current_ticket) = (SeedList {
                         topic: topic_id,
                         peers: ticket_peers,
                     })
                     .to_text()
                     {
-                        let mut proc_hb = build_self_heartbeat(
+                        let mut proc_beat = self_beat(
                             &opts.node,
-                            &endpoint_id,
+                            &node_id,
                             current_ticket,
                             counter,
                             diag,
                         );
-                        proc_hb.host_resources = res;
-                        proc_hb.managed_processes = mp;
-                        proc_hb.service_endpoints = se;
-                        proc_hb.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                        proc_hb.summary_stats = Some(local_summary);
+                        proc_beat.stats = res;
+                        proc_beat.processes = mp;
+                        proc_beat.service_endpoints = se;
+                        proc_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
+                        proc_beat.summary_stats = Some(local_summary);
                         let now_mono = monotonic_now_ms();
-                        proc_hb.sent_mono_ms = now_mono;
-                        proc_hb.peer_echoes = build_peer_echoes(&last_rx_from_peer, now_mono);
-                        sign_heartbeat_with_keys(&mut proc_hb, keys);
-                        if let Ok(wire_bytes) = encrypt_heartbeat_for_gossip(&proc_hb, keys) {
+                        proc_beat.sent_mono_ms = now_mono;
+                        proc_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
+                        sign_beat(&mut proc_beat, keys);
+                        if let Ok(wire_bytes) = seal_beat(&proc_beat, keys) {
                             let _ = tokio::time::timeout(
                                 Duration::from_millis(500),
                                 sender.broadcast(wire_bytes.into()),
@@ -1445,9 +1426,9 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                     }
                 }
             }
-            _ = hb_tick.tick() => {
-                if active_keys.is_some() && !bootstrap_ids.is_empty() {
-                    for seed_addr in default_fleet_seed_peers() {
+            _ = beat_tick.tick() => {
+                if active_keys.is_some() && !seed_ids.is_empty() {
+                    for seed_addr in default_seeds() {
                         if seed_addr.id != endpoint.id() {
                             memory_lookup.add_endpoint_info(seed_addr);
                         }
@@ -1457,7 +1438,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                     }
                     let _ = tokio::time::timeout(
                         Duration::from_millis(600),
-                        sender.join_peers(bootstrap_ids.clone()),
+                        sender.join_peers(seed_ids.clone()),
                     )
                     .await;
                 }
@@ -1468,7 +1449,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                         .nodes
                         .iter()
                         .filter(|n| n.node != opts.node)
-                        .map(|n| n.endpoint_id.clone())
+                        .map(|n| n.node_id.clone())
                         .collect();
                     for pid in peer_ids {
                         if let Ok((obs, tailnet)) = tokio::time::timeout(
@@ -1479,7 +1460,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                         {
                             if !obs.is_empty() {
                                 let mut st = st_arc.lock().unwrap();
-                                if let Some(peer_entry) = st.nodes.iter_mut().find(|n| n.endpoint_id == pid) {
+                                if let Some(peer_entry) = st.nodes.iter_mut().find(|n| n.node_id == pid) {
                                     peer_entry.observed_remote_addrs = obs;
                                     peer_entry.tailnet_used = tailnet;
                                 }
@@ -1489,64 +1470,64 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                 }
 
                 let adv = advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
-                let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &endpoint_id);
+                let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &node_id);
                 let mut ticket_peers = vec![adv];
                 ticket_peers.extend(known_peer_addrs.values().cloned());
-                let current_ticket = GossipTicket {
+                let current_ticket = SeedList {
                     topic: topic_id,
                     peers: ticket_peers,
                 }
                 .to_text()?;
-                let mut self_hb = build_self_heartbeat(&opts.node, &endpoint_id, current_ticket, counter, diag.clone());
-                self_hb.peer_rtt_ms = measured_peer_rtt_ms.clone();
+                let mut self_beat = self_beat(&opts.node, &node_id, current_ticket, counter, diag.clone());
+                self_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
 
-                let is_summary = counter <= 2 || counter.is_multiple_of(SUMMARY_HEARTBEAT_EVERY_N_TICKS);
+                let is_summary = counter <= 2 || counter.is_multiple_of(SUMMARY_EVERY_N_BEATS);
                 let local_summary = rolling_window.summarize(now_unix());
                 if is_summary {
-                    self_hb.heartbeat_kind = "summary".to_string();
-                    self_hb.summary_stats = Some(local_summary.clone());
+                    self_beat.kind = "summary".to_string();
+                    self_beat.summary_stats = Some(local_summary.clone());
                 } else {
-                    self_hb.heartbeat_kind = "regular".to_string();
-                    self_hb.summary_stats = None;
+                    self_beat.kind = "regular".to_string();
+                    self_beat.summary_stats = None;
                 }
 
                 let mut missing_peer_rtt = false;
                 if let Some(st_arc) = &shared_state {
                     let mut st = st_arc.lock().unwrap();
-                    st.reconcile_live_processes();
-                    last_broadcast_procs = st.managed_processes.clone();
-                    self_hb.managed_processes = st.managed_processes.clone();
-                    self_hb.service_endpoints = st.service_endpoints.clone();
-                    self_hb.e2e_test = st.e2e_test.clone();
+                    st.reconcile_processes();
+                    last_broadcast_procs = st.processes.clone();
+                    self_beat.processes = st.processes.clone();
+                    self_beat.service_endpoints = st.service_endpoints.clone();
+                    self_beat.probe = st.probe.clone();
                     for n in &st.nodes {
                         if n.node != opts.node && !measured_peer_rtt_ms.contains_key(&n.node) {
                             missing_peer_rtt = true;
                         }
                     }
-                    self_hb.rtt_probe_requested =
+                    self_beat.rtt_probe_requested =
                         missing_peer_rtt || counter <= 2 || counter.is_multiple_of(3);
                     let now_mono = monotonic_now_ms();
-                    self_hb.sent_mono_ms = now_mono;
-                    self_hb.peer_echoes = build_peer_echoes(&last_rx_from_peer, now_mono);
+                    self_beat.sent_mono_ms = now_mono;
+                    self_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
                     if let Some(ref keys) = active_keys {
-                        sign_heartbeat_with_keys(&mut self_hb, keys);
+                        sign_beat(&mut self_beat, keys);
                     }
                     st.iroh_runtime = diag;
-                    st.host_resources = self_hb.host_resources.clone();
-                    let mut local_copy = self_hb.clone();
+                    st.stats = self_beat.stats.clone();
+                    let mut local_copy = self_beat.clone();
                     local_copy.summary_stats = Some(local_summary.clone());
-                    upsert_heartbeat(&mut st.nodes, local_copy);
+                    merge_beat(&mut st.nodes, local_copy);
                     let rtt = build_mesh_rtt_matrix(&st.nodes);
-                    resolve_fleet_node_locations(&mut st.nodes, &rtt);
+                    place_nodes(&mut st.nodes, &rtt);
                     st.mesh_rtt_ms = rtt;
                     st.refresh_live_alerts();
                     if is_summary {
                         st.record_log(
-                            "gossip-heartbeat",
+                            "gossip-beat",
                             "INFO",
                             "stdout",
                             format!(
-                                "published 30s summary heartbeat #{} (cpu {:.1}% ±{:.1}%, mem {:.1}% ±{:.1}%, thrashing={}, rtt_peers={})",
+                                "published 30s summary beat #{} (cpu {:.1}% ±{:.1}%, mem {:.1}% ±{:.1}%, thrashing={}, rtt_peers={})",
                                 counter,
                                 local_summary.cpu_pct.mean,
                                 local_summary.cpu_pct.stddev,
@@ -1558,19 +1539,19 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                         );
                     }
                 } else {
-                    self_hb.rtt_probe_requested = counter <= 2 || counter.is_multiple_of(3);
+                    self_beat.rtt_probe_requested = counter <= 2 || counter.is_multiple_of(3);
                     let now_mono = monotonic_now_ms();
-                    self_hb.sent_mono_ms = now_mono;
-                    self_hb.peer_echoes = build_peer_echoes(&last_rx_from_peer, now_mono);
+                    self_beat.sent_mono_ms = now_mono;
+                    self_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
                     if let Some(ref keys) = active_keys {
-                        sign_heartbeat_with_keys(&mut self_hb, keys);
+                        sign_beat(&mut self_beat, keys);
                     }
                 }
                 if counter == 1 && !serve_http {
-                    println!("{}", serde_json::to_string_pretty(&self_hb).unwrap());
+                    println!("{}", serde_json::to_string_pretty(&self_beat).unwrap());
                 }
                 if let Some(ref keys) = active_keys {
-                    if let Ok(wire_bytes) = encrypt_heartbeat_for_gossip(&self_hb, keys) {
+                    if let Ok(wire_bytes) = seal_beat(&self_beat, keys) {
                         let _ = tokio::time::timeout(
                             Duration::from_millis(600),
                             sender.broadcast(wire_bytes.into()),
@@ -1591,20 +1572,20 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                                 st_arc
                                     .lock()
                                     .ok()
-                                    .map(|st| st.mesh_config.allowed_endpoint_ids.clone())
-                                    .unwrap_or_else(|| saved_cfg.allowed_endpoint_ids.clone())
+                                    .map(|st| st.mesh_config.allowlist.clone())
+                                    .unwrap_or_else(|| saved_cfg.allowlist.clone())
                             } else {
-                                saved_cfg.allowed_endpoint_ids.clone()
+                                saved_cfg.allowlist.clone()
                             };
                             if !is_allowed_peer_in_list(
                                 &allowed_ids,
                                 &peer_id.to_string(),
-                                Some(&endpoint_id),
+                                Some(&node_id),
                             ) {
-                                if !bootstrap_ids.is_empty() {
+                                if !seed_ids.is_empty() {
                                     let _ = tokio::time::timeout(
                                         Duration::from_millis(400),
-                                        sender.join_peers(bootstrap_ids.clone()),
+                                        sender.join_peers(seed_ids.clone()),
                                     )
                                     .await;
                                 }
@@ -1612,32 +1593,32 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                             }
                         }
                         let adv = advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
-                        let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &endpoint_id);
+                        let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &node_id);
                         let mut ticket_peers = vec![adv];
                         ticket_peers.extend(known_peer_addrs.values().cloned());
-                        let current_ticket = GossipTicket {
+                        let current_ticket = SeedList {
                             topic: topic_id,
                             peers: ticket_peers,
                         }
                         .to_text()?;
-                        let mut self_hb = build_self_heartbeat(&opts.node, &endpoint_id, current_ticket, counter, diag);
+                        let mut self_beat = self_beat(&opts.node, &node_id, current_ticket, counter, diag);
                         let now_mono = monotonic_now_ms();
-                        self_hb.heartbeat_kind = "summary".to_string();
-                        self_hb.sent_mono_ms = now_mono;
-                        self_hb.rtt_probe_requested = true;
-                        self_hb.peer_echoes = build_peer_echoes(&last_rx_from_peer, now_mono);
-                        self_hb.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                        self_hb.summary_stats = Some(rolling_window.summarize(now_unix()));
+                        self_beat.kind = "summary".to_string();
+                        self_beat.sent_mono_ms = now_mono;
+                        self_beat.rtt_probe_requested = true;
+                        self_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
+                        self_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
+                        self_beat.summary_stats = Some(rolling_window.summarize(now_unix()));
                         if let Some(st_arc) = &shared_state {
                             if let Ok(mut st) = st_arc.lock() {
-                                st.reconcile_live_processes();
-                                self_hb.managed_processes = st.managed_processes.clone();
-                                self_hb.service_endpoints = st.service_endpoints.clone();
-                                self_hb.e2e_test = st.e2e_test.clone();
+                                st.reconcile_processes();
+                                self_beat.processes = st.processes.clone();
+                                self_beat.service_endpoints = st.service_endpoints.clone();
+                                self_beat.probe = st.probe.clone();
                             }
                         }
-                        sign_heartbeat_with_keys(&mut self_hb, keys);
-                        if let Ok(wire_bytes) = encrypt_heartbeat_for_gossip(&self_hb, keys) {
+                        sign_beat(&mut self_beat, keys);
+                        if let Ok(wire_bytes) = seal_beat(&self_beat, keys) {
                             let _ = tokio::time::timeout(
                                 Duration::from_millis(600),
                                 sender.broadcast(wire_bytes.into()),
@@ -1646,10 +1627,10 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                         }
                     }
                     Some(Ok(GossipEvent::NeighborDown(_peer_id))) => {
-                        if active_keys.is_some() && !bootstrap_ids.is_empty() {
+                        if active_keys.is_some() && !seed_ids.is_empty() {
                             let _ = tokio::time::timeout(
                                 Duration::from_millis(400),
-                                sender.join_peers(bootstrap_ids.clone()),
+                                sender.join_peers(seed_ids.clone()),
                             )
                             .await;
                         }
@@ -1658,8 +1639,8 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                         let Some(ref keys) = active_keys else {
                             continue;
                         };
-                        let mut rx_hb = match decrypt_heartbeat_from_gossip(&msg.content, keys) {
-                            Ok(hb) => hb,
+                        let mut rx_beat = match open_beat(&msg.content, keys) {
+                            Ok(beat) => beat,
                             Err(reason) => {
                                 eprintln!(
                                     "[gossip-auth-reject] dropped gossip payload on channel '{}': {}",
@@ -1668,74 +1649,74 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                                 continue;
                             }
                         };
-                        if rx_hb.node != opts.node {
+                        if rx_beat.node != opts.node {
                             if active_channel == DEFAULT_CHANNEL_NAME {
                                 let allowed_ids = if let Some(st_arc) = &shared_state {
                                     st_arc
                                         .lock()
                                         .ok()
-                                        .map(|st| st.mesh_config.allowed_endpoint_ids.clone())
-                                        .unwrap_or_else(|| saved_cfg.allowed_endpoint_ids.clone())
+                                        .map(|st| st.mesh_config.allowlist.clone())
+                                        .unwrap_or_else(|| saved_cfg.allowlist.clone())
                                 } else {
-                                    saved_cfg.allowed_endpoint_ids.clone()
+                                    saved_cfg.allowlist.clone()
                                 };
                                 if !is_allowed_peer_in_list(
                                     &allowed_ids,
-                                    &rx_hb.endpoint_id,
-                                    Some(&endpoint_id),
+                                    &rx_beat.node_id,
+                                    Some(&node_id),
                                 ) {
                                     eprintln!(
-                                        "[gossip-allowlist-reject] dropped unlisted peer node={} endpoint_id={} on main 'dialtone' channel (run 'dialtone peers allow {}' to authorize)",
-                                        rx_hb.node, rx_hb.endpoint_id, rx_hb.endpoint_id
+                                        "[gossip-allowlist-reject] dropped unlisted peer node={} node_id={} on main 'dialtone' channel (run 'dialtone peers allow {}' to authorize)",
+                                        rx_beat.node, rx_beat.node_id, rx_beat.node_id
                                     );
                                     continue;
                                 }
                             }
 
                             let rx_mono = monotonic_now_ms();
-                            if rx_hb.sent_mono_ms > 0 {
+                            if rx_beat.sent_mono_ms > 0 {
                                 last_rx_from_peer
-                                    .insert(rx_hb.node.clone(), (rx_hb.sent_mono_ms, rx_mono));
+                                    .insert(rx_beat.node.clone(), (rx_beat.sent_mono_ms, rx_mono));
                             }
-                            if let Some(echo) = rx_hb.peer_echoes.get(&opts.node) {
+                            if let Some(echo) = rx_beat.peer_echoes.get(&opts.node) {
                                 if echo.hold_time_ms <= 600
-                                    || !measured_peer_rtt_ms.contains_key(&rx_hb.node)
+                                    || !measured_peer_rtt_ms.contains_key(&rx_beat.node)
                                 {
                                     if let Some(rtt_ms) = compute_rtt_ms_from_echo(rx_mono, echo) {
                                         let updated_rtt = if let Some(&prev) =
-                                            measured_peer_rtt_ms.get(&rx_hb.node)
+                                            measured_peer_rtt_ms.get(&rx_beat.node)
                                         {
                                             (((prev * 0.6) + (rtt_ms * 0.4)) * 10.0).round() / 10.0
                                         } else {
                                             rtt_ms
                                         };
-                                        measured_peer_rtt_ms.insert(rx_hb.node.clone(), updated_rtt);
+                                        measured_peer_rtt_ms.insert(rx_beat.node.clone(), updated_rtt);
                                     }
                                 }
                             }
-                            if let Some(&peer_reported) = rx_hb.peer_rtt_ms.get(&opts.node) {
+                            if let Some(&peer_reported) = rx_beat.peer_rtt_ms.get(&opts.node) {
                                 if peer_reported > 0.0 {
                                     measured_peer_rtt_ms
-                                        .entry(rx_hb.node.clone())
+                                        .entry(rx_beat.node.clone())
                                         .or_insert(peer_reported);
                                 }
                             }
-                            if let Some(&our_rtt) = measured_peer_rtt_ms.get(&rx_hb.node) {
-                                rx_hb.peer_rtt_ms.insert(opts.node.clone(), our_rtt);
+                            if let Some(&our_rtt) = measured_peer_rtt_ms.get(&rx_beat.node) {
+                                rx_beat.peer_rtt_ms.insert(opts.node.clone(), our_rtt);
                             }
 
                             let mut discovered_addrs = Vec::new();
-                            if let Ok(peer_ticket) = GossipTicket::from_str(&rx_hb.ticket) {
+                            if let Ok(peer_ticket) = SeedList::from_str(&rx_beat.ticket) {
                                 discovered_addrs.extend(peer_ticket.peers);
                             }
-                            if let Ok(pid) = rx_hb.endpoint_id.parse::<iroh::EndpointId>() {
+                            if let Ok(pid) = rx_beat.node_id.parse::<iroh::EndpointId>() {
                                 let mut direct_addr = iroh::EndpointAddr::new(pid);
-                                for r in &rx_hb.iroh_transport.advertised_relay_urls {
+                                for r in &rx_beat.iroh_transport.advertised_relay_urls {
                                     if let Ok(rurl) = r.parse::<iroh::RelayUrl>() {
                                         direct_addr = direct_addr.with_relay_url(rurl);
                                     }
                                 }
-                                for ip_s in &rx_hb.iroh_transport.advertised_ip_addrs {
+                                for ip_s in &rx_beat.iroh_transport.advertised_ip_addrs {
                                     if let Ok(sock) = ip_s.parse::<std::net::SocketAddr>() {
                                         direct_addr = direct_addr.with_ip_addr(sock);
                                     }
@@ -1755,8 +1736,8 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                             }
                             if !new_peers.is_empty() {
                                 for np in &new_peers {
-                                    if !bootstrap_ids.contains(np) {
-                                        bootstrap_ids.push(*np);
+                                    if !seed_ids.contains(np) {
+                                        seed_ids.push(*np);
                                     }
                                 }
                                 let _ = tokio::time::timeout(
@@ -1767,39 +1748,39 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                             }
                             let (obs, tailnet) = tokio::time::timeout(
                                 Duration::from_millis(400),
-                                observe_peer_remote_addrs(&endpoint, &rx_hb.endpoint_id),
+                                observe_peer_remote_addrs(&endpoint, &rx_beat.node_id),
                             )
                             .await
                             .unwrap_or_else(|_| (vec!["iroh-quic:active".to_string()], false));
-                            rx_hb.observed_remote_addrs = obs;
-                            rx_hb.tailnet_used = tailnet;
+                            rx_beat.observed_remote_addrs = obs;
+                            rx_beat.tailnet_used = tailnet;
 
                             let rtt_log = measured_peer_rtt_ms
-                                .get(&rx_hb.node)
+                                .get(&rx_beat.node)
                                 .map(|v| format!("{v:.1}ms"))
                                 .unwrap_or_else(|| "probing".to_string());
                             println!(
                                 "[gossip-rx] node={} kind={} counter={} rtt={} addrs={:?} tailnet_used={}",
-                                rx_hb.node,
-                                rx_hb.heartbeat_kind,
-                                rx_hb.counter,
+                                rx_beat.node,
+                                rx_beat.kind,
+                                rx_beat.counter,
                                 rtt_log,
-                                rx_hb.observed_remote_addrs,
-                                rx_hb.tailnet_used
+                                rx_beat.observed_remote_addrs,
+                                rx_beat.tailnet_used
                             );
 
-                            let peer_node_name = rx_hb.node.clone();
-                            let need_echo_reply = rx_hb.rtt_probe_requested
+                            let peer_node_name = rx_beat.node.clone();
+                            let need_echo_reply = rx_beat.rtt_probe_requested
                                 || !measured_peer_rtt_ms.contains_key(&peer_node_name);
                             // Stamp with receiver's local clock after MAC verification so NTP skew
                             // between hosts cannot cause premature TTL pruning.
-                            rx_hb.updated_at_unix = now_unix();
+                            rx_beat.updated_at_unix = now_unix();
 
                             if let Some(st_arc) = &shared_state {
                                 let mut pending_blob_pulls = Vec::new();
                                 {
                                     let mut st = st_arc.lock().unwrap();
-                                    for peer_proc in &rx_hb.managed_processes {
+                                    for peer_proc in &rx_beat.processes {
                                         if peer_proc.desired_state == "running"
                                             && peer_proc
                                                 .env
@@ -1810,27 +1791,27 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                                                 kv.strip_prefix("DIALTONE_BLOB_TICKET=")
                                             }) {
                                                 let already_running = st
-                                                    .managed_processes
+                                                    .processes
                                                     .iter()
                                                     .any(|p| {
                                                         p.name == peer_proc.name
-                                                            && p.sha256 == peer_proc.sha256
+                                                            && p.digest == peer_proc.digest
                                                             && p.status.as_deref() == Some("running")
                                                     });
                                                 let pull_key = (
-                                                    rx_hb.endpoint_id.clone(),
-                                                    peer_proc.sha256.clone(),
+                                                    rx_beat.node_id.clone(),
+                                                    peer_proc.digest.clone(),
                                                 );
                                                 if !already_running
                                                     || auto_pulled_peer_blobs.insert(pull_key)
                                                 {
-                                                    if let Some(ref bridge) = st.blob_bridge {
+                                                    if let Some(ref bridge) = st.store {
                                                         pending_blob_pulls.push((
                                                             bridge.clone(),
-                                                            st.blob_cache_dir.clone(),
+                                                            st.store_dir.clone(),
                                                             peer_proc.clone(),
                                                             t_uri.to_string(),
-                                                            rx_hb.node.clone(),
+                                                            rx_beat.node.clone(),
                                                         ));
                                                     }
                                                 }
@@ -1840,7 +1821,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
 
                                     let is_first_seen =
                                         !st.nodes.iter().any(|n| n.node == peer_node_name);
-                                    upsert_heartbeat(&mut st.nodes, rx_hb);
+                                    merge_beat(&mut st.nodes, rx_beat);
                                     let self_name = st.node.clone();
                                     if let Some(self_entry) =
                                         st.nodes.iter_mut().find(|n| n.node == self_name)
@@ -1851,7 +1832,7 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                                         }
                                     }
                                     let rtt = build_mesh_rtt_matrix(&st.nodes);
-                                    resolve_fleet_node_locations(&mut st.nodes, &rtt);
+                                    place_nodes(&mut st.nodes, &rtt);
                                     st.mesh_rtt_ms = rtt;
                                     st.refresh_live_alerts();
                                     if is_first_seen {
@@ -1865,28 +1846,28 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                                             "INFO",
                                             "stdout",
                                             format!(
-                                                "peer '{}' joined active gossip swarm (rtt={})",
+                                                "peer '{}' joined active gossip mesh (rtt={})",
                                                 peer_node_name, rtt_log
                                             ),
                                         );
                                     }
                                 }
 
-                                for (bridge, cache_dir, peer_proc, t_uri, provider_node) in
+                                for (bridge, store_dir, peer_proc, t_uri, provider_node) in
                                     pending_blob_pulls
                                 {
                                     let st_clone = Arc::clone(st_arc);
                                     std::thread::spawn(move || {
-                                        if let Ok(rep) = bridge.pull_verified_blob_ticket(
-                                            &cache_dir,
+                                        if let Ok(rep) = bridge.pull_blob(
+                                            &store_dir,
                                             &t_uri,
                                             false,
                                         ) {
                                             if let Ok((verified_sha, staged_path)) =
-                                                dialtone::supervisor::stage_executable_blob(
-                                                    &cache_dir,
+                                                dialtone::supervisor::stage_program(
+                                                    &store_dir,
                                                     &peer_proc.name,
-                                                    &rep.sha256,
+                                                    &rep.digest,
                                                 )
                                             {
                                                 if let Ok(mut st) = st_clone.lock() {
@@ -1898,38 +1879,38 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                                                         st.blob_fetches.push(rep);
                                                     }
                                                     let needs_update = !st
-                                                        .managed_processes
+                                                        .processes
                                                         .iter()
                                                         .any(|p| {
                                                             p.name == peer_proc.name
-                                                                && p.sha256 == verified_sha
+                                                                && p.digest == verified_sha
                                                                 && p.status.as_deref()
                                                                     == Some("running")
                                                         });
                                                     if needs_update {
                                                         let mut new_spec = peer_proc.clone();
-                                                        new_spec.sha256 = verified_sha;
+                                                        new_spec.digest = verified_sha;
                                                         new_spec.path = staged_path
                                                             .to_string_lossy()
                                                             .to_string();
                                                         new_spec.pid = None;
                                                         new_spec.status = None;
                                                         if let Some(ex) = st
-                                                            .managed_processes
+                                                            .processes
                                                             .iter_mut()
                                                             .find(|p| p.name == new_spec.name)
                                                         {
                                                             *ex = new_spec;
                                                         } else {
-                                                            st.managed_processes.push(new_spec);
+                                                            st.processes.push(new_spec);
                                                         }
-                                                        st.reconcile_live_processes();
+                                                        st.reconcile_processes();
                                                         st.record_log(
                                                             "blob-supervisor",
                                                             "INFO",
                                                             "stdout",
                                                             format!(
-                                                                "auto-deployed & executed subprocess blob '{}' from peer '{}'",
+                                                                "auto-deployed & executed process blob '{}' from peer '{}'",
                                                                 peer_proc.name, provider_node
                                                             ),
                                                         );
@@ -1953,44 +1934,44 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                                     &opts.transport,
                                     &adv,
                                     Some(&key_path),
-                                    &endpoint_id,
+                                    &node_id,
                                 );
                                 let mut ticket_peers = vec![adv];
                                 ticket_peers.extend(known_peer_addrs.values().cloned());
-                                if let Ok(current_ticket) = (GossipTicket {
+                                if let Ok(current_ticket) = (SeedList {
                                     topic: topic_id,
                                     peers: ticket_peers,
                                 })
                                 .to_text()
                                 {
-                                    let mut echo_hb = build_self_heartbeat(
+                                    let mut echo_beat = self_beat(
                                         &opts.node,
-                                        &endpoint_id,
+                                        &node_id,
                                         current_ticket,
                                         counter,
                                         diag,
                                     );
                                     let reply_mono = monotonic_now_ms();
-                                    echo_hb.heartbeat_kind = "rtt_echo".to_string();
-                                    echo_hb.sent_mono_ms = reply_mono;
-                                    echo_hb.rtt_probe_requested =
+                                    echo_beat.kind = "rtt_echo".to_string();
+                                    echo_beat.sent_mono_ms = reply_mono;
+                                    echo_beat.rtt_probe_requested =
                                         !measured_peer_rtt_ms.contains_key(&peer_node_name);
-                                    echo_hb.peer_echoes =
-                                        build_peer_echoes(&last_rx_from_peer, reply_mono);
-                                    echo_hb.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                                    echo_hb.summary_stats =
+                                    echo_beat.peer_echoes =
+                                        echoes_for_peers(&last_rx_from_peer, reply_mono);
+                                    echo_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
+                                    echo_beat.summary_stats =
                                         Some(rolling_window.summarize(now_unix()));
                                     if let Some(st_arc) = &shared_state {
                                         if let Ok(st) = st_arc.lock() {
-                                            echo_hb.managed_processes =
-                                                st.managed_processes.clone();
-                                            echo_hb.service_endpoints =
+                                            echo_beat.processes =
+                                                st.processes.clone();
+                                            echo_beat.service_endpoints =
                                                 st.service_endpoints.clone();
                                         }
                                     }
-                                    sign_heartbeat_with_keys(&mut echo_hb, keys);
+                                    sign_beat(&mut echo_beat, keys);
                                     if let Ok(wire_bytes) =
-                                        encrypt_heartbeat_for_gossip(&echo_hb, keys)
+                                        seal_beat(&echo_beat, keys)
                                     {
                                         let _ = tokio::time::timeout(
                                             Duration::from_millis(400),
@@ -2005,14 +1986,14 @@ async fn run_node_or_hub(mut opts: CliOptions, serve_http: bool) -> Result<(), S
                     Some(Ok(_)) => {}
                     Some(Err(err)) => {
                         eprintln!("[gossip-err] {err}");
-                        if let Ok(new_topic) = gossip.subscribe(topic_id, bootstrap_ids.clone()).await {
+                        if let Ok(new_topic) = gossip.subscribe(topic_id, seed_ids.clone()).await {
                             let (new_s, new_r) = new_topic.split();
                             sender = new_s;
                             receiver = new_r;
                         }
                     }
                     None => {
-                        if let Ok(new_topic) = gossip.subscribe(topic_id, bootstrap_ids.clone()).await {
+                        if let Ok(new_topic) = gossip.subscribe(topic_id, seed_ids.clone()).await {
                             let (new_s, new_r) = new_topic.split();
                             sender = new_s;
                             receiver = new_r;
@@ -2042,7 +2023,7 @@ async fn main() {
             Ok(())
         }
         "gen-password" => {
-            let pw = generate_channel_password();
+            let pw = new_secret();
             println!("{pw}");
             Ok(())
         }
@@ -2057,8 +2038,8 @@ async fn main() {
                             "schema": "dialtone.peers_allowlist.v1",
                             "config_path": cfg_path,
                             "default_policy": "deny_unless_listed",
-                            "allowed_endpoint_ids": cfg.allowed_endpoint_ids,
-                            "seed_peers": cfg.seed_peers
+                            "allowlist": cfg.allowlist,
+                            "seeds": cfg.seeds
                         }))
                         .unwrap()
                     );
@@ -2068,7 +2049,7 @@ async fn main() {
                     let target = opts
                         .peer_target
                         .as_deref()
-                        .ok_or_else(|| "usage: dialtone peers allow <endpoint_id> [--addr <ip:port>]".to_string())?;
+                        .ok_or_else(|| "usage: dialtone peers allow <node_id> [--addr <ip:port>]".to_string())?;
                     let relay_override = opts.transport.relay_urls.first().map(String::as_str);
                     let updated = allow_peer_in_config_with_addrs(
                         &cfg_path,
@@ -2080,9 +2061,9 @@ async fn main() {
                         "{}",
                         serde_json::to_string_pretty(&json!({
                             "status": "allowed",
-                            "endpoint_id": target.trim().to_ascii_lowercase(),
-                            "allowed_endpoint_ids": updated.allowed_endpoint_ids,
-                            "seed_peers": updated.seed_peers,
+                            "node_id": target.trim().to_ascii_lowercase(),
+                            "allowlist": updated.allowlist,
+                            "seeds": updated.seeds,
                             "config_path": cfg_path
                         }))
                         .unwrap()
@@ -2093,14 +2074,14 @@ async fn main() {
                     let target = opts
                         .peer_target
                         .as_deref()
-                        .ok_or_else(|| "usage: dialtone peers revoke <endpoint_id>".to_string())?;
+                        .ok_or_else(|| "usage: dialtone peers revoke <node_id>".to_string())?;
                     let updated = revoke_peer_in_config(&cfg_path, target)?;
                     println!(
                         "{}",
                         serde_json::to_string_pretty(&json!({
                             "status": "revoked",
-                            "endpoint_id": target.trim().to_ascii_lowercase(),
-                            "allowed_endpoint_ids": updated.allowed_endpoint_ids,
+                            "node_id": target.trim().to_ascii_lowercase(),
+                            "allowlist": updated.allowlist,
                             "config_path": cfg_path
                         }))
                         .unwrap()
@@ -2108,7 +2089,7 @@ async fn main() {
                     Ok(())
                 }
                 other => Err(format!(
-                    "unknown peers subcommand {other:?}; use: dialtone peers [allow|revoke|list] [<endpoint_id>]"
+                    "unknown peers subcommand {other:?}; use: dialtone peers [allow|revoke|list] [<node_id>]"
                 )),
             }
         })(),
@@ -2246,11 +2227,8 @@ async fn main() {
                     "security check failed: expected derived_keys.kdf_version == 'argon2id-v2', got {kdf_ver:?}"
                 ));
             }
-            if cfg_disk.allowed_endpoint_ids.is_empty() {
-                return Err(
-                    "security check failed: allowed_endpoint_ids is empty in config.json"
-                        .to_string(),
-                );
+            if cfg_disk.allowlist.is_empty() {
+                return Err("security check failed: allowlist is empty in config.json".to_string());
             }
 
             let lookup_modes: Vec<String> = config_resp
@@ -2274,11 +2252,11 @@ async fn main() {
 
             let own_ep_id = config_resp
                 .get("iroh_runtime")
-                .and_then(|r| r.get("endpoint_id"))
+                .and_then(|r| r.get("node_id"))
                 .and_then(|v| v.as_str());
             let expected_peers = opts
                 .expect_peers
-                .unwrap_or_else(|| cfg_disk.allowed_endpoint_ids.len().max(1));
+                .unwrap_or_else(|| cfg_disk.allowlist.len().max(1));
             let deadline =
                 std::time::Instant::now() + Duration::from_secs(opts.timeout_secs.max(1));
             let (converged_nodes, mesh_rtt_ms) = loop {
@@ -2295,9 +2273,9 @@ async fn main() {
                     .cloned()
                     .unwrap_or_default();
                 let mut valid_peers = Vec::new();
-                let mut all_telemetry_real = true;
+                let mut all_stats_real = true;
                 for n in &nodes {
-                    let ep_id = n.get("endpoint_id").and_then(|v| v.as_str()).unwrap_or("");
+                    let ep_id = n.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
                     let tailnet_used = n
                         .get("tailnet_used")
                         .and_then(|v| v.as_bool())
@@ -2307,11 +2285,11 @@ async fn main() {
                         .and_then(|v| v.as_str())
                         .map(|s| !s.is_empty())
                         .unwrap_or(false);
-                    if is_allowed_peer_in_list(&cfg_disk.allowed_endpoint_ids, ep_id, own_ep_id)
+                    if is_allowed_peer_in_list(&cfg_disk.allowlist, ep_id, own_ep_id)
                         && mac_ok
                         && (!opts.transport.exclude_tailnet || !tailnet_used)
                     {
-                        let hr = n.get("host_resources").cloned().unwrap_or(json!({}));
+                        let hr = n.get("stats").cloned().unwrap_or(json!({}));
                         let disk_used = hr
                             .get("disk_used_bytes")
                             .and_then(|v| v.as_u64())
@@ -2327,30 +2305,30 @@ async fn main() {
                         let is_fake_disk = disk_used == 120 * 1024 * 1024 * 1024
                             && disk_total == 512 * 1024 * 1024 * 1024;
                         if disk_total == 0 || mem_total == 0 || is_fake_disk {
-                            all_telemetry_real = false;
+                            all_stats_real = false;
                         }
                         if n.get("summary_stats").is_none()
                             || n.get("summary_stats").map(|v| v.is_null()).unwrap_or(true)
                         {
-                            all_telemetry_real = false;
+                            all_stats_real = false;
                         }
                         valid_peers.push(json!({
                             "node": n.get("node"),
                             "os": n.get("os"),
                             "arch": n.get("arch"),
-                            "endpoint_id": ep_id,
+                            "node_id": ep_id,
                             "counter": n.get("counter"),
-                            "heartbeat_kind": n.get("heartbeat_kind"),
-                            "heartbeat_interval_secs": n.get("heartbeat_interval_secs"),
+                            "kind": n.get("kind"),
+                            "beat_interval_secs": n.get("beat_interval_secs"),
                             "summary_interval_secs": n.get("summary_interval_secs"),
                             "updated_at_unix": n.get("updated_at_unix"),
                             "observed_remote_addrs": n.get("observed_remote_addrs"),
                             "tailnet_used": tailnet_used,
                             "peer_rtt_ms": n.get("peer_rtt_ms"),
                             "geo_location": n.get("geo_location"),
-                            "managed_processes": n.get("managed_processes"),
-                            "e2e_test": n.get("e2e_test"),
-                            "host_resources": {
+                            "processes": n.get("processes"),
+                            "probe": n.get("probe"),
+                            "stats": {
                                 "cpu_cores": hr.get("cpu_cores"),
                                 "cpu_percent": hr.get("cpu_percent"),
                                 "mem_percent": hr.get("mem_percent"),
@@ -2366,16 +2344,16 @@ async fn main() {
                 }
                 let rtt_ready =
                     expected_peers <= 1 || rtt_matrix.len() >= expected_peers.saturating_sub(1);
-                if valid_peers.len() >= expected_peers && all_telemetry_real && rtt_ready {
+                if valid_peers.len() >= expected_peers && all_stats_real && rtt_ready {
                     break (valid_peers, serde_json::Value::Object(rtt_matrix));
                 }
                 if std::time::Instant::now() >= deadline {
                     return Err(format!(
-                        "fleet convergence timed out after {}s: expected {} allowlisted peers with real telemetry & RTT, observed {} peers (all_telemetry_real={}, rtt_pairs={})",
+                        "mesh convergence timed out after {}s: expected {} allowlisted peers with real stats & RTT, observed {} peers (all_stats_real={}, rtt_pairs={})",
                         opts.timeout_secs,
                         expected_peers,
                         valid_peers.len(),
-                        all_telemetry_real,
+                        all_stats_real,
                         rtt_matrix.len()
                     ));
                 }
@@ -2412,14 +2390,14 @@ async fn main() {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "schema": "dialtone.fleet_test.v1",
+                    "schema": "dialtone.mesh_test.v1",
                     "status": "ok",
                     "node": config_resp.get("node"),
                     "channel_fingerprint": cfg_disk.channel_fingerprint,
                     "kdf_version": kdf_ver,
-                    "heartbeat_interval_secs": HEARTBEAT_INTERVAL_SECS,
-                    "summary_interval_secs": SUMMARY_HEARTBEAT_INTERVAL_SECS,
-                    "real_telemetry_verified": true,
+                    "beat_interval_secs": BEAT_INTERVAL_SECS,
+                    "summary_interval_secs": SUMMARY_INTERVAL_SECS,
+                    "real_stats_verified": true,
                     "summary_stats_verified": true,
                     "public_directory_publishing": false,
                     "address_lookup_modes": lookup_modes,
@@ -2428,7 +2406,7 @@ async fn main() {
                     "mesh_rtt_ms": mesh_rtt_ms,
                     "nodes": converged_nodes,
                     "live_blob_quic_transfer": {
-                        "sha256": pull_resp.get("sha256"),
+                        "digest": pull_resp.get("digest"),
                         "method": pull_resp.get("method"),
                         "transferred_bytes": pull_resp.get("transferred_bytes"),
                         "ticket_uri": ticket_uri
@@ -2443,24 +2421,24 @@ async fn main() {
             let mut cfg = load_mesh_config(&cfg_path);
             let channel = normalize_channel_name(Some(&opts.channel));
             let keys = if let Some(ref raw_pass) = opts.secret_key {
-                let valid = validate_channel_password(raw_pass)?;
-                cfg.apply_channel_password(&channel, &valid)
+                let valid = validate_secret(raw_pass)?;
+                cfg.apply_secret(&channel, &valid)
             } else if let Some(k) = cfg.active_channel_keys() {
                 k
             } else {
                 return Err(
-                    "cannot mint invite ticket: no channel keys configured (pass --password <PASSWORD> or run 'dialtone join <PASSWORD>' first)"
+                    "cannot mint invite ticket: no channel keys configured (pass --password <SECRET> or run 'dialtone join <SECRET>' first)"
                         .to_string(),
                 );
             };
 
             let key_path = default_secret_key_path();
             let secret_key = load_or_create_secret_key_at(&key_path)?;
-            let endpoint_id = secret_key.public().to_string();
+            let node_id = secret_key.public().to_string();
 
             let now = now_unix();
             let invite = create_invite_ticket(
-                &endpoint_id,
+                &node_id,
                 Some("https://usw1-1.relay.n0.iroh.link./"),
                 &keys,
                 now,
@@ -2474,8 +2452,8 @@ async fn main() {
                     "schema": "dialtone.invite.v1",
                     "channel": keys.channel,
                     "channel_fingerprint": keys.fingerprint(),
-                    "inviter_endpoint_id": endpoint_id,
-                    "bound_endpoint_id": opts.peer_target,
+                    "inviter_node_id": node_id,
+                    "bound_node_id": opts.peer_target,
                     "ttl_secs": opts.invite_ttl_secs,
                     "expires_at_unix": invite.expires_at_unix,
                     "invite_ticket": invite_token
@@ -2488,15 +2466,15 @@ async fn main() {
             let Some(raw_secret) = opts
                 .secret_key
                 .clone()
-                .or_else(|| opts.bootstrap_tickets.first().cloned())
+                .or_else(|| opts.invites.first().cloned())
             else {
                 eprintln!(
-                    "dialtone: usage: dialtone join <PASSWORD> [--channel dialtone] [--bootstrap-ticket <TICKET_OR_INVITE>] [--listen 127.0.0.1:8788]"
+                    "dialtone: usage: dialtone join <SECRET> [--channel dialtone] [--bootstrap-ticket <TICKET_OR_INVITE>] [--listen 127.0.0.1:8788]"
                 );
                 std::process::exit(2);
             };
             let channel = normalize_channel_name(Some(&opts.channel));
-            let password = match validate_channel_password(&raw_secret) {
+            let secret = match validate_secret(&raw_secret) {
                 Ok(p) => p,
                 Err(err) => {
                     eprintln!("dialtone: {err}");
@@ -2506,7 +2484,7 @@ async fn main() {
             let mut cfg = load_mesh_config(&default_config_path());
             cfg.node_name = Some(opts.node.clone());
             cfg.listen_addr = Some(opts.listen.clone());
-            let keys = cfg.apply_channel_password(&channel, &password);
+            let keys = cfg.apply_secret(&channel, &secret);
             let fp = keys.fingerprint();
             let topic_id = keys.topic_id;
 
@@ -2517,9 +2495,9 @@ async fn main() {
                 .unwrap_or_default();
             let now = now_unix();
 
-            for t in &opts.bootstrap_tickets {
+            for t in &opts.invites {
                 if t.starts_with(INVITE_TICKET_PREFIX) {
-                    let parsed_inv = match t.parse::<dialtone::mesh::InviteTicket>() {
+                    let parsed_inv = match t.parse::<dialtone::mesh::Invite>() {
                         Ok(inv) => inv,
                         Err(err) => {
                             eprintln!("dialtone: {err}");
@@ -2532,8 +2510,8 @@ async fn main() {
                         eprintln!("dialtone: {err}");
                         std::process::exit(2);
                     }
-                } else if !cfg.bootstrap_tickets.contains(t) {
-                    cfg.bootstrap_tickets.push(t.clone());
+                } else if !cfg.invites.contains(t) {
+                    cfg.invites.push(t.clone());
                 }
             }
             cfg.updated_at_unix = now;
@@ -2548,8 +2526,8 @@ async fn main() {
             if let Some(resp) = try_join_running_local_daemon(
                 &opts.listen,
                 &channel,
-                &password,
-                &opts.bootstrap_tickets,
+                &secret,
+                &opts.invites,
                 if opts.node_explicit {
                     Some(opts.node.as_str())
                 } else {
@@ -2588,7 +2566,7 @@ async fn main() {
                     "[JOIN] Derived & saved v2 channel subkeys for '{}' channel ({}) — booting dialtone daemon & local Web HUD...",
                     channel, fp
                 );
-                run_node_or_hub(opts, true).await
+                run_node(opts, true).await
             }
         }
         "daemon" => {
@@ -2666,11 +2644,11 @@ async fn main() {
             }
         }
         "blob-fetch-report" => {
-            let cache_dir = env::temp_dir().join("dialtone-blobs");
+            let store_dir = env::temp_dir().join("dialtone-blobs");
             evaluate_tiered_blob_fetch(
-                &cache_dir,
+                &store_dir,
                 &TieredBlobFetchRequest {
-                    sha256: opts.sha256,
+                    digest: opts.digest,
                     uri: opts.uri,
                     provider_node: opts.node,
                     expected_bytes: 4096,
@@ -2682,7 +2660,7 @@ async fn main() {
             })
         }
         "process-intent-fixture" => build_seeded_state(&opts).await.and_then(|st| {
-            let proc = st.managed_processes.first().ok_or("no managed process")?;
+            let proc = st.processes.first().ok_or("no process")?;
             let plan = plan_process_intent("node-alpha", &opts.node, proc, &opts.intent_action)?;
             println!("{}", serde_json::to_string_pretty(&plan).unwrap());
             Ok(())
@@ -2717,8 +2695,8 @@ async fn main() {
             println!("{unit}");
             Ok(())
         }
-        "node" => run_node_or_hub(opts, false).await,
-        "up" | "start" | "index" | "hub" => run_node_or_hub(opts, true).await,
+        "node" => run_node(opts, false).await,
+        "up" | "start" | "index" | "hub" => run_node(opts, true).await,
         other => Err(format!("unsupported action {other:?}")),
     };
 

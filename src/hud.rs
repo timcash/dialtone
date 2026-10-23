@@ -4,32 +4,29 @@ use serde_json::json;
 
 use crate::api::*;
 use crate::h3_land::LAND_H3_BITSET_B64;
-use crate::mesh::{HEARTBEAT_INTERVAL_SECS, SUMMARY_HEARTBEAT_INTERVAL_SECS};
+use crate::mesh::{BEAT_INTERVAL_SECS, SUMMARY_INTERVAL_SECS};
 
-pub(crate) fn render_dashboard_html(
-    state: &DaemonRuntimeState,
-    selected_peer: Option<&str>,
-) -> String {
+pub(crate) fn render_hud(state: &NodeState, selected_peer: Option<&str>) -> String {
     let peer_focus = selected_peer.unwrap_or(&state.node);
-    let (sha_blob_keys, sha_blob_bytes) = count_blob_cache_stats(&state.blob_cache_dir);
+    let (blob_keys, blob_bytes) = count_store(&state.store_dir);
     let initial_gossip = json!({
         "schema": "dialtone.gossip.v1",
         "mesh": "dialtone-iroh-gossip",
         "self_node": state.node,
         "mode": state.mode,
         "selected_peer": peer_focus,
-        "heartbeat_interval_secs": HEARTBEAT_INTERVAL_SECS,
-        "summary_interval_secs": SUMMARY_HEARTBEAT_INTERVAL_SECS,
+        "beat_interval_secs": BEAT_INTERVAL_SECS,
+        "summary_interval_secs": SUMMARY_INTERVAL_SECS,
         "self_iroh_runtime": state.iroh_runtime,
         "boot_stages": state.boot_stages,
         "mesh_config": masked_mesh_config(&state.mesh_config),
         "blob_stats": {
-            "sha_blob_keys": sha_blob_keys,
-            "sha_blob_bytes": sha_blob_bytes,
+            "blob_keys": blob_keys,
+            "blob_bytes": blob_bytes,
             "blob_fetches": state.blob_fetches.len(),
             "kv_keys": state.kv.len(),
             "key_leases": state.key_leases.len(),
-            "installed_binaries": state.installed_binaries.len(),
+            "installed_programs": state.installed_programs.len(),
             "deploy_manifests": state.deploy_manifests.len()
         },
         "nodes": state.nodes,
@@ -593,10 +590,10 @@ pub(crate) fn render_dashboard_html(
         </div>
       </section>
 
-      <!-- 3. Fleet Node Focus Selector -->
+      <!-- 3. Mesh Node Focus Selector -->
       <section class="menu-section">
         <div class="menu-section-title">
-          <span>03 // FLEET NODES (CLICK TO FOCUS TACTICAL SYMBOL)</span>
+          <span>03 // MESH NODES (CLICK TO FOCUS TACTICAL SYMBOL)</span>
           <span class="hi" id="menu-node-count">0 NODES</span>
         </div>
         <div class="btn-row" id="menu-node-buttons"></div>
@@ -685,7 +682,7 @@ const ZOOM_LAYERS = [
   { layer: 2, id: "region",    name: "REGION",    camDist: 7.4,  desc: "Regional H3 resolution-3 cells & peer RTT links" },
   { layer: 3, id: "site",      name: "SITE",      camDist: 5.95, desc: "Tactical node symbol & 3-sector CPU/MEM/DSK gauges" },
   { layer: 4, id: "container", name: "CONTAINER", camDist: 4.9,  desc: "30s rolling variability compass & thrashing detector" },
-  { layer: 5, id: "process",   name: "PROCESS",   camDist: 4.15, desc: "Supervised jobs, heartbeat sequence & QUIC sockets" }
+  { layer: 5, id: "process",   name: "PROCESS",   camDist: 4.15, desc: "Supervised jobs, beat sequence & QUIC sockets" }
 ];
 const PREVIOUS_LAYER_OPACITY = 0.25;
 
@@ -1004,9 +1001,9 @@ function resolveNodeLocationsJS(nodes, rttMatrix = {}) {
 // 3. Node Severity Classification (Nominal = Greyscale, Warn = Yellow, Error = Red)
 // ---------------------------------------------------------------------------
 function classifyNodeHealth(n) {
-  const hr = n.host_resources || {};
+  const hr = n.stats || {};
   const ss = n.summary_stats || null;
-  const sup = n.supervised_processes || [];
+  const sup = n.processes || [];
   const errors = [];
   const warnings = [];
 
@@ -1405,12 +1402,12 @@ function registerRingLayer(group, ringIdx, minLayer) {
 }
 
 function createMicroFactoryIcon(nodeData, geo, isFocused, health) {
-  const hr = nodeData.host_resources || {};
+  const hr = nodeData.stats || {};
   const ss = nodeData.summary_stats || null;
   const cpuPct = Math.max(4, Math.min(100, hr.cpu_percent || 8));
   const memPct = Math.max(6, Math.min(100, hr.mem_percent || 25));
   const dskPct = Math.max(6, Math.min(100, hr.disk_percent || 25));
-  const supCount = (nodeData.managed_processes || nodeData.supervised_processes || []).length;
+  const supCount = (nodeData.processes || nodeData.processes || []).length;
 
   // Semantic colors:
   // - Red strictly for errors
@@ -1913,7 +1910,7 @@ function rebuildGlobeNodesAndArcs(force = false) {
     arcs: cfgShowArcs,
     nodes: nodes.map(n => {
       const g = locMap.get(n.node) || {};
-      const hr = n.host_resources || {};
+      const hr = n.stats || {};
       const h = classifyNodeHealth(n);
       return `${n.node}:${(g.lat || 0).toFixed(2)}:${(g.lng || 0).toFixed(2)}:${h.severity}:${Math.round((hr.cpu_percent || 0) / 3)}:${Math.round((hr.mem_percent || 0) / 4)}`;
     })
@@ -2024,9 +2021,9 @@ function rebuildGlobeNodesAndArcs(force = false) {
 
 // ---------------------------------------------------------------------------
 // 6b. Live Event FX: SHA-256 blob downloads (ink particle stream into the node)
-//     & subprocess starts (blue H3 cell highlight + blue particle burst).
+//     & process starts (blue H3 cell highlight + blue particle burst).
 //     Fired only from real state changes between gossip polls, or replayed from the
-//     focused node's real worker blob/PID during the BLB / PRC tour steps.
+//     focused node's real process blob/PID during the BLB / PRC tour steps.
 // ---------------------------------------------------------------------------
 const fxGroup = new THREE.Group();
 globeSurface.add(fxGroup);
@@ -2165,7 +2162,7 @@ function pushFx(fx) {
   activeFx.push(fx);
 }
 
-// Blob download into the node's SHA-256 CAS: ink particles stream down and converge into the node,
+// Blob download into the node's SHA-256 store: ink particles stream down and converge into the node,
 // a hexagonal "hash lock" ring closes on it, and a BLB tag names the stored digest.
 function spawnBlobDownloadFx(nodeName, label, source = "live") {
   const nowMs = performance.now();
@@ -2228,9 +2225,9 @@ function spawnBlobDownloadFx(nodeName, label, source = "live") {
   });
 }
 
-// Subprocess start: the node's H3 cell lights up blue, a blue particle burst erupts from the node,
+// Process start: the node's H3 cell lights up blue, a blue particle burst erupts from the node,
 // two rings ripple outward, and a PRC tag names the process and its PID.
-function spawnSubprocessStartFx(nodeName, procName, pid, source = "live") {
+function spawnProcessStartFx(nodeName, procName, pid, source = "live") {
   const nowMs = performance.now();
   const sv = siteVisuals.find(s => s.node === nodeName);
   if (!sv || !canFireFx("spawn", nodeName, nowMs)) return;
@@ -2350,23 +2347,23 @@ function updateLiveFx(nowMs, fxScale) {
 function snapshotNodeFxState(n) {
   const procs = new Map();
   const shas = new Set();
-  for (const p of (n.managed_processes || n.supervised_processes || [])) {
+  for (const p of (n.processes || n.processes || [])) {
     if (!p || !p.name) continue;
-    if (p.sha256) shas.add(p.sha256);
+    if (p.digest) shas.add(p.digest);
     procs.set(p.name, { pid: p.pid || null, status: p.status || "" });
   }
-  const e2e = n.e2e_test || {};
-  if (e2e.worker_sha256) shas.add(e2e.worker_sha256);
-  const bs = n.blob_store || {};
+  const probe = n.probe || {};
+  if (probe.program_digest) shas.add(probe.program_digest);
+  const bs = n.store || {};
   return {
-    blobKeys: Number.isFinite(bs.sha_blob_keys) ? bs.sha_blob_keys : null,
-    latestSha: bs.latest_sha256 || "",
+    blobKeys: Number.isFinite(bs.blob_keys) ? bs.blob_keys : null,
+    latestSha: bs.latest_digest || "",
     shas,
     procs
   };
 }
 
-// Diff consecutive gossip snapshots per node and fire FX for real blob downloads & subprocess starts
+// Diff consecutive gossip snapshots per node and fire FX for real blob downloads & process starts
 function detectNodeFxEvents(nodes, fire = true) {
   const next = new Map();
   for (const n of nodes) next.set(n.node, snapshotNodeFxState(n));
@@ -2387,7 +2384,7 @@ function detectNodeFxEvents(nodes, fire = true) {
       for (const [name, p] of cur.procs) {
         const before = prev.procs.get(name);
         if (p.status === "running" && p.pid && (!before || before.pid !== p.pid)) {
-          spawnSubprocessStartFx(n.node, name, p.pid);
+          spawnProcessStartFx(n.node, name, p.pid);
         }
       }
     }
@@ -2395,18 +2392,18 @@ function detectNodeFxEvents(nodes, fire = true) {
   prevNodeFxState = next;
 }
 
-// BLB / PRC tour steps replay the focused node's real worker blob digest and running PID
+// BLB / PRC tour steps replay the focused node's real process blob digest and running PID
 function replayTourStepFx(stepIdx, nodeName) {
   const n = (meshState.nodes || []).find(x => x.node === nodeName);
   if (!n) return;
-  const procs = n.managed_processes || n.supervised_processes || [];
-  const e2e = n.e2e_test || {};
+  const procs = n.processes || n.processes || [];
+  const probe = n.probe || {};
   const running = procs.find(p => p && p.status === "running" && p.pid) || null;
   if (stepIdx === 1) {
-    const sha = e2e.worker_sha256 || (running && running.sha256) || "";
+    const sha = probe.program_digest || (running && running.digest) || "";
     if (sha) spawnBlobDownloadFx(nodeName, shortSha(sha), "tour");
   } else if (stepIdx === 2 && running) {
-    spawnSubprocessStartFx(nodeName, running.name, running.pid, "tour");
+    spawnProcessStartFx(nodeName, running.name, running.pid, "tour");
   }
 }
 
@@ -2452,14 +2449,14 @@ function setUserZoomLayer(newLayer) {
     zSlider.value = String(currentZoomLayer);
     zVal.textContent = `${currentZoomLayer}.0 (${layerSpec.name})`;
   }
-  renderTopShellTelemetry();
+  renderTopShellStats();
   syncMenuControls();
 }
 
 const TOUR_STEPS = [
   { idx: 0, code: "MSH", ring: 1, rowKey: "MSH", title: "ENCRYPTED GOSSIP MESH" },
-  { idx: 1, code: "BLB", ring: 2, rowKey: "E2E", title: "SHA-256 BLOB STORE (CAS)" },
-  { idx: 2, code: "PRC", ring: 3, rowKey: "E2E", title: "SUBPROCESS LOAD & EXEC FROM BLOB" },
+  { idx: 1, code: "BLB", ring: 2, rowKey: "PRB", title: "BLOB STORE" },
+  { idx: 2, code: "PRC", ring: 3, rowKey: "PRB", title: "PROCESS LOAD & EXEC FROM BLOB" },
   { idx: 3, code: "NET", ring: 1, rowKey: "NET", title: "QUIC TRANSPORT & RTT MATRIX" },
   { idx: 4, code: "KVS", ring: 2, rowKey: "MEM", title: "KEY-VALUE STORE & PAGINATION" },
   { idx: 5, code: "A/B", ring: 4, rowKey: "DSK", title: "A-TO-B DEPLOYMENT SLOT ROLLBACK" }
@@ -2470,7 +2467,7 @@ let tourStepChangedNode = true;
 function buildTourSequence() {
   const nodes = meshState.nodes || [];
   if (nodes.length === 0) return [];
-  // Whole-globe system tour: visits each node and steps through all 6 E2E capabilities
+  // Whole-globe system tour: visits each node and steps through all 6 probe capabilities
   // while keeping the camera zoomed out on the full globe.
   const seq = [];
   for (const n of nodes) {
@@ -2498,7 +2495,7 @@ function applyStop(stop, nowMs = performance.now()) {
     userDragOffset.identity();
   }
   rebuildGlobeNodesAndArcs(tourStepChangedNode);
-  renderTopShellTelemetry();
+  renderTopShellStats();
   syncMenuControls();
 
   const targetVisual = siteVisuals.find(sv => sv.node === selectedNode) || siteVisuals[0];
@@ -2591,7 +2588,7 @@ function valCls(val, warnAt, errAt) {
   return val >= errAt ? "err" : (val >= warnAt ? "warn" : "hi");
 }
 
-function renderTopShellTelemetry() {
+function renderTopShellStats() {
   const nodes = meshState.nodes || [];
   rebuildGlobeNodesAndArcs(false);
   if (!nodes.length) return;
@@ -2603,17 +2600,17 @@ function renderTopShellTelemetry() {
   const termEl = document.getElementById("terminal-overlay");
   if (termEl) termEl.dataset.severity = health.severity;
 
-  // Mesh configuration, channel & SHA-256 blob CAS stats
+  // Mesh configuration, channel & store stats
   const mcfg = meshState.mesh_config || {};
   const bstats = meshState.blob_stats || {};
   const channelName = mcfg.channel || "dialtone";
   const channelFp = mcfg.channel_fingerprint || "";
   const isConfigured = Boolean(mcfg.configured ?? meshState.channel_configured ?? true);
-  const expectedPeers = Math.max(nodes.length, (mcfg.allowed_endpoint_ids || []).length || nodes.length);
+  const expectedPeers = Math.max(nodes.length, (mcfg.allowlist || []).length || nodes.length);
   const expectedLinks = expectedPeers > 1 ? (expectedPeers * (expectedPeers - 1)) / 2 : 1;
   const activeLinks = Object.keys(meshState.mesh_rtt_ms || {}).length;
-  const shaBlobKeys = bstats.sha_blob_keys ?? 0;
-  const shaBlobBytes = bstats.sha_blob_bytes ?? 0;
+  const blobKeys = bstats.blob_keys ?? 0;
+  const blobBytes = bstats.blob_bytes ?? 0;
   const kvKeys = bstats.kv_keys ?? 0;
 
   // Update channel name & mesh status line in the bottom terminal overlay
@@ -2626,7 +2623,7 @@ function renderTopShellTelemetry() {
     chLineEl.innerHTML =`<span class="dim">CH:</span> <span class="focus">${channelName}</span>${fpPart}  <span class="${statusCls}">${statusText} ${nodes.length}/${expectedPeers}</span>`;
   }
 
-  // 1. Compute Overall Fleet / Network / E2E / Focused Node Stats for the 6 Aligned Bar-Graph Rows
+  // 1. Compute Overall Mesh / Network / probe / Focused Node Stats for the 6 Aligned Bar-Graph Rows
   let totalCores = 0;
   let totalJobs = 0;
   let sumCpu = 0;
@@ -2639,8 +2636,8 @@ function renderTopShellTelemetry() {
   let totalHbs = 0;
   let directPaths = 0;
   let relayPaths = 0;
-  let e2ePassTotal = 0;
-  let e2eCheckTotal = nodes.length * 5;
+  let probePassTotal = 0;
+  let probeCheckTotal = nodes.length * 5;
   let capBlbOk = 0;
   let capKvsOk = 0;
   let capPrcOk = 0;
@@ -2650,8 +2647,8 @@ function renderTopShellTelemetry() {
   const allJitters = [];
 
   for (const n of nodes) {
-    const h = n.host_resources || {};
-    const procs = n.managed_processes || n.supervised_processes || [];
+    const h = n.stats || {};
+    const procs = n.processes || n.processes || [];
     const runningProcs = procs.filter(p => p && p.status === "running");
     totalCores += (h.cpu_cores || 8);
     totalJobs += runningProcs.length;
@@ -2681,21 +2678,21 @@ function renderTopShellTelemetry() {
       directPaths += 1;
     }
 
-    const e2e = n.e2e_test || null;
+    const probe = n.probe || null;
     const hasRunProc = runningProcs.length > 0;
-    const blbOk = e2e ? Boolean(e2e.sha_blobs_ok) : (shaBlobKeys > 0);
-    const kvsOk = e2e ? Boolean(e2e.key_value_ok) : (kvKeys > 0);
-    const prcOk = e2e ? Boolean(e2e.sub_processes_ok) : hasRunProc;
-    const mshOk = e2e ? Boolean(e2e.mesh_connectivity_ok) : (nodes.length >= 1);
-    const abOk  = e2e ? Boolean(e2e.ab_rollback_ok) : hasRunProc;
-    if (blbOk) { capBlbOk += 1; e2ePassTotal += 1; }
-    if (kvsOk) { capKvsOk += 1; e2ePassTotal += 1; }
-    if (prcOk) { capPrcOk += 1; e2ePassTotal += 1; }
-    if (mshOk) { capMshOk += 1; e2ePassTotal += 1; }
-    if (abOk)  { capAbOk  += 1; e2ePassTotal += 1; }
+    const blbOk = probe ? Boolean(probe.blobs_ok) : (blobKeys > 0);
+    const kvsOk = probe ? Boolean(probe.key_value_ok) : (kvKeys > 0);
+    const prcOk = probe ? Boolean(probe.processes_ok) : hasRunProc;
+    const mshOk = probe ? Boolean(probe.mesh_connectivity_ok) : (nodes.length >= 1);
+    const abOk  = probe ? Boolean(probe.ab_rollback_ok) : hasRunProc;
+    if (blbOk) { capBlbOk += 1; probePassTotal += 1; }
+    if (kvsOk) { capKvsOk += 1; probePassTotal += 1; }
+    if (prcOk) { capPrcOk += 1; probePassTotal += 1; }
+    if (mshOk) { capMshOk += 1; probePassTotal += 1; }
+    if (abOk)  { capAbOk  += 1; probePassTotal += 1; }
   }
 
-  const hr = target.host_resources || {};
+  const hr = target.stats || {};
   const ss = target.summary_stats || null;
   const cpuVal = hr.cpu_percent || 0;
   const memVal = hr.mem_percent || 0;
@@ -2719,10 +2716,10 @@ function renderTopShellTelemetry() {
   const meshHealthPct = Math.round(((peerRatio * 0.5) + (linkRatio * 0.5)) * 100);
   const mshCls = meshHealthPct >= 90 ? "hi" : (meshHealthPct >= 50 ? "warn" : "err");
 
-  const e2ePct = e2eCheckTotal > 0 ? Math.round((e2ePassTotal / e2eCheckTotal) * 100) : 100;
-  const e2eCls = e2ePct >= 100 ? "hi" : (e2ePct >= 60 ? "warn" : "err");
-  const targetSlot = (target.e2e_test && target.e2e_test.active_slot) ? target.e2e_test.active_slot : "A";
-  const targetCycle = (target.e2e_test && target.e2e_test.cycle) ? target.e2e_test.cycle : 1;
+  const probePct = probeCheckTotal > 0 ? Math.round((probePassTotal / probeCheckTotal) * 100) : 100;
+  const probeCls = probePct >= 100 ? "hi" : (probePct >= 60 ? "warn" : "err");
+  const targetSlot = (target.probe && target.probe.active_slot) ? target.probe.active_slot : "A";
+  const targetCycle = (target.probe && target.probe.cycle) ? target.probe.cycle : 1;
 
   const stepMeta = TOUR_STEPS[activeTourStep] || TOUR_STEPS[0];
   const rowMark = (key) => stepMeta.rowKey === key ? `<span class="focus">▸</span> ` : `  `;
@@ -2735,23 +2732,23 @@ function renderTopShellTelemetry() {
   const capFmt = (okCnt) => `${okCnt}/${nodes.length} OK`;
   const capCls = (okCnt) => okCnt >= nodes.length ? "hi" : (okCnt > 0 ? "warn" : "err");
 
-  // Overall Stats Grid (6 strictly aligned bar-graph rows: MSH, NET, E2E, CPU, MEM, DSK)
+  // Overall Stats Grid (6 strictly aligned bar-graph rows: MSH, NET, probe, CPU, MEM, DSK)
   const overallRows = [
-    `${rowMark("MSH")}${rowLbl("MSH", "MSH")} ${asciiBar(meshHealthPct, 101, 101, 18)} <span class="${mshCls}">${padL(meshHealthPct.toFixed(0) + "%", 7)}</span>   ${kvCell("NDS", `${nodes.length}/${expectedPeers}`, "hi", stepMeta.code === "MSH")}   ${kvCell("LNK", `${activeLinks}/${expectedLinks}`, "hi", stepMeta.code === "MSH")}   ${kvCell("PTH", `${directPaths}D/${relayPaths}R`)}   ${kvCell("HBS", "#" + totalHbs)}   ${kvCell("SHA", String(shaBlobKeys), "hi", stepMeta.code === "BLB")}`,
+    `${rowMark("MSH")}${rowLbl("MSH", "MSH")} ${asciiBar(meshHealthPct, 101, 101, 18)} <span class="${mshCls}">${padL(meshHealthPct.toFixed(0) + "%", 7)}</span>   ${kvCell("NDS", `${nodes.length}/${expectedPeers}`, "hi", stepMeta.code === "MSH")}   ${kvCell("LNK", `${activeLinks}/${expectedLinks}`, "hi", stepMeta.code === "MSH")}   ${kvCell("PTH", `${directPaths}D/${relayPaths}R`)}   ${kvCell("BTS", "#" + totalHbs)}   ${kvCell("DIG", String(blobKeys), "hi", stepMeta.code === "BLB")}`,
     `${rowMark("NET")}${rowLbl("NET", "NET")} ${asciiBar(rttBarPct, 75, 95, 18)} <span class="${valCls(avgRtt, 180, 260)}">${padL(avgRtt.toFixed(1) + "ms", 7)}</span>   ${kvCell("RX", sumRxKb.toFixed(0) + "K/s", "hi", stepMeta.code === "NET")}   ${kvCell("TX", sumTxKb.toFixed(0) + "K/s", "hi", stepMeta.code === "NET")}   ${kvCell("MIN", minRtt.toFixed(1) + "ms")}   ${kvCell("MAX", maxRtt.toFixed(1) + "ms")}   ${kvCell("JIT", "±" + avgJitter.toFixed(1) + "ms")}`,
-    `${rowMark("E2E")}${rowLbl("E2E", "E2E")} ${asciiBar(e2ePct, 101, 101, 18)} <span class="${e2eCls}">${padL(`${e2ePassTotal}/${e2eCheckTotal}`, 7)}</span>   ${kvCell("BLB", capFmt(capBlbOk), capCls(capBlbOk), stepMeta.code === "BLB")}   ${kvCell("KVS", capFmt(capKvsOk), capCls(capKvsOk), stepMeta.code === "KVS")}   ${kvCell("PRC", capFmt(capPrcOk), capCls(capPrcOk), stepMeta.code === "PRC")}   ${kvCell("MSH", capFmt(capMshOk), capCls(capMshOk), stepMeta.code === "MSH")}   ${kvCell("A/B", capFmt(capAbOk), capCls(capAbOk), stepMeta.code === "A/B")}`,
-    `${rowMark("CPU")}${rowLbl("CPU", "CPU")} ${asciiBar(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT, 18)} <span class="${valCls(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT)}">${padL(cpuVal.toFixed(1) + "%", 7)}</span>   ${kvCell("AVG", cpuAvg.toFixed(1) + "%")}   ${kvCell("STD", "±" + cpuStd.toFixed(1) + "%")}   ${kvCell("MAX", cpuMax.toFixed(1) + "%")}   ${kvCell("COR", String(totalCores))}   ${kvCell("CAS", fmtBytesShort(shaBlobBytes), "hi", stepMeta.code === "BLB")}`,
+    `${rowMark("PRB")}${rowLbl("PRB", "PRB")} ${asciiBar(probePct, 101, 101, 18)} <span class="${probeCls}">${padL(`${probePassTotal}/${probeCheckTotal}`, 7)}</span>   ${kvCell("BLB", capFmt(capBlbOk), capCls(capBlbOk), stepMeta.code === "BLB")}   ${kvCell("KVS", capFmt(capKvsOk), capCls(capKvsOk), stepMeta.code === "KVS")}   ${kvCell("PRC", capFmt(capPrcOk), capCls(capPrcOk), stepMeta.code === "PRC")}   ${kvCell("MSH", capFmt(capMshOk), capCls(capMshOk), stepMeta.code === "MSH")}   ${kvCell("A/B", capFmt(capAbOk), capCls(capAbOk), stepMeta.code === "A/B")}`,
+    `${rowMark("CPU")}${rowLbl("CPU", "CPU")} ${asciiBar(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT, 18)} <span class="${valCls(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT)}">${padL(cpuVal.toFixed(1) + "%", 7)}</span>   ${kvCell("AVG", cpuAvg.toFixed(1) + "%")}   ${kvCell("STD", "±" + cpuStd.toFixed(1) + "%")}   ${kvCell("MAX", cpuMax.toFixed(1) + "%")}   ${kvCell("COR", String(totalCores))}   ${kvCell("STO", fmtBytesShort(blobBytes), "hi", stepMeta.code === "BLB")}`,
     `${rowMark("MEM")}${rowLbl("MEM", "MEM")} ${asciiBar(memVal, WARN_MEM_PCT, ERROR_MEM_PCT, 18)} <span class="${valCls(memVal, WARN_MEM_PCT, ERROR_MEM_PCT)}">${padL(memVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumMemUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumMemTot) + "G")}   ${kvCell("STD", "±" + memStd.toFixed(1) + "%")}   ${kvCell("KVS", String(kvKeys), "hi", stepMeta.code === "KVS")}   ${kvCell("FET", String(blobFetches))}`,
-    `${rowMark("DSK")}${rowLbl("DSK", "DSK")} ${asciiBar(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT, 18)} <span class="${valCls(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT)}">${padL(dskVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumDskUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumDskTot) + "G")}   ${kvCell("THR", thrashScore.toFixed(0), thrashScore > 0 ? "err" : "hi")}   ${kvCell("SLT", `${targetSlot}#${targetCycle}`, "hi", stepMeta.code === "A/B")}   ${kvCell("JOB", `${totalJobs}/${nodes.length}`, "hi", stepMeta.code === "PRC")}`
+    `${rowMark("DSK")}${rowLbl("DSK", "DSK")} ${asciiBar(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT, 18)} <span class="${valCls(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT)}">${padL(dskVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumDskUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumDskTot) + "G")}   ${kvCell("THR", thrashScore.toFixed(0), thrashScore > 0 ? "err" : "hi")}   ${kvCell("SLT", `${targetSlot}#${targetCycle}`, "hi", stepMeta.code === "A/B")}   ${kvCell("PCS", `${totalJobs}/${nodes.length}`, "hi", stepMeta.code === "PRC")}`
   ];
 
-  // 2. Per-Row Stats Grid (Strictly aligned table with inline CPU / MEM / DSK bar graphs + network/link/blob-proc/E2E stats per node)
+  // 2. Per-Row Stats Grid (Strictly aligned table with inline CPU / MEM / DSK bar graphs + network/link/blob-proc/probe stats per node)
   const headerLine =
-    `<span class="dim">  ${padR("NODE", 9)} ${padR("ARCH", 10)} ${padR("CPU", 17)} ${padR("MEM", 17)} ${padR("DSK", 17)} ${padR("IP/PATH", 16)} ${padL("RX/TX", 9)} ${padL("LNK", 4)} ${padL("RTT", 7)} ${padL("JIT", 6)} ${padL("PROC", 10)} ${padL("E2E", 9)} ${padL("HB", 6)}</span>`;
+    `<span class="dim">  ${padR("NODE", 9)} ${padR("ARCH", 10)} ${padR("CPU", 17)} ${padR("MEM", 17)} ${padR("DSK", 17)} ${padR("IP/PATH", 16)} ${padL("RX/TX", 9)} ${padL("LNK", 4)} ${padL("RTT", 7)} ${padL("JIT", 6)} ${padL("PROC", 10)} ${padL("PRB", 9)} ${padL("BEAT", 6)}</span>`;
 
   const nodeRows = nodes.map((n) => {
     const isSel = n.node === target.node;
-    const nhr = n.host_resources || {};
+    const nhr = n.stats || {};
     const nss = n.summary_stats || null;
     const nCpu = nhr.cpu_percent || 0;
     const nMem = nhr.mem_percent || 0;
@@ -2780,12 +2777,12 @@ function renderTopShellTelemetry() {
     const shortArch = (n.arch || "arch").replace("aarch64", "arm64");
     const archCol = padR(`${shortOs}/${shortArch}`, 10);
 
-    const nProcs = n.managed_processes || n.supervised_processes || [];
+    const nProcs = n.processes || n.processes || [];
     const activeProc = nProcs.find(p => p && p.status === "running") || nProcs[0] || null;
     let procStr = "NONE";
     let procCls = "dim";
     if (activeProc) {
-      const sha4 = String(activeProc.sha256 || "").replace("sha256:", "").slice(0, 4);
+      const sha4 = String(activeProc.digest || "").replace("sha256:", "").slice(0, 4);
       if (activeProc.status === "running") {
         procStr = activeProc.pid ? `${sha4}:${activeProc.pid}` : `${sha4}:RUN`;
         procCls = "hi";
@@ -2795,12 +2792,12 @@ function renderTopShellTelemetry() {
       }
     }
 
-    const ne2e = n.e2e_test || null;
-    const e2ePass = ne2e ? (ne2e.passed_count ?? 5) : (activeProc && activeProc.status === "running" ? 5 : 4);
-    const e2eSlot = ne2e && ne2e.active_slot ? ne2e.active_slot : "A";
-    const e2eCyc = ne2e && ne2e.cycle ? ne2e.cycle : 1;
-    const e2eStr = `${e2ePass}/5 ${e2eSlot}#${e2eCyc}`;
-    const e2eCellCls = e2ePass >= 5 ? "hi" : (e2ePass >= 3 ? "warn" : "err");
+    const nprobe = n.probe || null;
+    const probePass = nprobe ? (nprobe.passed_count ?? 5) : (activeProc && activeProc.status === "running" ? 5 : 4);
+    const probeSlot = nprobe && nprobe.active_slot ? nprobe.active_slot : "A";
+    const probeCyc = nprobe && nprobe.cycle ? nprobe.cycle : 1;
+    const probeStr = `${probePass}/5 ${probeSlot}#${probeCyc}`;
+    const probeCellCls = probePass >= 5 ? "hi" : (probePass >= 3 ? "warn" : "err");
 
     const mark = isSel ? `<span class="focus">▸</span> ` : `  `;
     const nameCls = isSel ? "focus" : "hi";
@@ -2813,10 +2810,10 @@ function renderTopShellTelemetry() {
     const rttCell = `<span class="${valCls(nRtt, 180, 260)}">${padL(rttStr, 7)}</span>`;
     const jitCell = `<span class="dim">${padL(jitStr, 6)}</span>`;
     const procCell = `<span class="${procCls}">${padL(procStr, 10)}</span>`;
-    const e2eCell = `<span class="${e2eCellCls}">${padL(e2eStr, 9)}</span>`;
+    const probeCell = `<span class="${probeCellCls}">${padL(probeStr, 9)}</span>`;
     const hbCell = `<span class="dim">${padL("#" + (n.counter || 0), 6)}</span>`;
 
-    return `<span class="top-row" data-node="${n.node}">${mark}<span class="${nameCls}">${padR(n.node, 9)}</span> <span class="dim">${archCol}</span> ${cpuCell} ${memCell} ${dskCell} ${ipCell} ${netCell} ${lnkCell} ${rttCell} ${jitCell} ${procCell} ${e2eCell} ${hbCell}</span>`;
+    return `<span class="top-row" data-node="${n.node}">${mark}<span class="${nameCls}">${padR(n.node, 9)}</span> <span class="dim">${archCol}</span> ${cpuCell} ${memCell} ${dskCell} ${ipCell} ${netCell} ${lnkCell} ${rttCell} ${jitCell} ${procCell} ${probeCell} ${hbCell}</span>`;
   });
 
   const hudEl = document.getElementById("node-top-hud");
@@ -2831,8 +2828,8 @@ function renderTopShellTelemetry() {
     expectedPeers,
     activeLinks,
     expectedLinks,
-    shaBlobKeys,
-    shaBlobBytes,
+    blobKeys,
+    blobBytes,
     kvKeys,
     avgRtt,
     avgJitter,
@@ -2855,23 +2852,23 @@ function renderTourClosedCaptions(ctx) {
     expectedPeers,
     activeLinks,
     expectedLinks,
-    shaBlobKeys,
-    shaBlobBytes,
+    blobKeys,
+    blobBytes,
     kvKeys,
     avgRtt,
     avgJitter
   } = ctx;
 
-  const te2e = target.e2e_test || {};
-  const tProcs = target.managed_processes || target.supervised_processes || [];
+  const tprobe = target.probe || {};
+  const tProcs = target.processes || target.processes || [];
   const activeProc = tProcs.find(p => p && p.status === "running") || tProcs[0] || {};
-  const workerName = te2e.worker_name || activeProc.name || "mesh-blob-worker";
-  const workerSha = te2e.worker_sha256 || activeProc.sha256 || "sha256:181091cbf978";
-  const shortSha = String(workerSha).replace("sha256:", "").slice(0, 12);
-  const workerPid = te2e.worker_pid || activeProc.pid || "LIVE";
-  const stagedPath = te2e.worker_staged_path || activeProc.path || `~/.dialtone/run/${workerName}-${shortSha}`;
-  const casPath = te2e.worker_blob_cas_path || `~/.dialtone/blobs/${shortSha.slice(0, 2)}/${shortSha}...`;
-  let ticketUri = te2e.worker_blob_ticket || "";
+  const programName = tprobe.program_name || activeProc.name || "mesh-blob-worker";
+  const programDigest = tprobe.program_digest || activeProc.digest || "sha256:181091cbf978";
+  const shortSha = String(programDigest).replace("sha256:", "").slice(0, 12);
+  const processPid = tprobe.pid || activeProc.pid || "LIVE";
+  const stagedPath = tprobe.staged_path || activeProc.path || `~/.dialtone/run/${programName}-${shortSha}`;
+  const casPath = tprobe.store_path || `~/.dialtone/blobs/${shortSha.slice(0, 2)}/${shortSha}...`;
+  let ticketUri = tprobe.ticket || "";
   if (!ticketUri && Array.isArray(activeProc.env)) {
     const tkEnv = activeProc.env.find(e => String(e).startsWith("DIALTONE_BLOB_TICKET="));
     if (tkEnv) ticketUri = String(tkEnv).slice("DIALTONE_BLOB_TICKET=".length);
@@ -2892,12 +2889,12 @@ function renderTourClosedCaptions(ctx) {
     .map(([peer, ms]) => `${peer}=${Number(ms).toFixed(1)}ms`)
     .join(", ") || "probing peers...";
 
-  const kvKey = te2e.kv_key || `e2e/${target.node}/status`;
-  const activeSlot = te2e.active_slot || "A";
+  const kvKey = tprobe.kv_key || `probe/${target.node}/status`;
+  const activeSlot = tprobe.active_slot || "A";
   const prevSlot = activeSlot === "A" ? "B" : "A";
-  const cycleNum = te2e.cycle || target.counter || 1;
-  const passCnt = te2e.passed_count ?? 5;
-  const totCnt = te2e.total_count ?? 5;
+  const cycleNum = tprobe.cycle || target.counter || 1;
+  const passCnt = tprobe.passed_count ?? 5;
+  const totCnt = tprobe.total_count ?? 5;
 
   const stepPills = TOUR_STEPS.map(s => {
     const isAct = s.idx === stepMeta.idx;
@@ -2914,28 +2911,28 @@ function renderTourClosedCaptions(ctx) {
   switch (stepMeta.idx) {
     case 0: // MSH: Encrypted Gossip Mesh
       line1 = `<span class="focus">[1/6 MESH &amp; GOSSIP]</span> Node <span class="hi">${target.node}</span> joined private channel <span class="focus">${channelName}</span> <span class="dim">[${channelFp || "live"}]</span> using Argon2id KDF + XChaCha20-Poly1305 encrypted gossip frames.`;
-      line2 = `Authenticated peer allowlist: <span class="hi">${nodes.length}/${expectedPeers} nodes online</span> across <span class="hi">${activeLinks}/${expectedLinks} encrypted links</span> (heartbeat <span class="hi">#${target.counter || 0}</span> via ${pathMode} <span class="hi">${cleanIp}</span>).`;
+      line2 = `Authenticated peer allowlist: <span class="hi">${nodes.length}/${expectedPeers} nodes online</span> across <span class="hi">${activeLinks}/${expectedLinks} encrypted links</span> (beat <span class="hi">#${target.counter || 0}</span> via ${pathMode} <span class="hi">${cleanIp}</span>).`;
       break;
     case 1: // BLB: SHA-256 Content-Addressed Blob Store
-      line1 = `<span class="focus">[2/6 SHA-256 BLOB STORE]</span> Deployed cross-platform subprocess payload into content-addressed storage on <span class="hi">${target.node}</span> (<span class="hi">${shaBlobKeys} blobs</span>, <span class="hi">${fmtBytesShort(shaBlobBytes)}</span> in CAS).`;
+      line1 = `<span class="focus">[2/6 BLOB STORE]</span> Stored the cross-platform probe program in the store on <span class="hi">${target.node}</span> (<span class="hi">${blobKeys} blobs</span>, <span class="hi">${fmtBytesShort(blobBytes)}</span> in the store).`;
       line2 = `Verified SHA-256 digest <span class="focus">sha256:${shortSha}</span> at <span class="dim">${casPath}</span> and published <span class="hi">${shortTicket}</span> for peer replication.`;
       break;
-    case 2: // PRC: Subprocess Load & Exec from Blob Store
-      line1 = `<span class="focus">[3/6 SUBPROCESS LOAD &amp; EXEC]</span> Loaded verified executable from SHA-256 blob store (<span class="hi">sha256:${shortSha}</span>) &rarr; staged to <span class="hi">${stagedPath}</span>.`;
-      line2 = `Supervisor spawned <span class="focus">${workerName}</span> (<span class="hi">PID ${workerPid}</span>, status=<span class="hi">RUNNING</span>) from CAS blob — running <span class="hi">dialtone test-tick</span> E2E checks every 5s.`;
+    case 2: // PRC: Process Load & Exec from Blob Store
+      line1 = `<span class="focus">[3/6 PROCESS LOAD &amp; EXEC]</span> Loaded verified executable from SHA-256 blob store (<span class="hi">sha256:${shortSha}</span>) &rarr; staged to <span class="hi">${stagedPath}</span>.`;
+      line2 = `Supervisor spawned <span class="focus">${programName}</span> (<span class="hi">PID ${processPid}</span>, status=<span class="hi">RUNNING</span>) from its blob — running <span class="hi">dialtone probe</span> every 5s.`;
       break;
     case 3: // NET: QUIC Transport & RTT Matrix
       line1 = `<span class="focus">[4/6 QUIC TRANSPORT &amp; RTT]</span> Probing pairwise QUIC connection paths and monotonic RTT echoes from <span class="hi">${target.node}</span> (stripping non-routable tailnet IPs).`;
-      line2 = `Live peer latencies from <span class="hi">${target.node}</span>: <span class="focus">${peerRttEntries}</span> (fleet avg <span class="hi">${avgRtt.toFixed(1)}ms ±${avgJitter.toFixed(1)}ms</span>).`;
+      line2 = `Live peer latencies from <span class="hi">${target.node}</span>: <span class="focus">${peerRttEntries}</span> (mesh avg <span class="hi">${avgRtt.toFixed(1)}ms ±${avgJitter.toFixed(1)}ms</span>).`;
       break;
     case 4: // KVS: Distributed Key-Value Store
-      line1 = `<span class="focus">[5/6 KEY-VALUE STORE]</span> Subprocess worker writing live E2E attestation record to key <span class="focus">${kvKey}</span> (<span class="hi">${kvKeys} total KV records</span>).`;
-      line2 = `Verified bounded cursor pagination (<span class="hi">paginate_kv_records</span>) on cycle <span class="hi">#${cycleNum}</span>: <span class="dim">{ sha_blobs: true, sub_processes: true, mesh: true, ab_rollback: true, pid: ${workerPid} }</span>.`;
+      line1 = `<span class="focus">[5/6 KEY-VALUE STORE]</span> Probe process writing a live probe record to key <span class="focus">${kvKey}</span> (<span class="hi">${kvKeys} total KV records</span>).`;
+      line2 = `Verified bounded cursor pagination (<span class="hi">paginate_kv_records</span>) on cycle <span class="hi">#${cycleNum}</span>: <span class="dim">{ sha_blobs: true, processes: true, mesh: true, ab_rollback: true, pid: ${processPid} }</span>.`;
       break;
     case 5: // A/B: Verified A-to-B Deployment Slot Rollback
     default:
       line1 = `<span class="focus">[6/6 A-TO-B SLOT ROLLBACK]</span> Executed side-effect-free <span class="hi">plan_rollback</span> preview between staged deployment <span class="hi">Slot ${prevSlot}</span> and <span class="hi">Slot ${activeSlot}</span> on <span class="hi">${target.node}</span>.`;
-      line2 = `Re-verified SHA-256 digests of both slot binaries on disk and atomically flipped active slot <span class="focus">Slot ${prevSlot} &rarr; Slot ${activeSlot}#${cycleNum}</span> (<span class="hi">E2E ${passCnt}/${totCnt} OK</span>).`;
+      line2 = `Re-verified SHA-256 digests of both slot binaries on disk and atomically flipped active slot <span class="focus">Slot ${prevSlot} &rarr; Slot ${activeSlot}#${cycleNum}</span> (<span class="hi">probe ${passCnt}/${totCnt} OK</span>).`;
       break;
   }
 
@@ -2957,7 +2954,7 @@ document.getElementById("tour-cc-header").addEventListener("click", (e) => {
   if (toggleBtn) {
     tourPlaying = !tourPlaying;
     lastTourSwitchMs = performance.now();
-    renderTopShellTelemetry();
+    renderTopShellStats();
     syncMenuControls();
   }
 });
@@ -3037,7 +3034,7 @@ function syncMenuControls() {
       btn.setAttribute("aria-pressed", String(isSel));
       btn.dataset.severity = h.severity;
       const dotCls = h.severity === "error" ? "error" : (h.severity === "warn" ? "warn" : (isSel ? "focus" : ""));
-      const hr = n.host_resources || {};
+      const hr = n.stats || {};
       btn.innerHTML = `<span class="node-dot ${dotCls}"></span><span>${n.node}</span><span style="color:var(--ink-2)">${(hr.cpu_percent || 0).toFixed(0)}%</span>`;
       btn.addEventListener("click", () => {
         tourPlaying = false;
@@ -3063,7 +3060,7 @@ function syncMenuControls() {
 document.getElementById("tour-playback").addEventListener("click", () => {
   tourPlaying = !tourPlaying;
   lastTourSwitchMs = performance.now();
-  renderTopShellTelemetry();
+  renderTopShellStats();
   syncMenuControls();
 });
 
@@ -3115,7 +3112,7 @@ document.getElementById("slider-zoom-layer").addEventListener("input", (e) => {
   const frac = val - Math.floor(val);
   targetCameraDist = THREE.MathUtils.lerp(ZOOM_LAYERS[lowIdx].camDist, ZOOM_LAYERS[highIdx].camDist, frac);
   document.getElementById("val-zoom-layer").textContent = `${val.toFixed(1)} (${lSpec.name})`;
-  renderTopShellTelemetry();
+  renderTopShellStats();
   syncMenuControls();
 });
 
@@ -3434,7 +3431,7 @@ function renderFrame(nowMs) {
     }
   });
 
-  // Replay real blob / subprocess FX for the focused node whenever the tour lands on BLB or PRC
+  // Replay real blob / process FX for the focused node whenever the tour lands on BLB or PRC
   const tourFxKey = `${activeTourStep}|${selectedNode}|${lastTourSwitchMs}`;
   if (tourFxKey !== lastTourFxKey) {
     lastTourFxKey = tourFxKey;
@@ -3470,7 +3467,7 @@ async function pollGossipState() {
       selectedNode = meshState.self_node || meshState.nodes[0].node;
       stepTour(0, performance.now());
     } else {
-      renderTopShellTelemetry();
+      renderTopShellStats();
       if (!fullscreenMenu.hasAttribute("hidden")) {
         syncMenuControls();
       }
@@ -3485,7 +3482,7 @@ if (tourStops.length > 0) {
   tourStopIndex = startIdx;
   applyStop(tourStops[tourStopIndex], performance.now());
 } else {
-  renderTopShellTelemetry();
+  renderTopShellStats();
 }
 detectNodeFxEvents(meshState.nodes || [], false);
 requestAnimationFrame(renderFrame);
