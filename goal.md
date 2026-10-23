@@ -1,20 +1,95 @@
-# Dialtone Security, Authentic Telemetry & Zero-Leak Fleet Architecture (`goal.md`)
+# Dialtone: Goals, Domain Language & Architecture (`goal.md`)
+
+## Domain Language
+
+Every concept has **one word**. Code, CLI, API, HUD, docs and commit messages use that word and nothing else.
+`ci.sh` fails the build if a banned synonym appears in `src/` (lines that must keep an old name for wire / CLI
+compatibility, or that name an Iroh library type, carry a `// compat` marker).
+
+| Word | Means | Code form | Never say |
+|------|-------|-----------|-----------|
+| **Node** | One running dialtone instance | `Node`, `node` | host, hub, site, fleet member |
+| **NodeId** | A node's public Ed25519 key (iroh's `EndpointId`) | `NodeId`, `node_id` | endpoint id, peer id |
+| **Key** | A node's private Ed25519 key, stored at `~/.dialtone/iroh-secret-key` | `Key`, `key_path` | secret key, identity key |
+| **Peer** | Any node other than this one | `peer`, `peers` | remote host, neighbour (except iroh-gossip `NeighborUp/Down`) |
+| **Mesh** | All nodes in one channel | `mesh` | fleet, swarm, cluster |
+| **Channel** | A named gossip room unlocked by a secret | `Channel`, `channel` | room; *topic* only inside transport code |
+| **Secret** | A channel's password (`dt-…`) | `secret` | password, passphrase |
+| **Allowlist** | NodeIds permitted in the mesh | `allowlist` | allowed endpoint ids, ACL |
+| **Invite** | Signed, expiring, single-use join token | `Invite`, `invite` | bootstrap ticket, gossip ticket |
+| **Seed** | A peer address used to dial into the mesh | `Seed`, `seeds` | bootstrap peer |
+| **Beat** | The signed, encrypted status message a node gossips; `kind` is `beat` (5s), `summary` (30s) or `echo` (RTT reply) | `Beat`, `beat` | heartbeat, hb, ping, pulse |
+| **Stats** | Measured machine numbers: cpu, mem, disk, net | `Stats`, `stats` | telemetry, host resources, metrics |
+| **Rtt** | Round-trip time between two nodes, in ms | `rtt_ms` | latency |
+| **Blob** | Immutable bytes named by a digest | `Blob`, `blob` | artifact, payload, sha blob |
+| **Digest** | A blob's name: `sha256:<hex>` | `digest` | sha, checksum; *hash* only for iroh's BLAKE3 `Hash` |
+| **Store** | A node's local blob storage (`~/.dialtone/blobs`) | `Store`, `store_dir` | cache, CAS, blob cache |
+| **Ticket** | An iroh-blobs link to fetch a blob from a node | `ticket` | blob uri |
+| **Program** | A blob that can be executed | `Program`, `program` | binary, executable |
+| **Process** | A running program owned by the supervisor | `Process`, `ProcessSpec` | job, worker, subprocess, child, managed process |
+| **Supervisor** | Keeps every process at its desired state | `Supervisor` | — |
+| **Service** | A network endpoint a process exposes to the mesh | `Service` | service advertisement |
+| **Deploy** | An order to run a program digest on nodes | `Deploy`, `deploy` | rollout, manifest apply |
+| **Slot** | The A or B install location of a program; *rollback* flips the slot | `Slot` | — |
+| **Probe** | One run of the five checks: `BLB` `KVS` `PRC` `MSH` `A/B` | `Probe`, `probe` | e2e tick, test tick, capability tick |
+| **Record** | A stored event, alert, log line or KV entry | `Event`, `Alert`, `Log`, `Kv` | evidence |
+| **Daemon** | The OS login service (launchd / systemd / Scheduled Task) that starts the node | `daemon` | — |
+| **HUD** | The node's local web UI | `hud` | dashboard, index page |
+| **API** | The node's local HTTP control surface on `127.0.0.1:8788` | `api` | control plane routes |
+
+### Code layout follows the words
+
+| Module | Owns |
+|--------|------|
+| `node.rs` | Key, NodeId, transport config (was `identity.rs`) |
+| `mesh.rs` | Channel, Secret, Allowlist, Invite, Seed, Beat, Rtt, geo (was `gossip.rs`) |
+| `stats.rs` | Stats sampling and summaries (was the first half of `evidence.rs`) |
+| `record.rs` | Event, Alert, Log, Kv records (was the second half of `evidence.rs`) |
+| `blob.rs` | Blob, Digest, Store, Ticket (was `blobs.rs`) |
+| `supervisor.rs` | Program, Process, ProcessSpec, Supervisor |
+| `deploy.rs` | Deploy, Slot, Daemon install |
+| `service.rs` | Service and service references (was `metadata.rs`) |
+| `api.rs` / `hud.rs` | API routes and node state / HUD page (was `http.rs`) |
+
+### Commands and routes use the words
+
+| Today | Becomes (old name kept as a hidden alias for one release) |
+|-------|------------|
+| `dialtone gen-password` | `dialtone secret` |
+| `dialtone peers list / allow / revoke` | `dialtone allowlist list / add / remove` |
+| `dialtone blobs share / pull` | `dialtone blob share / pull` |
+| `dialtone test-tick` | `dialtone probe` |
+| `dialtone fleet-test` | `dialtone mesh-test` |
+| `dialtone index` | `dialtone hud` |
+| `--password`, `--bootstrap-ticket` | `--secret`, `--invite` |
+| `GET /api/gossip` | `GET /api/mesh` |
+| Beat fields `host_resources`, `managed_processes`, `e2e_test`, `blob_store`, `endpoint_id` | `stats`, `processes`, `probe`, `store`, `node_id` (old names accepted on read) |
+
+## Current Work
+
+1. **Now — Domain language.** Apply the table above everywhere: Rust types / functions / modules, Beat wire fields (old
+   names accepted on read), CLI and API names (old names as hidden aliases), HUD, README, `ci.sh`, and add the
+   banned-word gate to `ci.sh`.
+2. **Next — Phase 1 security** (see roadmap): allowlist at the QUIC handshake, beats signed with each node's Key and
+   checked for replay, deploys only from allowlisted signers, no process `env` in beats, HUD XSS / token fixes.
+3. **Done — 2026-10-23:** cleanup tier A (384 dead lines removed). **2026-10-22:** authentic stats, RTT, 5s / 30s
+   beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
 
 | # | Feature | What it does | Where it lives |
 |---|---------|--------------|----------------|
-| F1 | **Iroh identity & QUIC transport** | Persistent Ed25519 `EndpointId` (`~/.dialtone/iroh-secret-key`), endpoint presets (N0 / minimal / private mesh), relay / Pkarr DNS / DHT / mDNS policy, tailnet-address filtering, transport diagnostics | `src/identity.rs` |
-| F2 | **Encrypted gossip mesh & membership** | Channel password → Argon2id subkeys (topic, auth, enc), XChaCha20-Poly1305 gossip envelopes, heartbeat MAC, deny-by-default `EndpointId` allowlist, signed single-use invite tickets, seed peers, `~/.dialtone/config.json` persistence | `src/gossip.rs`, run loop in `src/main.rs` |
-| F3 | **Heartbeats, telemetry & RTT** | 5s regular / 30s summary heartbeats, real OS CPU / mem / disk / net sampling (macOS, Linux, Windows), rolling variability + thrashing detection, monotonic RTT echoes → mesh RTT matrix, public-IP / latency-cluster geo placement | `src/evidence.rs`, `src/gossip.rs` |
-| F4 | **SHA-256 blob store & iroh-blobs transfer** | Content-addressed cache under `~/.dialtone/blobs`, `blobs share` / `blobs pull` tickets over QUIC with SHA-256 re-verification, tiered hydration plan (cache → iroh-blobs → guarded HTTP fallback), per-node `blob_store` stats in heartbeats | `src/blobs.rs` |
-| F5 | **Process supervision & E2E worker** | Stage executables from verified blobs, spawn / respawn-on-crash / stop managed processes, default cross-platform `mesh-blob-worker`, 5-capability E2E tick (BLB, KVS, PRC, MSH, A/B) | `src/supervisor.rs`, `DaemonRuntimeState` in `src/http.rs` |
-| F6 | **Deploy, A/B rollback & OS daemon install** | Deploy manifest contract, build-cache probe & build decision, A/B slot rollback planning / verified execution, launchd / systemd `--user` / Windows Scheduled Task install | `src/deploy.rs` |
-| F7 | **Daemon runtime & local control API** | 5-stage boot, shared runtime state, local HTTP API + WebSocket on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin (CSRF, DNS-rebinding) checks, live channel join | `src/main.rs` (`run_node_or_hub`), `src/http.rs` |
-| F8 | **3D tactical HUD** | Embedded Three.js + H3 globe, terminal `top` overlay, 6-step guided tour with closed captions, live blob-download / subprocess-start FX | `render_dashboard_html` in `src/http.rs`, `src/h3_land.rs` |
-| F9 | **Verification suite** | `self-test`, `fleet-test`, `test-tick`, unit + live Iroh tests, `ci.sh` (zero-leak gate, fmt, tests, live acceptance), GitHub CI matrix | `src/lib.rs`, `ci.sh`, `.github/workflows/` |
-| F10 | **Metadata, service discovery & evidence records** | Peer / service refs, service advertisements, key leases, telemetry templates, policies, events / alerts / logs, KV records with cursor pagination, proof validation | `src/metadata.rs`, `src/evidence.rs` |
-| F11 | **CLI & diagnostic fixtures** | Argument parsing, `help`, and the `*-fixture` / planner preview commands | `src/main.rs` |
+| F1 | **Node & transport** | Persistent Key → NodeId, iroh endpoint presets (N0 / minimal / private mesh), relay / Pkarr DNS / DHT / mDNS policy, tailnet-address filtering, transport diagnostics | `node.rs` |
+| F2 | **Mesh membership** | Secret → Argon2id channel keys (topic, auth, enc), XChaCha20-Poly1305 beat envelopes, deny-by-default Allowlist, signed single-use Invites, Seeds, `~/.dialtone/config.json` | `mesh.rs`, run loop in `main.rs` |
+| F3 | **Beats, stats & Rtt** | 5s beats / 30s summaries, real cpu / mem / disk / net stats on macOS, Linux and Windows, spread + thrashing detection, echo Rtt → mesh Rtt matrix, public-IP / Rtt-cluster geo placement | `stats.rs`, `mesh.rs` |
+| F4 | **Blob store & tickets** | Store under `~/.dialtone/blobs` named by Digest, `blob share` / `blob pull` tickets over QUIC with digest re-check, per-node `store` stats in beats | `blob.rs` |
+| F5 | **Supervisor & probe** | Stage programs from blobs, start / restart / stop processes, default `probe` program, the five-check Probe (`BLB` `KVS` `PRC` `MSH` `A/B`) | `supervisor.rs`, node state in `api.rs` |
+| F6 | **Deploy, slots & daemon install** | Deploy contract, A/B slot rollback, launchd / systemd `--user` / Scheduled Task daemon install | `deploy.rs` |
+| F7 | **Node runtime & API** | 5-stage boot, shared node state, API + WebSocket on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `api.rs` |
+| F8 | **HUD** | Embedded Three.js + H3 globe, `top`-style overlay, 6-step tour with captions, blob / process FX | `hud.rs`, `h3_land.rs` |
+| F9 | **Verification** | `self-test`, `mesh-test`, `probe`, unit + live iroh tests, `ci.sh` (zero-leak gate, domain-language gate, fmt, tests, live acceptance), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
+| F10 | **Services & records** | Service refs, Services, key leases, policies, Event / Alert / Log / Kv records with cursor pagination, proof validation | `service.rs`, `record.rs` |
+| F11 | **CLI & fixtures** | Argument parsing, `help`, and the `*-fixture` preview commands | `main.rs` |
 
 ## Code Review (2026-10-23): Findings, Cleanup & Target Iroh Architecture
 
