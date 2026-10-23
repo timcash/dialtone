@@ -469,7 +469,6 @@ impl Store {
             .add_endpoint_info(parsed_ticket.addr().clone());
         let store = self.store.clone();
         let endpoint = self.endpoint.clone();
-        let transport_config = self.transport_config.clone();
         let handle = self.runtime_handle.clone();
         let store_dir_buf = store_dir.to_path_buf();
         let expected_sha_clone = expected_digest.clone();
@@ -478,35 +477,32 @@ impl Store {
         std::thread::scope(|s| {
             s.spawn(move || {
                 handle.block_on(async move {
-                    let is_self = provider_id == endpoint.id();
-                    let tmp_export = std::env::temp_dir().join(format!(
-                        "dialtone-blob-pull-{}-{}.bin",
-                        std::process::id(),
-                        crate::now_unix()
-                    ));
-
-                    let mut fetcher_cfg = if is_self {
-                        IrohTransportConfig::local_offline()
-                    } else {
-                        transport_config.clone()
-                    };
-                    fetcher_cfg.quic_port = None;
-                    fetcher_cfg.exclude_tailnet = transport_config.exclude_tailnet;
-                    let fetcher_ep = build_endpoint_builder(&fetcher_cfg)?
-                        .bind()
-                        .await
-                        .map_err(|e| format!("bind blob fetcher endpoint: {e}"))?;
-                    let mem_lookup = MemoryLookup::new();
-                    if is_self {
-                        mem_lookup.add_endpoint_info(endpoint.addr());
+                    // A node never dials itself: a ticket it issued is read from its own store.
+                    if provider_id == endpoint.id() {
+                        let bytes = match store.blobs().get_bytes(parsed_ticket.hash()).await {
+                            Ok(b) => b.to_vec(),
+                            Err(_) => read_blob(&store_dir_buf, &expected_sha_clone)?,
+                        };
+                        let (verified_digest, _) =
+                            put_blob(&store_dir_buf, &bytes, Some(&expected_sha_clone))?;
+                        return Ok(BlobTransportReport {
+                            digest: verified_digest,
+                            blake3_hash: parsed_ticket.hash().to_string(),
+                            provider_node_id: provider_id.to_string(),
+                            ticket_uri: ticket_uri_owned,
+                            bytes: bytes.len() as u64,
+                            transferred_bytes: 0,
+                            method: "local-self".to_string(),
+                            fallback_used: false,
+                            active_address_modes: vec!["local-self".to_string()],
+                            known_address_modes: vec!["local-self".to_string()],
+                            remote_info_status: "self".to_string(),
+                        });
                     }
-                    mem_lookup.add_endpoint_info(parsed_ticket.addr().clone());
-                    fetcher_ep
-                        .address_lookup()
-                        .map_err(|e| format!("address lookup handle: {e}"))?
-                        .add(mem_lookup);
-                    let tmp_store = MemStore::new();
-                    let downloader = tmp_store.downloader(&fetcher_ep);
+
+                    // Fetch over this node's own endpoint, so the provider sees our NodeId and
+                    // its allowlist decides; the blob lands in the node's iroh-blobs store.
+                    let downloader = store.downloader(&endpoint);
                     tokio::time::timeout(
                         Duration::from_secs(15),
                         downloader.download(parsed_ticket.hash(), Some(provider_id)),
@@ -514,20 +510,16 @@ impl Store {
                     .await
                     .map_err(|_| format!("iroh-blobs download from peer {provider_id} timed out"))?
                     .map_err(|e| {
-                        format!("iroh-blobs download from peer {provider_id} failed: {e}")
+                        format!("iroh-blobs download from peer {provider_id} failed (is this node on its allowlist?): {e}")
                     })?;
                     let (active_modes, known_modes, remote_status) =
-                        observe_remote_info(&fetcher_ep, provider_id).await;
-                    tmp_store
+                        observe_remote_info(&endpoint, provider_id).await;
+                    let downloaded_bytes = store
                         .blobs()
-                        .export(parsed_ticket.hash(), &tmp_export)
+                        .get_bytes(parsed_ticket.hash())
                         .await
-                        .map_err(|e| format!("export downloaded blob: {e}"))?;
-                    let downloaded_bytes =
-                        fs::read(&tmp_export).map_err(|e| format!("read exported blob: {e}"))?;
-                    let _ = fs::remove_file(&tmp_export);
-                    let _ = store.blobs().add_slice(&downloaded_bytes).await;
-                    fetcher_ep.close().await;
+                        .map_err(|e| format!("read downloaded blob: {e}"))?
+                        .to_vec();
 
                     let (verified_digest, _) =
                         put_blob(&store_dir_buf, &downloaded_bytes, Some(&expected_sha_clone))?;
@@ -660,6 +652,78 @@ mod tests {
         assert_eq!(fallback_plan.method, "http-peer-fallback");
         assert!(fallback_plan.fallback_used);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The handshake hook is what makes the allowlist real: a node on the provider's
+    /// allowlist can fetch a blob, any other NodeId is closed right after the TLS handshake.
+    #[test]
+    fn allowlist_hook_admits_listed_nodes_and_closes_everyone_else() {
+        use crate::mesh::LiveAllowlist;
+        use crate::node::AllowlistHook;
+
+        async fn fetch(
+            key: iroh::SecretKey,
+            provider: iroh::EndpointAddr,
+            hash: iroh_blobs::Hash,
+        ) -> Result<Vec<u8>, String> {
+            let lookup = MemoryLookup::new();
+            lookup.add_endpoint_info(provider.clone());
+            let ep = build_endpoint_builder(&IrohTransportConfig::local_offline())?
+                .address_lookup(lookup)
+                .secret_key(key)
+                .bind()
+                .await
+                .map_err(|e| e.to_string())?;
+            let store = MemStore::new();
+            let res = tokio::time::timeout(
+                Duration::from_secs(5),
+                store.downloader(&ep).download(hash, Some(provider.id)),
+            )
+            .await;
+            let out = match res {
+                Ok(Ok(_)) => store
+                    .blobs()
+                    .get_bytes(hash)
+                    .await
+                    .map(|b| b.to_vec())
+                    .map_err(|e| e.to_string()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err("timed out".to_string()),
+            };
+            ep.close().await;
+            out
+        }
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let allowed = iroh::SecretKey::generate();
+            let stranger = iroh::SecretKey::generate();
+            let provider_ep = build_endpoint_builder(&IrohTransportConfig::local_offline())
+                .unwrap()
+                .hooks(AllowlistHook::new(LiveAllowlist::new(&[allowed
+                    .public()
+                    .to_string()])))
+                .bind()
+                .await
+                .unwrap();
+            let provider_store = MemStore::new();
+            let tag = provider_store
+                .blobs()
+                .add_slice(b"only for allowlisted nodes")
+                .await
+                .unwrap();
+            let router = Router::builder(provider_ep.clone())
+                .accept(iroh_blobs::ALPN, BlobsProtocol::new(&provider_store, None))
+                .spawn();
+            let provider_addr = provider_ep.addr();
+
+            let got = fetch(allowed, provider_addr.clone(), tag.hash)
+                .await
+                .unwrap();
+            assert_eq!(got, b"only for allowlisted nodes");
+            assert!(fetch(stranger, provider_addr, tag.hash).await.is_err());
+            let _ = router.shutdown().await;
+        });
     }
 
     #[test]

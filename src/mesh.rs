@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -30,7 +31,10 @@ use crate::service::Service;
 use crate::stats::{sample_stats, Stats, StatsSummary};
 
 pub const BEAT_SCHEMA: &str = "dialtone.iroh.beat.v1";
-pub const DIALTONE_ENVELOPE_SCHEMA_V2: &str = "dialtone.iroh.envelope.v2";
+/// v3: the encrypted plaintext is a `SignedBeat` (beat JSON + the sender Key's Ed25519 signature).
+pub const DIALTONE_ENVELOPE_SCHEMA_V3: &str = "dialtone.iroh.envelope.v3";
+/// Beats sent more than this far from local time (either direction) are rejected.
+pub const REPLAY_WINDOW_MS: u64 = 5 * 60 * 1000;
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
 pub const INVITE_PREFIX: &str = "dialtone-invite-v1:";
 pub const DEFAULT_CHANNEL_NAME: &str = "dialtone";
@@ -1537,8 +1541,9 @@ pub struct Beat {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(alias = "blob_store")] // compat
     pub store: Option<StoreStats>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub channel_mac: Option<String>,
+    /// Sender wall-clock send time in ms, strictly increasing per sender (replay check).
+    #[serde(default)]
+    pub sent_unix_ms: u64,
     #[serde(default = "default_os")]
     pub os: String,
     #[serde(default = "default_arch")]
@@ -1580,77 +1585,101 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-pub fn beat_mac(beat: &Beat, channel: &str, auth_key: &[u8; 32]) -> String {
-    let norm_channel = normalize_channel_name(Some(channel));
-    let mut hasher = Sha256::new();
-    hasher.update(b"dialtone.heartbeat.mac.v2:"); // compat: MAC domain label is a protocol constant
-    hasher.update(auth_key);
-    hasher.update(b":");
-    hasher.update(norm_channel.as_bytes());
-    hasher.update(b":");
-    hasher.update(beat.node.as_bytes());
-    hasher.update(b":");
-    hasher.update(beat.node_id.as_bytes());
-    hasher.update(b":");
-    hasher.update(beat.counter.to_string().as_bytes());
-    hasher.update(b":");
-    hasher.update(beat.updated_at_unix.to_string().as_bytes());
-    let digest: [u8; 32] = hasher.finalize().into();
-    crate::hex_encode(&digest)
+/// What a sealed frame carries: the exact beat JSON that was signed, and its signature.
+#[derive(Serialize, Deserialize)]
+struct SignedBeat {
+    beat: String,
+    sig: String,
 }
 
-/// Sign `Beat` in-place with `ChannelKeys`.
-pub fn sign_beat(beat: &mut Beat, keys: &ChannelKeys) {
-    beat.channel_mac = Some(beat_mac(beat, &keys.channel, &keys.auth_key));
+/// Wall-clock milliseconds, but never equal to or below the previous value returned in
+/// this process, so every beat a node sends is strictly newer than the one before.
+fn next_sent_unix_ms() -> u64 {
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let mut prev = LAST.load(Ordering::Relaxed);
+    loop {
+        let next = now.max(prev + 1);
+        match LAST.compare_exchange_weak(prev, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return next,
+            Err(seen) => prev = seen,
+        }
+    }
 }
 
-/// Verify in constant time that `Beat` carries a valid MAC for `keys`.
-pub fn verify_beat(beat: &Beat, keys: &ChannelKeys) -> bool {
-    let Some(ref provided_mac) = beat.channel_mac else {
-        return false;
-    };
-    let expected_mac = beat_mac(beat, &keys.channel, &keys.auth_key);
-    constant_time_eq(provided_mac.as_bytes(), expected_mac.as_bytes())
+/// The form of a process that leaves this node in a beat: no `env` or `args` (they may hold
+/// secrets), and an explicit `deploy_ticket` when the process is offered for mesh deploy.
+pub fn process_advert(spec: &crate::service::ProcessSpec) -> crate::service::ProcessSpec {
+    let mut advert = spec.clone();
+    let offered = spec.env.iter().any(|kv| kv == "DIALTONE_MESH_DEPLOY=1");
+    advert.deploy_ticket = spec.deploy_ticket.clone().or_else(|| {
+        offered
+            .then(|| {
+                spec.env
+                    .iter()
+                    .find_map(|kv| kv.strip_prefix("DIALTONE_BLOB_TICKET="))
+                    .map(str::to_string)
+            })
+            .flatten()
+    });
+    advert.env.clear();
+    advert.args.clear();
+    advert
 }
 
-/// Encrypt and authenticate a `Beat` using **XChaCha20-Poly1305** with a random 24-byte
-/// nonce and `DIALTONE_ENVELOPE_SCHEMA_V2` as Associated Data (AAD) (Issue #5).
-pub fn seal_beat(beat: &Beat, keys: &ChannelKeys) -> Result<Vec<u8>, String> {
-    let mut signed_beat = beat.clone();
-    sign_beat(&mut signed_beat, keys);
-    let plaintext = serde_json::to_vec(&signed_beat).map_err(|e| e.to_string())?;
+/// Sign a `Beat` with this node's Key, then encrypt it with XChaCha20-Poly1305 (random
+/// 24-byte nonce, `DIALTONE_ENVELOPE_SCHEMA_V3` as AAD). Process `env` / `args` never
+/// leave the node, and `sent_unix_ms` is stamped here so every frame is unique.
+pub fn seal_beat(
+    beat: &Beat,
+    keys: &ChannelKeys,
+    key: &iroh::SecretKey,
+) -> Result<Vec<u8>, String> {
+    let mut wire = beat.clone();
+    wire.sent_unix_ms = next_sent_unix_ms();
+    wire.processes = beat.processes.iter().map(process_advert).collect();
+    let beat_json = serde_json::to_string(&wire).map_err(|e| e.to_string())?;
+    let sig = key.sign(beat_json.as_bytes());
+    let plaintext = serde_json::to_vec(&SignedBeat {
+        beat: beat_json,
+        sig: crate::hex_encode(&sig.to_bytes()),
+    })
+    .map_err(|e| e.to_string())?;
 
     let rand_bytes = iroh::SecretKey::generate().to_bytes();
     let nonce_bytes = &rand_bytes[..24];
     let nonce = XNonce::from_slice(nonce_bytes);
     let cipher = XChaCha20Poly1305::new((&keys.enc_key).into());
-
     let ciphertext = cipher
         .encrypt(
             nonce,
             Payload {
                 msg: &plaintext,
-                aad: DIALTONE_ENVELOPE_SCHEMA_V2.as_bytes(),
+                aad: DIALTONE_ENVELOPE_SCHEMA_V3.as_bytes(),
             },
         )
         .map_err(|_| "XChaCha20-Poly1305 encryption failed".to_string())?;
 
     let env = EncryptedGossipEnvelope {
-        schema: DIALTONE_ENVELOPE_SCHEMA_V2.to_string(),
+        schema: DIALTONE_ENVELOPE_SCHEMA_V3.to_string(),
         nonce: crate::hex_encode(nonce_bytes),
         ciphertext: crate::base64url_encode(&ciphertext),
     };
     serde_json::to_vec(&env).map_err(|e| e.to_string())
 }
 
-/// Decrypt and authenticate an `EncryptedGossipEnvelope` frame from `iroh-gossip` (Issue #5).
-/// Drops any plaintext frame, tampered ciphertext, wrong AAD, or invalid inner MAC.
+/// Decrypt a gossip frame and verify that the beat inside was signed by the Key of the
+/// `node_id` it names. Drops plaintext frames, other envelope versions, tampered
+/// ciphertext, and beats whose signature does not match their claimed NodeId.
 pub fn open_beat(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Beat, String> {
     let env: EncryptedGossipEnvelope = serde_json::from_slice(raw_frame)
         .map_err(|_| "gossip frame is not a valid encrypted envelope".to_string())?;
-    if env.schema != DIALTONE_ENVELOPE_SCHEMA_V2 {
+    if env.schema != DIALTONE_ENVELOPE_SCHEMA_V3 {
         return Err(format!(
-            "unsupported gossip envelope schema '{}'",
+            "unsupported gossip envelope schema '{}' (expected {DIALTONE_ENVELOPE_SCHEMA_V3})",
             env.schema
         ));
     }
@@ -1661,25 +1690,126 @@ pub fn open_beat(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Beat, String> {
     let ciphertext = crate::base64_decode(&env.ciphertext)?;
     let nonce = XNonce::from_slice(&nonce_bytes);
     let cipher = XChaCha20Poly1305::new((&keys.enc_key).into());
-
     let plaintext = cipher
         .decrypt(
             nonce,
             Payload {
                 msg: &ciphertext,
-                aad: DIALTONE_ENVELOPE_SCHEMA_V2.as_bytes(),
+                aad: DIALTONE_ENVELOPE_SCHEMA_V3.as_bytes(),
             },
         )
         .map_err(|_| {
             "XChaCha20-Poly1305 decryption failed (wrong key or tampered frame)".to_string()
         })?;
 
-    let beat: Beat = serde_json::from_slice(&plaintext)
+    let signed: SignedBeat =
+        serde_json::from_slice(&plaintext).map_err(|e| format!("invalid signed beat: {e}"))?;
+    let beat: Beat = serde_json::from_str(&signed.beat)
         .map_err(|e| format!("invalid decrypted beat JSON: {e}"))?;
-    if !verify_beat(&beat, keys) {
-        return Err("decrypted beat failed inner channel_mac verification".to_string());
-    }
+    let signer: iroh::PublicKey = beat
+        .node_id
+        .parse()
+        .map_err(|_| format!("beat names an invalid node_id '{}'", beat.node_id))?;
+    let sig_bytes: [u8; 64] = crate::hex_decode(&signed.sig)?
+        .try_into()
+        .map_err(|_| "beat signature must be 64 bytes".to_string())?;
+    signer
+        .verify(
+            signed.beat.as_bytes(),
+            &iroh::Signature::from_bytes(&sig_bytes),
+        )
+        .map_err(|_| format!("beat signature does not match node_id {}", beat.node_id))?;
     Ok(beat)
+}
+
+/// Rejects a beat unless it is strictly newer than the last one accepted from the same
+/// node and was sent within `REPLAY_WINDOW_MS` of local time.
+#[derive(Debug, Default)]
+pub struct ReplayGuard {
+    last_sent_ms: HashMap<String, u64>,
+}
+
+impl ReplayGuard {
+    pub fn admit(
+        &mut self,
+        node_id: &str,
+        sent_unix_ms: u64,
+        now_unix_ms: u64,
+    ) -> Result<(), String> {
+        if sent_unix_ms.abs_diff(now_unix_ms) > REPLAY_WINDOW_MS {
+            return Err(format!(
+                "beat sent_unix_ms={sent_unix_ms} is more than {}s from local time {now_unix_ms}",
+                REPLAY_WINDOW_MS / 1000
+            ));
+        }
+        let last = self.last_sent_ms.entry(node_id.to_string()).or_insert(0);
+        if sent_unix_ms <= *last {
+            return Err(format!(
+                "replayed or stale beat (sent_unix_ms={sent_unix_ms} <= last accepted {})",
+                *last
+            ));
+        }
+        *last = sent_unix_ms;
+        Ok(())
+    }
+}
+
+/// The allowlist the node enforces right now: read by the QUIC handshake hook, the beat
+/// receiver and mesh deploy; refreshed whenever `config.json` changes.
+#[derive(Clone, Debug, Default)]
+pub struct LiveAllowlist(
+    std::sync::Arc<std::sync::RwLock<std::collections::HashSet<iroh::EndpointId>>>,
+); // compat: iroh type
+
+impl LiveAllowlist {
+    pub fn new(node_ids: &[String]) -> Self {
+        let live = Self::default();
+        live.replace(node_ids);
+        live
+    }
+
+    /// Replace the set; entries that are not valid NodeIds are ignored.
+    pub fn replace(&self, node_ids: &[String]) {
+        let parsed = node_ids
+            .iter()
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        if let Ok(mut set) = self.0.write() {
+            *set = parsed;
+        }
+    }
+
+    pub fn contains(&self, node_id: &iroh::EndpointId) -> bool {
+        // compat: iroh type
+        self.0
+            .read()
+            .map(|set| set.contains(node_id))
+            .unwrap_or(false)
+    }
+
+    pub fn contains_str(&self, node_id: &str) -> bool {
+        node_id
+            .parse()
+            .map(|id| self.contains(&id))
+            .unwrap_or(false)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.read().map(|set| set.len()).unwrap_or(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Node names travel in beats and are shown in the HUD; only plain names are accepted.
+pub fn is_valid_node_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
 pub async fn observe_peer_remote_addrs(
@@ -1758,9 +1888,16 @@ pub async fn verify_live_gossip_exchange(
     let keys = derive_channel_keys_v2(DEFAULT_CHANNEL_NAME, test_secret);
     let topic_id = keys.topic_id;
 
+    // Each node allowlists only the other, exactly as a two-node mesh would.
+    let key_a = iroh::SecretKey::generate();
+    let key_b = iroh::SecretKey::generate();
     let lookup_a = MemoryLookup::new();
     let endpoint_a = build_endpoint_builder(&config)?
         .address_lookup(lookup_a.clone())
+        .secret_key(key_a.clone())
+        .hooks(crate::node::AllowlistHook::new(LiveAllowlist::new(&[
+            key_b.public().to_string(),
+        ])))
         .bind()
         .await
         .map_err(|e| format!("bind endpoint A: {e}"))?;
@@ -1774,6 +1911,10 @@ pub async fn verify_live_gossip_exchange(
     let lookup_b = MemoryLookup::new();
     let endpoint_b = build_endpoint_builder(&config)?
         .address_lookup(lookup_b.clone())
+        .secret_key(key_b.clone())
+        .hooks(crate::node::AllowlistHook::new(LiveAllowlist::new(&[
+            key_a.public().to_string(),
+        ])))
         .bind()
         .await
         .map_err(|e| format!("bind endpoint B: {e}"))?;
@@ -1824,7 +1965,7 @@ pub async fn verify_live_gossip_exchange(
         .await
         .map_err(|e| format!("join_peers B->A: {e}"))?;
 
-    let mut beat_a = Beat {
+    let beat_a = Beat {
         schema: BEAT_SCHEMA.to_string(),
         node: node_a.to_string(),
         node_id: id_a.to_string(),
@@ -1839,7 +1980,7 @@ pub async fn verify_live_gossip_exchange(
         peer_echoes: HashMap::new(),
         peer_rtt_ms: std::collections::BTreeMap::new(),
         summary_stats: None,
-        channel_mac: None,
+        sent_unix_ms: 0,
         os: default_os(),
         arch: default_arch(),
         role: node_role_for(node_a),
@@ -1865,11 +2006,10 @@ pub async fn verify_live_gossip_exchange(
         probe: None,
         store: None,
     };
-    sign_beat(&mut beat_a, &keys);
 
     let received_beat: Beat = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let encrypted_payload_a = seal_beat(&beat_a, &keys)?;
+            let encrypted_payload_a = seal_beat(&beat_a, &keys, &key_a)?;
             let _ = sender_a.broadcast(encrypted_payload_a.into()).await;
             while let Ok(Some(event)) =
                 tokio::time::timeout(Duration::from_millis(120), receiver_b.next()).await
@@ -1887,7 +2027,7 @@ pub async fn verify_live_gossip_exchange(
     .await
     .map_err(|_| "timed out waiting for encrypted iroh-gossip beat".to_string())??;
 
-    let mut beat_b = Beat {
+    let beat_b = Beat {
         schema: BEAT_SCHEMA.to_string(),
         node: node_b.to_string(),
         node_id: id_b.to_string(),
@@ -1902,7 +2042,7 @@ pub async fn verify_live_gossip_exchange(
         peer_echoes: HashMap::new(),
         peer_rtt_ms: std::collections::BTreeMap::new(),
         summary_stats: None,
-        channel_mac: None,
+        sent_unix_ms: 0,
         os: default_os(),
         arch: default_arch(),
         role: node_role_for(node_b),
@@ -1917,7 +2057,6 @@ pub async fn verify_live_gossip_exchange(
         probe: None,
         store: None,
     };
-    sign_beat(&mut beat_b, &keys);
 
     let _ = router_a.shutdown().await;
     let _ = router_b.shutdown().await;
@@ -2060,11 +2199,13 @@ mod tests {
 
         let cfg = IrohTransportConfig::local_offline();
         let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
-        let diag = build_diagnostics(&cfg, &addr, None, "ep-secret-node");
+        let node_key = iroh::SecretKey::generate();
+        let node_id = node_key.public().to_string();
+        let diag = build_diagnostics(&cfg, &addr, None, &node_id);
         let beat = Beat {
             schema: BEAT_SCHEMA.to_string(),
             node: "node-alpha".to_string(),
-            node_id: "ep-secret-node".to_string(),
+            node_id: node_id.clone(),
             ticket: "iroh-gossip-v1:super-secret-ticket".to_string(),
             counter: 42,
             updated_at_unix: 1_700_000_000,
@@ -2076,7 +2217,7 @@ mod tests {
             peer_echoes: HashMap::new(),
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
-            channel_mac: None,
+            sent_unix_ms: 0,
             os: default_os(),
             arch: default_arch(),
             role: node_role_for("node-alpha"),
@@ -2092,11 +2233,11 @@ mod tests {
             store: None,
         };
 
-        let wire_bytes = seal_beat(&beat, &k1).unwrap();
+        let wire_bytes = seal_beat(&beat, &k1, &node_key).unwrap();
         let wire_str = String::from_utf8_lossy(&wire_bytes);
         // Captured gossip frames must contain NO plaintext fields
         assert!(!wire_str.contains("node-alpha"));
-        assert!(!wire_str.contains("ep-secret-node"));
+        assert!(!wire_str.contains(&node_id));
         assert!(!wire_str.contains("super-secret-ticket"));
         assert!(!wire_str.contains("stats"));
 
@@ -2111,6 +2252,155 @@ mod tests {
         tampered_env.ciphertext.push_str("AA");
         let tampered_bytes = serde_json::to_vec(&tampered_env).unwrap();
         assert!(open_beat(&tampered_bytes, &k1).is_err());
+    }
+
+    fn test_beat(node_key: &iroh::SecretKey) -> Beat {
+        let addr = EndpointAddr::new(node_key.public());
+        let node_id = node_key.public().to_string();
+        Beat {
+            schema: BEAT_SCHEMA.to_string(),
+            node: "node-alpha".to_string(),
+            node_id: node_id.clone(),
+            ticket: String::new(),
+            counter: 1,
+            updated_at_unix: 1_700_000_000,
+            kind: "regular".to_string(),
+            beat_interval_secs: BEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_INTERVAL_SECS,
+            sent_mono_ms: 1,
+            rtt_probe_requested: false,
+            peer_echoes: HashMap::new(),
+            peer_rtt_ms: std::collections::BTreeMap::new(),
+            summary_stats: None,
+            sent_unix_ms: 0,
+            os: default_os(),
+            arch: default_arch(),
+            role: String::new(),
+            capabilities: Vec::new(),
+            stats: Stats::default(),
+            service_endpoints: Vec::new(),
+            processes: Vec::new(),
+            iroh_transport: build_diagnostics(
+                &IrohTransportConfig::local_offline(),
+                &addr,
+                None,
+                &node_id,
+            ),
+            observed_remote_addrs: Vec::new(),
+            tailnet_used: false,
+            geo_location: None,
+            probe: None,
+            store: None,
+        }
+    }
+
+    #[test]
+    fn beats_are_signed_by_the_sender_key_and_forged_node_ids_are_rejected() {
+        let keys = derive_channel_keys_v2("dialtone", "dt-Signed_Beat_Test_Secret_2026!");
+        let alice = iroh::SecretKey::generate();
+        let mallory = iroh::SecretKey::generate();
+
+        let beat = test_beat(&alice);
+        let opened = open_beat(&seal_beat(&beat, &keys, &alice).unwrap(), &keys).unwrap();
+        assert_eq!(opened.node_id, alice.public().to_string());
+        assert!(opened.sent_unix_ms > 0);
+
+        // Mallory knows the channel secret but not Alice's Key: claiming Alice's NodeId fails.
+        let forged = open_beat(&seal_beat(&beat, &keys, &mallory).unwrap(), &keys);
+        assert!(forged.unwrap_err().contains("signature does not match"));
+
+        // Every sealed beat is strictly newer than the previous one from this process.
+        let a = open_beat(&seal_beat(&beat, &keys, &alice).unwrap(), &keys).unwrap();
+        let b = open_beat(&seal_beat(&beat, &keys, &alice).unwrap(), &keys).unwrap();
+        assert!(b.sent_unix_ms > a.sent_unix_ms);
+    }
+
+    #[test]
+    fn replay_guard_rejects_replayed_stale_and_far_future_beats() {
+        let mut guard = ReplayGuard::default();
+        let now = 1_800_000_000_000u64;
+        assert!(guard.admit("n1", now, now).is_ok());
+        assert!(guard.admit("n1", now, now).is_err(), "exact replay");
+        assert!(
+            guard.admit("n1", now - 1, now).is_err(),
+            "older than last accepted"
+        );
+        assert!(guard.admit("n1", now + 1, now).is_ok());
+        assert!(guard.admit("n2", now - 1, now).is_ok(), "per-node state");
+        assert!(
+            guard.admit("n3", now - REPLAY_WINDOW_MS - 1, now).is_err(),
+            "too old"
+        );
+        assert!(
+            guard.admit("n3", now + REPLAY_WINDOW_MS + 1, now).is_err(),
+            "too far ahead"
+        );
+    }
+
+    #[test]
+    fn process_env_never_leaves_the_node_and_offers_become_deploy_tickets() {
+        let keys = derive_channel_keys_v2("dialtone", "dt-Process_Advert_Test_Secret_2026!");
+        let alice = iroh::SecretKey::generate();
+        let mut beat = test_beat(&alice);
+        let spec = |name: &str, env: Vec<&str>| crate::service::ProcessSpec {
+            name: name.to_string(),
+            path: "/tmp/p".to_string(),
+            digest: format!("sha256:{}", "c".repeat(64)),
+            desired_state: "running".to_string(),
+            args: vec!["--token".to_string(), "hunter2".to_string()],
+            env: env.into_iter().map(String::from).collect(),
+            cwd: None,
+            startup_grace_secs: None,
+            status: Some("running".to_string()),
+            pid: Some(1),
+            restart_count: 0,
+            service_unit: None,
+            deploy_ticket: None,
+        };
+        beat.processes = vec![
+            spec(
+                "offered",
+                vec![
+                    "DIALTONE_MESH_DEPLOY=1",
+                    "DIALTONE_BLOB_TICKET=iroh-blobs://ticket/x",
+                    "API_KEY=s3cret",
+                ],
+            ),
+            spec(
+                "private",
+                vec![
+                    "DIALTONE_BLOB_TICKET=iroh-blobs://ticket/y",
+                    "API_KEY=s3cret",
+                ],
+            ),
+        ];
+        let opened = open_beat(&seal_beat(&beat, &keys, &alice).unwrap(), &keys).unwrap();
+        for p in &opened.processes {
+            assert!(
+                p.env.is_empty() && p.args.is_empty(),
+                "{} leaked env/args",
+                p.name
+            );
+        }
+        assert_eq!(
+            opened.processes[0].deploy_ticket.as_deref(),
+            Some("iroh-blobs://ticket/x")
+        );
+        assert_eq!(opened.processes[1].deploy_ticket, None);
+    }
+
+    #[test]
+    fn live_allowlist_parses_node_ids_and_ignores_garbage() {
+        let a = iroh::SecretKey::generate().public();
+        let live = LiveAllowlist::new(&[a.to_string(), "not-a-node-id".to_string()]);
+        assert_eq!(live.len(), 1);
+        assert!(live.contains(&a));
+        assert!(!live.contains_str(&iroh::SecretKey::generate().public().to_string()));
+        live.replace(&[]);
+        assert!(live.is_empty() && !live.contains(&a));
+        assert!(is_valid_node_name("edge-1.lab_2"));
+        assert!(!is_valid_node_name("<img src=x onerror=alert(1)>"));
+        assert!(!is_valid_node_name(""));
     }
 
     /// Beats from peers and config files written before the domain-language rename use the
@@ -2166,7 +2456,7 @@ mod tests {
             peer_echoes: HashMap::new(),
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
-            channel_mac: None,
+            sent_unix_ms: 0,
             os: default_os(),
             arch: default_arch(),
             role: String::new(),
@@ -2186,6 +2476,7 @@ mod tests {
                 pid: Some(42),
                 restart_count: 0,
                 service_unit: None,
+                deploy_ticket: None,
             }],
             iroh_transport: diag,
             observed_remote_addrs: Vec::new(),
@@ -2324,7 +2615,7 @@ mod tests {
             peer_echoes: HashMap::new(),
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
-            channel_mac: None,
+            sent_unix_ms: 0,
             os: default_os(),
             arch: default_arch(),
             role: node_role_for("node-alpha"),
@@ -2382,7 +2673,7 @@ mod tests {
             peer_echoes: HashMap::new(),
             peer_rtt_ms: std::collections::BTreeMap::from([("node-beta".to_string(), 14.2)]),
             summary_stats: None,
-            channel_mac: None,
+            sent_unix_ms: 0,
             os: default_os(),
             arch: default_arch(),
             role: node_role_for("node-alpha"),

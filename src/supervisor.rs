@@ -495,6 +495,7 @@ pub fn ensure_probe_program(
         pid: None,
         restart_count: 0,
         service_unit: None,
+        deploy_ticket: None,
     };
     specs.push(spec.clone());
     Ok(spec)
@@ -669,6 +670,7 @@ mod tests {
             pid: None,
             restart_count: 0,
             service_unit: Some("rtcore.service".to_string()),
+            deploy_ticket: None,
         };
 
         let report = reconcile_systemd_intent_drop_in(
@@ -713,6 +715,7 @@ mod tests {
             pid: None,
             restart_count: 0,
             service_unit: None,
+            deploy_ticket: None,
         }];
         hydrate_process_digests(&mut specs, &[], &HashMap::new());
         assert!(specs[0].digest.starts_with("sha256:") && specs[0].digest != "sha256:unknown");
@@ -759,6 +762,7 @@ mod tests {
             pid: None,
             restart_count: 0,
             service_unit: None,
+            deploy_ticket: None,
         }];
 
         let mut sup = Supervisor::new();

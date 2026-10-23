@@ -420,6 +420,7 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
         pid: None,
         restart_count: 0,
         service_unit: Some("self-test-sleep.service".to_string()),
+        deploy_ticket: None,
     }];
     hydrate_process_digests(&mut proc_specs, &[], &HashMap::new());
     let _ = plan_process_intent("node-alpha", "edge-1", &proc_specs[0], "restart")?;

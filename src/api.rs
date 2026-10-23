@@ -638,7 +638,7 @@ impl NodeState {
             peer_echoes: HashMap::new(),
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
-            channel_mac: None,
+            sent_unix_ms: 0,
             os: default_os(),
             arch: default_arch(),
             role: node_role_for(node),
@@ -818,7 +818,7 @@ impl NodeState {
                 peer_echoes: HashMap::new(),
                 peer_rtt_ms: std::collections::BTreeMap::new(),
                 summary_stats: None,
-                channel_mac: None,
+                sent_unix_ms: 0,
                 os: default_os(),
                 arch: default_arch(),
                 role: node_role_for(peer_name),
@@ -928,6 +928,7 @@ impl NodeState {
                 pid: Some(4242),
                 restart_count: 0,
                 service_unit: Some("robot-edge-motion-server.service".to_string()),
+                deploy_ticket: None,
             }],
             deploy_slots: vec![DeploySlot {
                 name: "edge-1-motion-server".to_string(),
@@ -1170,11 +1171,13 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
     match (method, path) {
         ("GET", "/") | ("GET", "/nodes") | ("GET", "/peer") | ("GET", "/hud") => {
             st.reconcile_processes();
-            let html = render_hud(&st, query.get("peer-id").map(String::as_str));
-            write_response(
+            let nonce = crate::hex_encode(&iroh::SecretKey::generate().to_bytes()[..16]);
+            let html = render_hud(&st, query.get("peer-id").map(String::as_str), &nonce);
+            write_response_with_headers(
                 &mut stream,
                 200,
                 "text/html; charset=utf-8",
+                &hud_security_headers(&nonce),
                 html.as_bytes(),
                 false,
             )
@@ -1824,6 +1827,7 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 pid: None,
                 restart_count: prev_restart_count,
                 service_unit: None,
+                deploy_ticket: None,
             };
 
             let sup_res = {
@@ -2192,10 +2196,36 @@ fn write_json<T: Serialize>(stream: &mut TcpStream, status: u16, value: &T) -> R
     write_response(stream, status, "application/json", &body, false)
 }
 
+/// Headers for the HUD page. The CSP lets only the page's own nonce-tagged scripts (plus the
+/// pinned three.js / h3-js modules they import) run, so markup a peer manages to get into the
+/// page can never execute; the page may only talk back to this API.
+fn hud_security_headers(nonce: &str) -> String {
+    format!(
+        "Content-Security-Policy: default-src 'none'; script-src 'nonce-{nonce}' https://cdn.jsdelivr.net; \
+         style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; \
+         base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         Referrer-Policy: no-referrer\r\n\
+         X-Frame-Options: DENY\r\n"
+    )
+}
+
 fn write_response(
     stream: &mut TcpStream,
     status: u16,
     content_type: &str,
+    body: &[u8],
+    head_only: bool,
+) -> Result<(), String> {
+    write_response_with_headers(stream, status, content_type, "", body, head_only)
+}
+
+/// `extra_headers` is a block of complete `Name: value\r\n` lines.
+fn write_response_with_headers(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    extra_headers: &str,
     body: &[u8],
     head_only: bool,
 ) -> Result<(), String> {
@@ -2210,7 +2240,7 @@ fn write_response(
         _ => "Response",
     };
     let header = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{extra_headers}Connection: close\r\n\r\n",
         body.len()
     );
     stream
@@ -2259,6 +2289,59 @@ mod tests {
 
         assert_eq!(latest_digest(&dir), Some(format!("sha256:{newer}")));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hud_page_runs_only_nonce_scripts_and_never_embeds_the_api_token() {
+        let tmp_dir = env::temp_dir().join(format!("dialtone-hud-csp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let ep_addr = EndpointAddr::new(SecretKey::generate().public());
+        let diag = build_diagnostics(&IrohTransportConfig::local_offline(), &ep_addr, None, "n1");
+        let mut node = NodeState::new_seeded(
+            "node-alpha",
+            "hub",
+            &addr.to_string(),
+            tmp_dir.clone(),
+            diag,
+        );
+        node.api_token = "dtk-must-never-appear-in-html-0123456789".to_string();
+        let state = Arc::new(Mutex::new(node));
+        let state_bg = state.clone();
+        let handle = thread::spawn(move || {
+            serve_http_blocking(listener, state_bg, Some(1)).unwrap();
+        });
+
+        let resp = raw_http_request(
+            addr,
+            "GET /?peer-id=%3C/script%3E%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        );
+        handle.join().unwrap();
+        let (head, body) = resp.split_once("\r\n\r\n").unwrap();
+        let csp = head
+            .lines()
+            .find(|l| l.starts_with("Content-Security-Policy:"))
+            .expect("HUD must send a CSP");
+        let nonce = csp
+            .split("'nonce-")
+            .nth(1)
+            .unwrap()
+            .split('\'')
+            .next()
+            .unwrap();
+        assert!(nonce.len() >= 16);
+        assert!(csp.contains("default-src 'none'") && !csp.contains("unsafe-eval"));
+        assert_eq!(body.matches(&format!("nonce=\"{nonce}\"")).count(), 2);
+        assert_eq!(
+            body.matches("<script").count(),
+            2,
+            "only the two nonce-tagged scripts"
+        );
+        assert!(!body.contains("dtk-must-never-appear-in-html"));
+        assert!(!body.contains("__API_TOKEN__") && !body.contains("__CSP_NONCE__"));
+        assert!(head.contains("X-Content-Type-Options: nosniff"));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 
     #[test]

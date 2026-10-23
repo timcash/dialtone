@@ -6,7 +6,13 @@ use crate::api::*;
 use crate::h3_land::LAND_H3_BITSET_B64;
 use crate::mesh::{BEAT_INTERVAL_SECS, SUMMARY_INTERVAL_SECS};
 
-pub(crate) fn render_hud(state: &NodeState, selected_peer: Option<&str>) -> String {
+/// Render the HUD page. `csp_nonce` must match the `Content-Security-Policy` header sent
+/// with it; only the two `<script>` tags carrying it may run.
+pub(crate) fn render_hud(
+    state: &NodeState,
+    selected_peer: Option<&str>,
+    csp_nonce: &str,
+) -> String {
     let peer_focus = selected_peer.unwrap_or(&state.node);
     let (blob_keys, blob_bytes) = count_store(&state.store_dir);
     let initial_gossip = json!({
@@ -41,7 +47,7 @@ pub(crate) fn render_hud(state: &NodeState, selected_peer: Option<&str>) -> Stri
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>dialtone // __SELF_NODE__ — Dialtone Iroh 1.3 Mesh Control Plane</title>
-<script type="importmap">
+<script type="importmap" nonce="__CSP_NONCE__">
 {
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js",
@@ -666,12 +672,21 @@ pub(crate) fn render_hud(state: &NodeState, selected_peer: Option<&str>) -> Stri
   </aside>
 </div>
 
-<script type="module">
+<script type="module" nonce="__CSP_NONCE__">
 import * as THREE from "three";
 import { cellToBoundary, latLngToCell, gridDisk } from "h3-js";
 
-const INITIAL_STATE = __INITIAL_JSON__;
-const API_TOKEN = "__API_TOKEN__";
+// Peer-supplied text is shown in the HUD; strip markup characters from every string
+// in the state before anything renders it.
+function scrubStrings(value) {
+  if (typeof value === "string") return value.replace(/[<>"'`&]/g, "");
+  if (Array.isArray(value)) return value.map(scrubStrings);
+  if (value && typeof value === "object") {
+    for (const k of Object.keys(value)) value[k] = scrubStrings(value[k]);
+  }
+  return value;
+}
+const INITIAL_STATE = scrubStrings(__INITIAL_JSON__);
 const LAND_H3_BITSET_B64 = "__LAND_H3_BITSET_B64__";
 
 // ---------------------------------------------------------------------------
@@ -3165,25 +3180,15 @@ bindToggle("toggle-quic-arcs", "QUIC ARCS", () => cfgShowArcs, v => { cfgShowArc
 bindToggle("toggle-clouds", "CLOUDS", () => cfgShowClouds, v => { cfgShowClouds = v; });
 bindToggle("toggle-drones", "SYMBOL ACTIVITY", () => cfgShowActivity, v => { cfgShowActivity = v; });
 
-// Mesh API actions (Init / Invite / Join)
-async function callMeshApi(path, bodyObj) {
-  const outEl = document.getElementById("menu-mesh-output");
-  outEl.textContent = `Calling ${path}...`;
-  try {
-    const resp = await fetch(path, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${API_TOKEN}`
-      },
-      body: JSON.stringify(bodyObj || {})
-    });
-    const data = await resp.json();
-    outEl.textContent = JSON.stringify(data, null, 2);
-    await pollGossipState();
-  } catch (err) {
-    outEl.textContent = `ERROR: ${err}`;
-  }
+// Mesh actions (Init / Invite / Join). The page carries no API token, so these point at the
+// CLI until the API grows /api/channel/* routes (goal.md roadmap, Phase 3).
+const MESH_CLI_HINT = {
+  "/api/channel/init": "dialtone secret   # then: dialtone join <secret>",
+  "/api/channel/invite": "dialtone invite --ttl 15m",
+  "/api/channel/join": "dialtone join <secret> --invite <invite>"
+};
+async function callMeshApi(path) {
+  document.getElementById("menu-mesh-output").textContent = `Run on this node:\n  ${MESH_CLI_HINT[path]}`;
 }
 
 document.getElementById("btn-init-mesh").addEventListener("click", () => {
@@ -3462,7 +3467,7 @@ async function pollGossipState() {
     const resp = await fetch("/api/mesh", { cache: "no-store" });
     if (!resp.ok) return;
     const data = await resp.json();
-    meshState = data;
+    meshState = scrubStrings(data);
     if (!meshState.nodes.some(n => n.node === selectedNode) && meshState.nodes.length > 0) {
       selectedNode = meshState.self_node || meshState.nodes[0].node;
       stepTour(0, performance.now());
@@ -3492,9 +3497,26 @@ setInterval(pollGossipState, 1500);
 </html>"##;
 
     template
-        .replace("__SELF_NODE__", &state.node)
-        .replace("__PEER_FOCUS__", peer_focus)
-        .replace("__INITIAL_JSON__", &initial_json)
-        .replace("__API_TOKEN__", &state.api_token)
+        .replace("__SELF_NODE__", &html_escape(&state.node))
+        .replace("__CSP_NONCE__", csp_nonce)
+        .replace("__INITIAL_JSON__", &script_safe_json(&initial_json))
         .replace("__LAND_H3_BITSET_B64__", LAND_H3_BITSET_B64)
+}
+
+/// Escape text for an HTML text node or attribute value.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// JSON that is safe to embed inside `<script>`: no `</script>`, `<!--` or line separators.
+fn script_safe_json(json: &str) -> String {
+    json.replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
 }

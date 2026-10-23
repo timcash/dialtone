@@ -19,16 +19,18 @@ use dialtone::mesh::{
     allow_peer_in_config_with_addrs, build_mesh_rtt_matrix, cached_local_public_ip_geo,
     compute_rtt_ms_from_echo, default_arch, default_config_path, default_os, default_seeds,
     default_store_dir, derive_standby_topic_id, detect_default_node_name, is_allowed_peer_in_list,
-    load_mesh_config, monotonic_now_ms, new_invite, new_secret, node_capabilities_for,
-    node_role_for, normalize_channel_name, now_unix, observe_peer_remote_addrs, open_beat,
-    parse_duration_secs, place_nodes, redeem_invite, revoke_peer_in_config, save_mesh_config,
-    seal_beat, sign_beat, spawn_background_public_ip_geo_probe, validate_secret, Beat, ChannelKeys,
-    MeshControlCommand, PeerRttEcho, SeedList, StoreStats, BEAT_INTERVAL_SECS, BEAT_SCHEMA,
-    DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
+    is_valid_node_name, load_mesh_config, monotonic_now_ms, new_invite, new_secret,
+    node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
+    observe_peer_remote_addrs, open_beat, parse_duration_secs, place_nodes, redeem_invite,
+    revoke_peer_in_config, save_mesh_config, seal_beat, spawn_background_public_ip_geo_probe,
+    validate_secret, Beat, ChannelKeys, LiveAllowlist, MeshControlCommand, PeerRttEcho,
+    ReplayGuard, SeedList, StoreStats, BEAT_INTERVAL_SECS, BEAT_SCHEMA, DEFAULT_CHANNEL_NAME,
+    INVITE_PREFIX, SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
-    load_or_create_secret_key_at, IrohRelayPolicy, IrohTransportConfig, IrohTransportDiagnostics,
+    load_or_create_secret_key_at, AllowlistHook, IrohRelayPolicy, IrohTransportConfig,
+    IrohTransportDiagnostics,
 };
 use dialtone::record::{evaluate_proof_case, plan_alert_ack};
 use dialtone::stats::{sample_stats, StatsWindow};
@@ -599,7 +601,7 @@ fn self_beat(
             blob_bytes,
             latest_digest: latest_digest(&blob_dir),
         }),
-        channel_mac: None,
+        sent_unix_ms: 0,
     }
 }
 
@@ -916,9 +918,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                 placeholder_diag,
             );
             boot_beat.processes = runtime_state.processes.clone();
-            if let Some(ref keys) = active_keys {
-                sign_beat(&mut boot_beat, keys);
-            }
             runtime_state.nodes = vec![boot_beat];
         }
 
@@ -980,10 +979,18 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     // =========================================================================
     let key_path = default_secret_key_path();
     let secret_key = load_or_create_secret_key_at(&key_path)?;
+    // Beats are signed with this Key; peers verify them against our NodeId.
+    let node_key = secret_key.clone();
+    // Enforced at the QUIC handshake for every protocol, and for beats and deploys below.
+    let live_allowlist = LiveAllowlist::new(&saved_cfg.allowlist);
+    let mut allowlist_mtime = std::fs::metadata(&config_path)
+        .and_then(|m| m.modified())
+        .ok();
     let memory_lookup = MemoryLookup::new();
     let endpoint = build_endpoint_builder(&opts.transport)?
         .address_lookup(memory_lookup.clone())
         .secret_key(secret_key)
+        .hooks(AllowlistHook::new(live_allowlist.clone()))
         .bind()
         .await
         .map_err(|e| format!("bind iroh endpoint: {e}"))?;
@@ -1187,10 +1194,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     );
     initial_self_beat.summary_stats = Some(rolling_window.summarize(now_init));
 
-    if let Some(ref keys) = active_keys {
-        sign_beat(&mut initial_self_beat, keys);
-    }
-
     if let Some(st_arc) = &shared_state {
         if let Ok(mut st) = st_arc.lock() {
             st.iroh_runtime = diagnostics.clone();
@@ -1258,7 +1261,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         let json = serde_json::to_string_pretty(&initial_self_beat).map_err(|e| e.to_string())?;
         println!("{json}");
         if let Some(ref keys) = active_keys {
-            if let Ok(enc) = seal_beat(&initial_self_beat, keys) {
+            if let Ok(enc) = seal_beat(&initial_self_beat, keys, &node_key) {
                 let _ = sender.broadcast(enc.into()).await;
             }
         }
@@ -1269,6 +1272,8 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let mut last_broadcast_procs = initial_self_beat.processes.clone();
     let mut auto_pulled_peer_blobs: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
+    let mut replay_guard = ReplayGuard::default();
+    live_allowlist.replace(&saved_cfg.allowlist);
     let mut sample_tick = tokio::time::interval(Duration::from_secs(1));
     let mut beat_tick = tokio::time::interval(Duration::from_secs(BEAT_INTERVAL_SECS));
     loop {
@@ -1419,8 +1424,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                         let now_mono = monotonic_now_ms();
                         proc_beat.sent_mono_ms = now_mono;
                         proc_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
-                        sign_beat(&mut proc_beat, keys);
-                        if let Ok(wire_bytes) = seal_beat(&proc_beat, keys) {
+                        if let Ok(wire_bytes) = seal_beat(&proc_beat, keys, &node_key) {
                             let _ = tokio::time::timeout(
                                 Duration::from_millis(500),
                                 sender.broadcast(wire_bytes.into()),
@@ -1431,6 +1435,19 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                 }
             }
             _ = beat_tick.tick() => {
+                let mtime = std::fs::metadata(&config_path).and_then(|m| m.modified()).ok();
+                if mtime != allowlist_mtime {
+                    allowlist_mtime = mtime;
+                    let disk = load_mesh_config(&config_path);
+                    live_allowlist.replace(&disk.allowlist);
+                    saved_cfg.allowlist = disk.allowlist.clone();
+                    if let Some(st_arc) = &shared_state {
+                        if let Ok(mut st) = st_arc.lock() {
+                            st.mesh_config.allowlist = disk.allowlist;
+                        }
+                    }
+                    println!("[allowlist] reloaded {} NodeId(s) from {}", live_allowlist.len(), config_path.display());
+                }
                 if active_keys.is_some() && !seed_ids.is_empty() {
                     for seed_addr in default_seeds() {
                         if seed_addr.id != endpoint.id() {
@@ -1513,9 +1530,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                     let now_mono = monotonic_now_ms();
                     self_beat.sent_mono_ms = now_mono;
                     self_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
-                    if let Some(ref keys) = active_keys {
-                        sign_beat(&mut self_beat, keys);
-                    }
                     st.iroh_runtime = diag;
                     st.stats = self_beat.stats.clone();
                     let mut local_copy = self_beat.clone();
@@ -1547,15 +1561,12 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                     let now_mono = monotonic_now_ms();
                     self_beat.sent_mono_ms = now_mono;
                     self_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
-                    if let Some(ref keys) = active_keys {
-                        sign_beat(&mut self_beat, keys);
-                    }
                 }
                 if counter == 1 && !serve_http {
                     println!("{}", serde_json::to_string_pretty(&self_beat).unwrap());
                 }
                 if let Some(ref keys) = active_keys {
-                    if let Ok(wire_bytes) = seal_beat(&self_beat, keys) {
+                    if let Ok(wire_bytes) = seal_beat(&self_beat, keys, &node_key) {
                         let _ = tokio::time::timeout(
                             Duration::from_millis(600),
                             sender.broadcast(wire_bytes.into()),
@@ -1621,8 +1632,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                 self_beat.probe = st.probe.clone();
                             }
                         }
-                        sign_beat(&mut self_beat, keys);
-                        if let Ok(wire_bytes) = seal_beat(&self_beat, keys) {
+                        if let Ok(wire_bytes) = seal_beat(&self_beat, keys, &node_key) {
                             let _ = tokio::time::timeout(
                                 Duration::from_millis(600),
                                 sender.broadcast(wire_bytes.into()),
@@ -1653,28 +1663,34 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                 continue;
                             }
                         };
-                        if rx_beat.node != opts.node {
-                            if active_channel == DEFAULT_CHANNEL_NAME {
-                                let allowed_ids = if let Some(st_arc) = &shared_state {
-                                    st_arc
-                                        .lock()
-                                        .ok()
-                                        .map(|st| st.mesh_config.allowlist.clone())
-                                        .unwrap_or_else(|| saved_cfg.allowlist.clone())
-                                } else {
-                                    saved_cfg.allowlist.clone()
-                                };
-                                if !is_allowed_peer_in_list(
-                                    &allowed_ids,
-                                    &rx_beat.node_id,
-                                    Some(&node_id),
-                                ) {
-                                    eprintln!(
-                                        "[gossip-allowlist-reject] dropped unlisted peer node={} node_id={} on main 'dialtone' channel (run 'dialtone allowlist add {}' to authorize)",
-                                        rx_beat.node, rx_beat.node_id, rx_beat.node_id
-                                    );
-                                    continue;
-                                }
+                        // open_beat verified the signature, so rx_beat.node_id is the real sender.
+                        if rx_beat.node_id != node_id {
+                            if !live_allowlist.contains_str(&rx_beat.node_id) {
+                                eprintln!(
+                                    "[gossip-allowlist-reject] dropped beat from unlisted node_id={} on channel '{}' (run 'dialtone allowlist add {}' to authorize)",
+                                    rx_beat.node_id, active_channel, rx_beat.node_id
+                                );
+                                continue;
+                            }
+                            if !is_valid_node_name(&rx_beat.node) {
+                                eprintln!(
+                                    "[gossip-auth-reject] dropped beat from node_id={} with an invalid node name",
+                                    rx_beat.node_id
+                                );
+                                continue;
+                            }
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            if let Err(reason) =
+                                replay_guard.admit(&rx_beat.node_id, rx_beat.sent_unix_ms, now_ms)
+                            {
+                                eprintln!(
+                                    "[gossip-replay-reject] dropped beat from node={} node_id={}: {}",
+                                    rx_beat.node, rx_beat.node_id, reason
+                                );
+                                continue;
                             }
 
                             let rx_mono = monotonic_now_ms();
@@ -1787,14 +1803,21 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                     for peer_proc in &rx_beat.processes {
                                         if peer_proc.desired_state == "running"
                                             && !dialtone::supervisor::is_probe_program(&peer_proc.name)
-                                            && peer_proc
-                                                .env
-                                                .iter()
-                                                .any(|kv| kv == "DIALTONE_MESH_DEPLOY=1")
                                         {
-                                            if let Some(t_uri) = peer_proc.env.iter().find_map(|kv| {
-                                                kv.strip_prefix("DIALTONE_BLOB_TICKET=")
-                                            }) {
+                                            // Deploys come only from allowlisted signers (checked
+                                            // above) and only from allowlisted blob providers.
+                                            let provider_ok = |t: &str| {
+                                                dialtone::blob::parse_blob_ticket_uri(t)
+                                                    .map(|(ticket, _)| {
+                                                        live_allowlist.contains(&ticket.addr().id)
+                                                    })
+                                                    .unwrap_or(false)
+                                            };
+                                            if let Some(t_uri) = peer_proc
+                                                .deploy_ticket
+                                                .as_deref()
+                                                .filter(|t| provider_ok(t))
+                                            {
                                                 let already_running = st
                                                     .processes
                                                     .iter()
@@ -1808,7 +1831,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                                     peer_proc.digest.clone(),
                                                 );
                                                 if !already_running
-                                                    || auto_pulled_peer_blobs.insert(pull_key)
+                                                    && auto_pulled_peer_blobs.insert(pull_key)
                                                 {
                                                     if let Some(ref bridge) = st.store {
                                                         pending_blob_pulls.push((
@@ -1974,9 +1997,8 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                                 st.service_endpoints.clone();
                                         }
                                     }
-                                    sign_beat(&mut echo_beat, keys);
                                     if let Ok(wire_bytes) =
-                                        seal_beat(&echo_beat, keys)
+                                        seal_beat(&echo_beat, keys, &node_key)
                                     {
                                         let _ = tokio::time::timeout(
                                             Duration::from_millis(400),
@@ -2285,13 +2307,8 @@ async fn main() {
                         .get("tailnet_used")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
-                    let mac_ok = n
-                        .get("channel_mac")
-                        .and_then(|v| v.as_str())
-                        .map(|s| !s.is_empty())
-                        .unwrap_or(false);
+                    // Peers only reach node state after their beat's signature verified.
                     if is_allowed_peer_in_list(&cfg_disk.allowlist, ep_id, own_ep_id)
-                        && mac_ok
                         && (!opts.transport.exclude_tailnet || !tailnet_used)
                     {
                         let hr = n.get("stats").cloned().unwrap_or(json!({}));
@@ -2410,7 +2427,7 @@ async fn main() {
                     "converged_peers": converged_nodes.len(),
                     "mesh_rtt_ms": mesh_rtt_ms,
                     "nodes": converged_nodes,
-                    "live_blob_quic_transfer": {
+                    "blob_round_trip": {
                         "digest": pull_resp.get("digest"),
                         "method": pull_resp.get("method"),
                         "transferred_bytes": pull_resp.get("transferred_bytes"),

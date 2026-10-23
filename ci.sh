@@ -203,7 +203,7 @@ echo "    4. Stopped the process cleanly (status=$STOP_STATUS)"
 SHARE_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blob share "ci-live-blob-payload" --listen 127.0.0.1:18794)
 TICKET_URI=$(printf '%s' "$SHARE_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["ticket_uri"])')
 PULL_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blob pull "$TICKET_URI" --force --listen 127.0.0.1:18794)
-printf '%s' "$PULL_JSON" | grep -q '"method": "iroh-blobs-ticket"'
+printf '%s' "$PULL_JSON" | grep -q '"method": "local-self"'
 echo "    5. Verified blob share & pull via CLI ($TICKET_URI)"
 
 MESH_TEST_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" mesh-test --expect-peers 1 --timeout 5s --listen 127.0.0.1:18794)

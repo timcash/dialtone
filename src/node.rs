@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 
 use iroh::{
-    endpoint::{presets, BindOpts},
+    endpoint::{presets, AfterHandshakeOutcome, BindOpts, Connection, EndpointHooks, VarInt},
     Endpoint, EndpointAddr, RelayMode, SecretKey,
 };
 use iroh_mainline_address_lookup::DhtAddressLookup;
@@ -239,6 +239,38 @@ fn write_secret_key(path: &Path, secret_key: &SecretKey) -> Result<(), String> {
             .map_err(|err| format!("chmod iroh secret key {}: {err}", path.display()))?;
     }
     Ok(())
+}
+
+/// QUIC close code sent to a node that is not on the allowlist.
+pub const NOT_ALLOWLISTED_CLOSE_CODE: u32 = 403;
+
+/// Endpoint hook that closes every connection (gossip and blobs, in and out) right after
+/// the TLS handshake unless the remote NodeId is on the live allowlist.
+#[derive(Clone, Debug)]
+pub struct AllowlistHook {
+    allowlist: crate::mesh::LiveAllowlist,
+}
+
+impl AllowlistHook {
+    pub fn new(allowlist: crate::mesh::LiveAllowlist) -> Self {
+        Self { allowlist }
+    }
+}
+
+impl EndpointHooks for AllowlistHook {
+    async fn after_handshake<'a>(&'a self, conn: &'a Connection) -> AfterHandshakeOutcome {
+        let remote = conn.remote_id();
+        if self.allowlist.contains(&remote) {
+            return AfterHandshakeOutcome::accept();
+        }
+        eprintln!(
+            "[allowlist-reject] closed QUIC connection from node_id={remote} (run 'dialtone allowlist add {remote}' to authorize)"
+        );
+        AfterHandshakeOutcome::Reject {
+            error_code: VarInt::from_u32(NOT_ALLOWLISTED_CLOSE_CODE),
+            reason: b"not on allowlist".to_vec(),
+        }
+    }
 }
 
 pub fn build_endpoint_builder(

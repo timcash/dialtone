@@ -152,6 +152,9 @@ pub struct ProcessSpec {
     pub restart_count: u32,
     #[serde(default)]
     pub service_unit: Option<String>,
+    /// Ticket for this process's program when it is offered for mesh deploy (set in beats).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deploy_ticket: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
