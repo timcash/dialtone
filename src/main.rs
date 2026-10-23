@@ -1786,6 +1786,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                     let mut st = st_arc.lock().unwrap();
                                     for peer_proc in &rx_beat.processes {
                                         if peer_proc.desired_state == "running"
+                                            && !dialtone::supervisor::is_probe_program(&peer_proc.name)
                                             && peer_proc
                                                 .env
                                                 .iter()

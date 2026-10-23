@@ -344,6 +344,11 @@ impl NodeState {
     }
 
     pub fn reconcile_processes(&mut self) {
+        for spec in self.processes.iter_mut() {
+            if spec.name == crate::supervisor::OLD_PROBE_PROGRAM_NAME {
+                spec.desired_state = "stopped".to_string();
+            }
+        }
         let mut started_logs = Vec::new();
         let listen_kv = format!("APP_LISTEN={}", self.listen);
         let sup_arc = self.supervisor.clone();

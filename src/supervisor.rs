@@ -431,8 +431,13 @@ pub fn stage_program(
 }
 
 pub const PROBE_PROGRAM_NAME: &str = "probe";
-/// Name the probe program had before the domain-language rename; dropped from specs at boot.
-const OLD_PROBE_PROGRAM_NAME: &str = "mesh-blob-worker"; // compat
+/// Name the probe program had before the domain-language rename; such specs are stopped.
+pub const OLD_PROBE_PROGRAM_NAME: &str = "mesh-blob-worker"; // compat
+
+/// Every node runs its own probe program, so a peer's probe is never deployed here.
+pub fn is_probe_program(name: &str) -> bool {
+    name == PROBE_PROGRAM_NAME || name == OLD_PROBE_PROGRAM_NAME
+}
 
 /// Canonical cross-platform polyglot probe test process blob (`sh` on macOS/Linux, `cmd.exe` on Windows)
 /// sharing an identical SHA-256 digest across all OS/arch nodes in the mesh.
