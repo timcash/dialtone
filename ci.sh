@@ -54,39 +54,6 @@ grep -q '"iroh_version": "1.3.0"' /tmp/dialtone-ci-self-test.json
 "$BIN" status --node node-alpha > /tmp/dialtone-ci-status.json
 grep -q '"steady_state_data_plane": "iroh-quic"' /tmp/dialtone-ci-status.json
 
-"$BIN" state-fixture --node node-alpha > /tmp/dialtone-ci-state.json
-grep -q '"robot-edge-motion-server"' /tmp/dialtone-ci-state.json
-
-"$BIN" gossip-fixture --node node-alpha > /tmp/dialtone-ci-gossip.json
-grep -q '"mesh": "dialtone-iroh-gossip"' /tmp/dialtone-ci-gossip.json
-
-"$BIN" deploy-plan-fixture --deploy-target robot-v4-default > /tmp/dialtone-ci-deploy.json
-grep -q '"includes_daemon_self_update": false' /tmp/dialtone-ci-deploy.json
-
-"$BIN" deploy-plan-fixture --build-case peer-local-async > /tmp/dialtone-ci-build.json
-grep -q '"async_non_blocking": true' /tmp/dialtone-ci-build.json
-
-"$BIN" blob-fetch-report > /tmp/dialtone-ci-blob.json
-grep -q '"method": "iroh-blobs-ticket"' /tmp/dialtone-ci-blob.json
-
-"$BIN" process-intent-fixture --node edge-1 --intent-action restart > /tmp/dialtone-ci-proc.json
-grep -q '"restart_requested": true' /tmp/dialtone-ci-proc.json
-
-"$BIN" rollback-plan-fixture --node edge-1 > /tmp/dialtone-ci-rb.json
-grep -q '"side_effect_free_preview": true' /tmp/dialtone-ci-rb.json
-
-"$BIN" alert-ack-fixture --actor operator-ci --note "ci verified" > /tmp/dialtone-ci-ack.json
-grep -q '"planned_status": "acknowledged"' /tmp/dialtone-ci-ack.json
-
-"$BIN" proof-validation-fixture --proof-case valid > /tmp/dialtone-ci-proof-valid.json
-grep -q '"accepted": true' /tmp/dialtone-ci-proof-valid.json
-
-"$BIN" proof-validation-fixture --proof-case non-daemon-fallback > /tmp/dialtone-ci-proof-bad.json
-grep -q '"accepted": false' /tmp/dialtone-ci-proof-bad.json
-
-"$BIN" program-catalog-fixture > /tmp/dialtone-ci-cat.json
-grep -q '"row-05-calibration"' /tmp/dialtone-ci-cat.json
-
 "$BIN" service --os macos --node node-alpha | grep -q 'com.timcash.dialtone'
 "$BIN" service --os linux --node node-alpha | grep -q 'EnvironmentFile=-/etc/dialtone/daemon.env'
 "$BIN" service --os windows --node node-beta | grep -q 'up --node node-beta'
@@ -242,6 +209,16 @@ curl -fsS -X POST http://127.0.0.1:18794/api/artifacts/blob \
   -d "{\"bytes_base64\":\"$BLOB_B64\"}" | python3 -c 'import sys,json; assert json.load(sys.stdin)["digest"]=="'"$BLOB_DIGEST"'"'
 curl -fsS http://127.0.0.1:18794/api/gossip | python3 -c 'import sys,json; assert "nodes" in json.load(sys.stdin)'
 echo "    8. Verified old command and route names still work (gen-password, peers, /api/artifacts/blob, /api/gossip)"
+
+# 9. Removed preview / fixture routes stay removed
+for route in /api/deploy-plan /api/catalogs /api/process-intent /install/v1/install.sh /ws; do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:18794$route")
+  if [ "$CODE" != "404" ]; then
+    echo "ERROR: expected 404 for removed route $route, got $CODE" >&2
+    exit 1
+  fi
+done
+echo "    9. Verified removed preview routes return 404"
 
 ci_cleanup
 trap - EXIT

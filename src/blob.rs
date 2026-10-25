@@ -27,30 +27,6 @@ pub struct BlobTransportReport {
     pub remote_info_status: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TieredBlobFetchRequest {
-    #[serde(alias = "sha256")] // compat
-    pub digest: String,
-    pub uri: String,
-    pub provider_node: String,
-    pub expected_bytes: u64,
-    pub http_fallback_enabled: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TieredBlobFetchPlan {
-    #[serde(alias = "sha256")] // compat
-    pub digest: String,
-    pub uri_scheme: String,
-    pub provider_node: String,
-    pub method: String,
-    pub status: String,
-    pub transferred_bytes: u64,
-    pub native_ticket_attempted: bool,
-    pub fallback_used: bool,
-    pub message: String,
-}
-
 pub fn digest_of(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     format!("sha256:{}", crate::hex_encode(&digest))
@@ -127,75 +103,6 @@ pub fn put_blob(
             .map_err(|e| format!("write blob {}: {e}", blob_path.display()))?;
     }
     Ok((observed, blob_path))
-}
-
-/// Evaluate tiered blob hydration order:
-/// 1. Local content-addressed SHA-256 cache hit (`transferred_bytes = 0`).
-/// 2. Native `iroh-blobs://ticket/...` fetch over QUIC.
-/// 3. Bounded HTTP peer-bridge fallback only when explicitly enabled.
-pub fn evaluate_tiered_blob_fetch(
-    store_dir: &Path,
-    req: &TieredBlobFetchRequest,
-) -> Result<TieredBlobFetchPlan, String> {
-    let digest = normalize_digest(&req.digest)?;
-    let scheme = req
-        .uri
-        .split_once("://")
-        .map(|(s, _)| s.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    if has_blob(store_dir, &digest) {
-        return Ok(TieredBlobFetchPlan {
-            digest,
-            uri_scheme: scheme,
-            provider_node: req.provider_node.clone(),
-            method: "local-cache".to_string(),
-            status: "cache_hit".to_string(),
-            transferred_bytes: 0,
-            native_ticket_attempted: false,
-            fallback_used: false,
-            message: "verified payload already present in local content-addressed store"
-                .to_string(),
-        });
-    }
-
-    if req.uri.starts_with("iroh-blobs://ticket/") {
-        return Ok(TieredBlobFetchPlan {
-            digest,
-            uri_scheme: "iroh-blobs".to_string(),
-            provider_node: req.provider_node.clone(),
-            method: "iroh-blobs-ticket".to_string(),
-            status: "planned_native_iroh".to_string(),
-            transferred_bytes: req.expected_bytes,
-            native_ticket_attempted: true,
-            fallback_used: false,
-            message: format!(
-                "fetching via native iroh-blobs QUIC ticket from producer peer {}",
-                req.provider_node
-            ),
-        });
-    }
-
-    if (req.uri.starts_with("http://") || req.uri.starts_with("https://"))
-        && req.http_fallback_enabled
-    {
-        return Ok(TieredBlobFetchPlan {
-            digest,
-            uri_scheme: scheme,
-            provider_node: req.provider_node.clone(),
-            method: "http-peer-fallback".to_string(),
-            status: "planned_http_fallback".to_string(),
-            transferred_bytes: req.expected_bytes,
-            native_ticket_attempted: false,
-            fallback_used: true,
-            message: "explicit HTTP seed fallback enabled".to_string(),
-        });
-    }
-
-    Err(format!(
-        "steady-state blob fetch rejected URI {:?}: native iroh-blobs://ticket/... required when HTTP fallback is disabled",
-        req.uri
-    ))
 }
 
 /// Format a native `iroh-blobs` ticket URI with its canonical SHA-256 verification anchor.
@@ -585,72 +492,6 @@ mod tests {
         fs::write(&path, b"corrupted").unwrap();
         put_blob(&dir, b"dialtone-program", None).unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"dialtone-program");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn tiered_blob_fetch_prefers_local_cache_then_native_ticket_and_guards_http_fallback() {
-        let dir = env::temp_dir().join(format!("dialtone-tiered-blob-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let payload = b"cached-payload-bytes";
-        let (sha, _) = put_blob(&dir, payload, None).unwrap();
-
-        let cache_hit = evaluate_tiered_blob_fetch(
-            &dir,
-            &TieredBlobFetchRequest {
-                digest: sha.clone(),
-                uri: format!("iroh-blobs://ticket/fake#{sha}"),
-                provider_node: "node-beta".to_string(),
-                expected_bytes: 20,
-                http_fallback_enabled: false,
-            },
-        )
-        .unwrap();
-        assert_eq!(cache_hit.method, "local-cache");
-        assert_eq!(cache_hit.transferred_bytes, 0);
-
-        let uncached_sha =
-            "sha256:1111111111111111111111111111111111111111111111111111111111111111";
-        let native_plan = evaluate_tiered_blob_fetch(
-            &dir,
-            &TieredBlobFetchRequest {
-                digest: uncached_sha.to_string(),
-                uri: format!("iroh-blobs://ticket/blob123#{uncached_sha}"),
-                provider_node: "node-beta".to_string(),
-                expected_bytes: 4096,
-                http_fallback_enabled: false,
-            },
-        )
-        .unwrap();
-        assert_eq!(native_plan.method, "iroh-blobs-ticket");
-        assert!(native_plan.native_ticket_attempted);
-
-        let rejected = evaluate_tiered_blob_fetch(
-            &dir,
-            &TieredBlobFetchRequest {
-                digest: uncached_sha.to_string(),
-                uri: "http://node-beta:8787/api/blob".to_string(),
-                provider_node: "node-beta".to_string(),
-                expected_bytes: 4096,
-                http_fallback_enabled: false,
-            },
-        )
-        .unwrap_err();
-        assert!(rejected.contains("native iroh-blobs://ticket/... required"));
-
-        let fallback_plan = evaluate_tiered_blob_fetch(
-            &dir,
-            &TieredBlobFetchRequest {
-                digest: uncached_sha.to_string(),
-                uri: "http://node-beta:8787/api/blob".to_string(),
-                provider_node: "node-beta".to_string(),
-                expected_bytes: 4096,
-                http_fallback_enabled: true,
-            },
-        )
-        .unwrap();
-        assert_eq!(fallback_plan.method, "http-peer-fallback");
-        assert!(fallback_plan.fallback_used);
         let _ = fs::remove_dir_all(&dir);
     }
 

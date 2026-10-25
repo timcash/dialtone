@@ -10,11 +10,8 @@ use dialtone::api::{
     count_store, default_boot_stages, latest_digest, load_or_create_api_token, serve_http_blocking,
     validate_listen_addr_security, NodeState,
 };
-use dialtone::blob::{evaluate_tiered_blob_fetch, put_blob, Store, TieredBlobFetchRequest};
-use dialtone::deploy::{
-    evaluate_deploy_build_decision, generate_deploy_plan, install_persistent_os_daemon,
-    plan_rollback, render_os_service_unit,
-};
+use dialtone::blob::{put_blob, Store};
+use dialtone::deploy::{install_persistent_os_daemon, render_os_service_unit};
 use dialtone::mesh::{
     allow_peer_in_config_with_addrs, build_mesh_rtt_matrix, cached_local_public_ip_geo,
     compute_rtt_ms_from_echo, default_arch, default_config_path, default_os, default_seeds,
@@ -33,9 +30,7 @@ use dialtone::node::{
     load_or_create_secret_key_at, AllowlistHook, IrohRelayPolicy, IrohTransportConfig,
     IrohTransportDiagnostics,
 };
-use dialtone::record::{evaluate_proof_case, plan_alert_ack};
 use dialtone::stats::{sample_stats, StatsWindow};
-use dialtone::supervisor::plan_process_intent;
 use dialtone::{collect_node_diagnostics, run_self_test};
 use futures_lite::StreamExt;
 use iroh::address_lookup::memory::MemoryLookup;
@@ -65,17 +60,6 @@ fn print_usage() {
          \x20 node                     Run the node without the HUD or API\n\
          \x20 status                   Print this node's NodeId and transport report\n\
          \x20 self-test | ci           Run full 7-capability live verification suite\n\
-         \x20 state-fixture            Print representative daemon state JSON\n\
-         \x20 mesh-fixture             Print global mesh peer index JSON\n\
-         \x20 gossip-fixture           Print Iroh gossip & service discovery JSON\n\
-         \x20 iroh-runtime-fixture     Print Iroh 1.3 runtime identity & transport diagnostics\n\
-         \x20 deploy-plan-fixture      Print deploy target plan or build-decision evidence\n\
-         \x20 blob-fetch-report        Print tiered blob hydration plan (cache / iroh-blobs / fallback)\n\
-         \x20 process-intent-fixture   Print start/stop/restart process intent plan & diff\n\
-         \x20 rollback-plan-fixture    Print side-effect-free guarded rollback plan\n\
-         \x20 alert-ack-fixture        Print side-effect-free alert acknowledgement preview\n\
-         \x20 proof-validation-fixture Print session proof acceptance/rejection report\n\
-         \x20 program-catalog-fixture  Print program catalog & named dataset evidence\n\
          \x20 service                  Render OS login service unit (macos | linux | windows)\n\
          \x20 help                     Show this help\n\n\
          flags:\n\
@@ -103,16 +87,6 @@ fn print_usage() {
          \x20 --no-relay               Disable Iroh relay servers\n\
          \x20 --relay-only             Advertise relay-only gossip tickets\n\
          \x20 --relay-url <url>        Custom Iroh relay URL (repeatable)\n\
-         \x20 --deploy-target <t>      robot-v4-default | dialtone | all-daemon | all-with-daemons\n\
-         \x20 --build-case <c>         unchanged-skip | cache-reused | peer-local-async\n\
-         \x20 --intent-action <a>      start | stop | restart\n\
-         \x20 --proof-case <c>         valid | missing | stale | cross-session | non-daemon-fallback |\n\
-         \x20                          no-renderer-fallback | peer-build-deps-missing\n\
-         \x20 --digest <digest>        SHA-256 digest for blob-fetch-report\n\
-         \x20 --uri <uri>              Blob URI for blob-fetch-report\n\
-         \x20 --http-fallback-enabled  Allow HTTP peer-bridge fallback for blob-fetch-report\n\
-         \x20 --actor <name>           Actor name for alert-ack-fixture\n\
-         \x20 --note <text>            Note for alert-ack-fixture\n\
          \x20 --os <macos|linux|windows> Target OS for service unit generation\n\
          \x20 --once                   Run one cycle and exit"
     );
@@ -139,15 +113,6 @@ struct CliOptions {
     timeout_secs: u64,
     invite_ttl_secs: u64,
     once: bool,
-    deploy_target: String,
-    build_case: Option<String>,
-    intent_action: String,
-    proof_case: String,
-    digest: String,
-    uri: String,
-    http_fallback_enabled: bool,
-    actor: String,
-    note: String,
     os_kind: String,
     invites: Vec<String>,
     transport: IrohTransportConfig,
@@ -199,17 +164,6 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         timeout_secs: 15,
         invite_ttl_secs: 900,
         once: false,
-        deploy_target: "robot-v4-default".to_string(),
-        build_case: None,
-        intent_action: "restart".to_string(),
-        proof_case: "valid".to_string(),
-        digest: "sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d"
-            .to_string(),
-        uri: "iroh-blobs://ticket/blob123#sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d"
-            .to_string(),
-        http_fallback_enabled: false,
-        actor: "operator-a".to_string(),
-        note: "verified nominal".to_string(),
         os_kind: if cfg!(target_os = "macos") {
             "macos".to_string()
         } else if cfg!(target_os = "windows") {
@@ -332,17 +286,6 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             | "node"
             | "hud"
             | "probe"
-            | "state-fixture"
-            | "mesh-fixture"
-            | "gossip-fixture"
-            | "iroh-runtime-fixture"
-            | "deploy-plan-fixture"
-            | "blob-fetch-report"
-            | "process-intent-fixture"
-            | "rollback-plan-fixture"
-            | "alert-ack-fixture"
-            | "proof-validation-fixture"
-            | "program-catalog-fixture"
             | "service")
                 if !action_set =>
             {
@@ -431,47 +374,6 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     .map_err(|e| format!("invalid --quic-port value: {e}"))?;
                 opts.transport.quic_port = Some(port);
             }
-            "--deploy-target" => {
-                idx += 1;
-                opts.deploy_target = args
-                    .get(idx)
-                    .ok_or("missing --deploy-target value")?
-                    .clone();
-            }
-            "--build-case" => {
-                idx += 1;
-                opts.build_case = Some(args.get(idx).ok_or("missing --build-case value")?.clone());
-            }
-            "--intent-action" => {
-                idx += 1;
-                opts.intent_action = args
-                    .get(idx)
-                    .ok_or("missing --intent-action value")?
-                    .clone();
-            }
-            "--proof-case" => {
-                idx += 1;
-                opts.proof_case = args.get(idx).ok_or("missing --proof-case value")?.clone();
-            }
-            "--digest" => {
-                idx += 1;
-                opts.digest = args.get(idx).ok_or("missing --digest value")?.clone();
-            }
-            "--uri" => {
-                idx += 1;
-                opts.uri = args.get(idx).ok_or("missing --uri value")?.clone();
-            }
-            "--http-fallback-enabled" => {
-                opts.http_fallback_enabled = true;
-            }
-            "--actor" => {
-                idx += 1;
-                opts.actor = args.get(idx).ok_or("missing --actor value")?.clone();
-            }
-            "--note" => {
-                idx += 1;
-                opts.note = args.get(idx).ok_or("missing --note value")?.clone();
-            }
             "--os" => {
                 idx += 1;
                 opts.os_kind = args.get(idx).ok_or("missing --os value")?.clone();
@@ -512,23 +414,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         idx += 1;
     }
 
-    if !opts.node_explicit && opts.action.ends_with("fixture") {
-        opts.node = "node-alpha".to_string();
-    }
-
     Ok(opts)
-}
-
-async fn build_seeded_state(opts: &CliOptions) -> Result<NodeState, String> {
-    let diag = collect_node_diagnostics(&opts.transport).await?;
-    let blob_dir = env::temp_dir().join("dialtone-blobs");
-    Ok(NodeState::new_seeded(
-        &opts.node,
-        &opts.action,
-        &opts.listen,
-        blob_dir,
-        diag,
-    ))
 }
 
 fn self_beat(
@@ -814,23 +700,13 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         opts.listen = bound_addr.to_string();
         local_web_url = format!("http://{bound_addr}");
 
-        let mut runtime_state = if opts.action == "hud" {
-            NodeState::new_seeded(
-                &opts.node,
-                &opts.action,
-                &opts.listen,
-                blob_dir.clone(),
-                placeholder_diag.clone(),
-            )
-        } else {
-            NodeState::new_live(
-                &opts.node,
-                &opts.action,
-                &opts.listen,
-                blob_dir.clone(),
-                placeholder_diag.clone(),
-            )
-        };
+        let mut runtime_state = NodeState::new_live(
+            &opts.node,
+            &opts.action,
+            &opts.listen,
+            blob_dir.clone(),
+            placeholder_diag.clone(),
+        );
         if let Some(ref explicit_tok) = opts.api_token {
             runtime_state.api_token = explicit_tok.clone();
         } else if let Ok(tok) = load_or_create_api_token() {
@@ -2226,22 +2102,10 @@ async fn main() {
                     Ok(())
                 }
                 "pull" | "fetch" | "get" => {
-                    let ticket_uri = opts
-                        .blob_target
-                        .as_deref()
-                        .or_else(|| {
-                            if opts.uri.starts_with("iroh-blobs://ticket/")
-                                && !opts.uri.contains("blob123")
-                            {
-                                Some(opts.uri.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .ok_or_else(|| {
-                            "usage: dialtone blob pull <iroh-blobs://ticket/...#sha256:...> [--force]"
-                                .to_string()
-                        })?;
+                    let ticket_uri = opts.blob_target.as_deref().ok_or_else(|| {
+                        "usage: dialtone blob pull <iroh-blobs://ticket/...#sha256:...> [--force]"
+                            .to_string()
+                    })?;
                     let resp = local_daemon_http_json(
                         &opts.listen,
                         "POST",
@@ -2696,94 +2560,21 @@ async fn main() {
                     })
             }
         }
-        "status" | "iroh-runtime-fixture" => {
-            collect_node_diagnostics(&opts.transport).await.map(|diag| {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({
-                        "schema": "dialtone.iroh_runtime.v1",
-                        "owner": "dialtone-rust-daemon",
-                        "steady_state_data_plane": "iroh-quic",
-                        "node": opts.node,
-                        "diagnostics": diag
-                    }))
-                    .unwrap()
-                );
-            })
-        }
-        "self-test" => run_self_test().await.map(|report| {
-            println!("{}", serde_json::to_string_pretty(&report).unwrap());
-        }),
-        "state-fixture" => build_seeded_state(&opts).await.map(|st| {
-            println!("{}", serde_json::to_string_pretty(&st).unwrap());
-        }),
-        "mesh-fixture" | "gossip-fixture" => build_seeded_state(&opts).await.map(|st| {
+        "status" => collect_node_diagnostics(&opts.transport).await.map(|diag| {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "schema": "dialtone.gossip.v1",
-                    "mesh": "dialtone-iroh-gossip",
-                    "nodes": st.nodes,
-                    "service_endpoints": st.service_endpoints
+                    "schema": "dialtone.iroh_runtime.v1",
+                    "owner": "dialtone-rust-daemon",
+                    "steady_state_data_plane": "iroh-quic",
+                    "node": opts.node,
+                    "diagnostics": diag
                 }))
                 .unwrap()
             );
         }),
-        "deploy-plan-fixture" => {
-            if let Some(case) = &opts.build_case {
-                evaluate_deploy_build_decision(case).map(|d| {
-                    println!("{}", serde_json::to_string_pretty(&d).unwrap());
-                })
-            } else {
-                generate_deploy_plan(&opts.deploy_target).map(|plan| {
-                    println!("{}", serde_json::to_string_pretty(&plan).unwrap());
-                })
-            }
-        }
-        "blob-fetch-report" => {
-            let store_dir = env::temp_dir().join("dialtone-blobs");
-            evaluate_tiered_blob_fetch(
-                &store_dir,
-                &TieredBlobFetchRequest {
-                    digest: opts.digest,
-                    uri: opts.uri,
-                    provider_node: opts.node,
-                    expected_bytes: 4096,
-                    http_fallback_enabled: opts.http_fallback_enabled,
-                },
-            )
-            .map(|plan| {
-                println!("{}", serde_json::to_string_pretty(&plan).unwrap());
-            })
-        }
-        "process-intent-fixture" => build_seeded_state(&opts).await.and_then(|st| {
-            let proc = st.processes.first().ok_or("no process")?;
-            let plan = plan_process_intent("node-alpha", &opts.node, proc, &opts.intent_action)?;
-            println!("{}", serde_json::to_string_pretty(&plan).unwrap());
-            Ok(())
-        }),
-        "rollback-plan-fixture" => build_seeded_state(&opts).await.and_then(|st| {
-            let slot = st.deploy_slots.first().ok_or("no deploy slots")?;
-            let plan = plan_rollback(&opts.node, slot)?;
-            println!("{}", serde_json::to_string_pretty(&plan).unwrap());
-            Ok(())
-        }),
-        "alert-ack-fixture" => build_seeded_state(&opts).await.and_then(|st| {
-            let alert = st.alerts.first().ok_or("no alerts")?;
-            let plan = plan_alert_ack(alert, &opts.actor, &opts.note)?;
-            println!("{}", serde_json::to_string_pretty(&plan).unwrap());
-            Ok(())
-        }),
-        "proof-validation-fixture" => {
-            evaluate_proof_case(&opts.proof_case, "session-cli").map(|rep| {
-                println!("{}", serde_json::to_string_pretty(&rep).unwrap());
-            })
-        }
-        "program-catalog-fixture" => build_seeded_state(&opts).await.map(|st| {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&st.metadata.catalogs).unwrap()
-            );
+        "self-test" => run_self_test().await.map(|report| {
+            println!("{}", serde_json::to_string_pretty(&report).unwrap());
         }),
         "service" => {
             let exe =

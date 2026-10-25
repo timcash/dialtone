@@ -11,39 +11,27 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::blob::{
-    evaluate_tiered_blob_fetch, has_blob, put_blob, read_blob, BlobTransportReport, Store,
-    TieredBlobFetchRequest,
-};
+use crate::blob::{has_blob, put_blob, read_blob, BlobTransportReport, Store};
 use crate::deploy::{
-    evaluate_deploy_build_decision, execute_verified_rollback, generate_deploy_plan,
-    install_persistent_os_daemon, plan_rollback, probe_build_cache, render_install_v1_sh,
-    validate_manifest_contract, BuildCacheRecord, BuildProbeRequest, DeployManifest, DeploySlot,
+    execute_verified_rollback, install_persistent_os_daemon, plan_rollback, DeploySlot,
 };
 use crate::hud::render_hud;
 use crate::mesh::{
     build_mesh_rtt_matrix, cached_local_public_ip_geo, default_arch, default_config_path,
     default_os, default_state_dir, monotonic_now_ms, node_capabilities_for, node_role_for,
     normalize_channel_name, now_unix, place_nodes, prune_stale_peers, save_mesh_config,
-    secret_channel_fingerprint, validate_secret, Beat, BootStageStatus, MeshConfig,
-    MeshControlCommand, ProbeReport, BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME,
-    DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
+    validate_secret, Beat, BootStageStatus, MeshConfig, MeshControlCommand, ProbeReport,
+    BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
 };
 use crate::node::IrohTransportDiagnostics;
 use crate::record::{
-    paginate_kv_records, plan_alert_ack, AlertRecord, EventRecord, KeyValueRecord, KvPageMeta,
-    ServiceLogRecord,
+    paginate_kv_records, AlertRecord, EventRecord, KeyValueRecord, KvPageMeta, ServiceLogRecord,
 };
-use crate::service::Service;
-use crate::service::{
-    CatalogPolicy, DialtoneMetadata, InstalledProgram, KeyLeaseStatus, ProcessSpec,
-};
+use crate::service::{InstalledProgram, ProcessSpec, Service};
 use crate::stats::{pct_or_unknown, sample_stats, Stats};
 use crate::supervisor::{
-    ensure_probe_program, plan_process_intent, probe_program_bytes, stage_program, Supervisor,
-    PROBE_PROGRAM_NAME,
+    ensure_probe_program, probe_program_bytes, stage_program, Supervisor, PROBE_PROGRAM_NAME,
 };
-use crate::supervisor::{upsert_command_intent, CursorJobRecord, RobotCommandIntentRecord};
 
 pub const MAX_HTTP_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_CONCURRENT_HTTP_CONNECTIONS: usize = 32;
@@ -162,7 +150,6 @@ pub struct NodeState {
     pub listen: String,
     #[serde(alias = "blob_cache_dir")] // compat
     pub store_dir: PathBuf,
-    pub allowed_deploy_roots: Vec<String>,
     #[serde(skip)]
     pub api_token: String,
     #[serde(default)]
@@ -176,7 +163,6 @@ pub struct NodeState {
     pub store: Option<Store>,
     #[serde(skip)]
     pub supervisor: Arc<Mutex<Supervisor>>,
-    pub metadata: DialtoneMetadata,
     pub iroh_runtime: IrohTransportDiagnostics,
     pub nodes: Vec<Beat>,
     #[serde(default)]
@@ -186,18 +172,13 @@ pub struct NodeState {
     #[serde(alias = "managed_processes")] // compat
     pub processes: Vec<ProcessSpec>,
     pub deploy_slots: Vec<DeploySlot>,
-    pub deploy_manifests: Vec<DeployManifest>,
-    pub deploy_build_caches: Vec<BuildCacheRecord>,
     pub blob_fetches: Vec<BlobTransportReport>,
     pub service_endpoints: Vec<Service>,
-    pub key_leases: Vec<KeyLeaseStatus>,
     #[serde(alias = "host_resources")] // compat
     pub stats: Stats,
     pub events: Vec<EventRecord>,
     pub logs: Vec<ServiceLogRecord>,
     pub alerts: Vec<AlertRecord>,
-    pub robot_command_intents: Vec<RobotCommandIntentRecord>,
-    pub cursor_jobs: Vec<CursorJobRecord>,
     pub kv: Vec<KeyValueRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kv_page: Option<KvPageMeta>,
@@ -463,8 +444,6 @@ impl NodeState {
         let (program_name, program_digest, pid, staged_path, ticket, processes_ok) =
             if let Some(ref proc) = probe_proc {
                 let running = proc.status.as_deref() == Some("running") && proc.pid.is_some();
-                let intent_ok =
-                    plan_process_intent(&self.node, &self.node, proc, "restart").is_ok();
                 let ticket = proc
                     .env
                     .iter()
@@ -477,7 +456,7 @@ impl NodeState {
                     proc.pid,
                     proc.path.clone(),
                     ticket,
-                    staged_from_store_ok && running && intent_ok,
+                    staged_from_store_ok && running,
                 )
             } else {
                 (
@@ -694,30 +673,23 @@ impl NodeState {
             listen: listen.to_string(),
             api_token,
             store_dir,
-            allowed_deploy_roots: vec!["/opt/dialtone/".to_string(), "/tmp/".to_string()],
             boot_stages,
             mesh_config,
             control_tx: None,
             store: None,
             supervisor: Arc::new(Mutex::new(Supervisor::new())),
-            metadata: DialtoneMetadata::default(),
             iroh_runtime,
             nodes: vec![self_beat],
             mesh_rtt_ms: std::collections::BTreeMap::new(),
             installed_programs,
             processes: Vec::new(),
             deploy_slots: Vec::new(),
-            deploy_manifests: Vec::new(),
-            deploy_build_caches: Vec::new(),
             blob_fetches: Vec::new(),
             service_endpoints,
-            key_leases: Vec::new(),
             stats: stats.clone(),
             events: Vec::new(),
             logs: Vec::new(),
             alerts: Vec::new(),
-            robot_command_intents: Vec::new(),
-            cursor_jobs: Vec::new(),
             kv: vec![
                 KeyValueRecord {
                     key: "mesh/self_node".to_string(),
@@ -776,246 +748,6 @@ impl NodeState {
         place_nodes(&mut st.nodes, &st.mesh_rtt_ms);
         st.refresh_live_alerts();
         st
-    }
-
-    pub fn new_seeded(
-        node: &str,
-        mode: &str,
-        listen: &str,
-        store_dir: PathBuf,
-        iroh_runtime: IrohTransportDiagnostics,
-    ) -> Self {
-        let now = now_unix();
-        let sample_sha =
-            "sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d".to_string();
-        let prev_sha =
-            "sha256:a1892e88f06224d9bd720a5f5a2c9fd70184c4eaf887f96e7df89f229484ffb1".to_string();
-        let service_endpoints = vec![Service {
-            name: "robot-v4-nats".to_string(),
-            kind: "nats-jetstream".to_string(),
-            protocol: "nats".to_string(),
-            url: format!("dialtone://{node}/controller/robot-v4-nats"),
-            listen: "127.0.0.1:4222".to_string(),
-            status: "running".to_string(),
-            advertised_by: node.to_string(),
-            role: "controller".to_string(),
-            mesh: "dialtone-iroh-gossip".to_string(),
-            subjects: vec![
-                "dialtone/events.>".to_string(),
-                "dialtone/test.>".to_string(),
-            ],
-        }];
-
-        let mut peer_beats = Vec::new();
-        for peer_name in ["node-alpha", "node-beta", "edge-1", "pendant-1"] {
-            peer_beats.push(Beat {
-                schema: "dialtone.iroh.beat.v1".to_string(),
-                node: peer_name.to_string(),
-                node_id: iroh_runtime.node_id.clone(),
-                ticket: format!("iroh-gossip-v1:{peer_name}"),
-                counter: 1,
-                updated_at_unix: now,
-                kind: "summary".to_string(),
-                beat_interval_secs: BEAT_INTERVAL_SECS,
-                summary_interval_secs: SUMMARY_INTERVAL_SECS,
-                sent_mono_ms: monotonic_now_ms(),
-                rtt_probe_requested: false,
-                peer_echoes: HashMap::new(),
-                peer_rtt_ms: std::collections::BTreeMap::new(),
-                summary_stats: None,
-                sent_unix_ms: 0,
-                os: default_os(),
-                arch: default_arch(),
-                role: node_role_for(peer_name),
-                capabilities: node_capabilities_for(peer_name),
-                stats: sample_stats(peer_name, iroh_runtime.bound_non_tailnet_ipv4.as_deref(), 1),
-                service_endpoints: if peer_name == node {
-                    service_endpoints.clone()
-                } else {
-                    Vec::new()
-                },
-                processes: Vec::new(),
-                iroh_transport: iroh_runtime.clone(),
-                observed_remote_addrs: Vec::new(),
-                tailnet_used: false,
-                geo_location: None,
-                probe: None,
-                store: None,
-            });
-        }
-        let seeded_rtt = build_mesh_rtt_matrix(&peer_beats);
-        place_nodes(&mut peer_beats, &seeded_rtt);
-
-        let metadata = DialtoneMetadata {
-            catalogs: vec![
-                CatalogPolicy {
-                    name: "programs".to_string(),
-                    schema: "dialtone.program_catalog.v1".to_string(),
-                    owner: "motion-server".to_string(),
-                    id_field: "program_id".to_string(),
-                    url_path: "/api/program-catalog".to_string(),
-                    entries: vec![json!({
-                        "program_id": "row-05-calibration",
-                        "program_name": "Row 05 Calibration Loop",
-                        "row_count": 12
-                    })],
-                },
-                CatalogPolicy {
-                    name: "jobs".to_string(),
-                    schema: "dialtone.jobs_catalog.v1".to_string(),
-                    owner: "scheduler".to_string(),
-                    id_field: "job_id".to_string(),
-                    url_path: "/api/catalogs/jobs".to_string(),
-                    entries: vec![json!({
-                        "job_id": "job-01",
-                        "title": "Mesh Health Audit"
-                    })],
-                },
-            ],
-            ..Default::default()
-        };
-
-        let boot_stages = default_boot_stages(listen, &store_dir);
-        let mesh_config = MeshConfig {
-            node_name: Some(node.to_string()),
-            listen_addr: Some(listen.to_string()),
-            channel: DEFAULT_CHANNEL_NAME.to_string(),
-            configured: true,
-            secret_key: None,
-            derived_keys: None,
-            channel_fingerprint: secret_channel_fingerprint("dialtone:seeded"),
-            invites: Vec::new(),
-            seeds: Vec::new(),
-            allowlist: Vec::new(),
-            used_invite_nonces: Vec::new(),
-            daemon_installed: false,
-            daemon_service_path: None,
-            processes: Vec::new(),
-            updated_at_unix: now,
-        };
-        let api_token =
-            load_or_create_api_token().unwrap_or_else(|_| "dtk-seeded-token".to_string());
-
-        Self {
-            node: node.to_string(),
-            mode: mode.to_string(),
-            listen: listen.to_string(),
-            api_token,
-            store_dir,
-            allowed_deploy_roots: vec!["/opt/dialtone/".to_string(), "/tmp/".to_string()],
-            boot_stages,
-            mesh_config,
-            control_tx: None,
-            store: None,
-            supervisor: Arc::new(Mutex::new(Supervisor::new())),
-            metadata,
-            iroh_runtime,
-            nodes: peer_beats,
-            mesh_rtt_ms: seeded_rtt,
-            installed_programs: vec![InstalledProgram {
-                name: "robot-v4-cartesiand".to_string(),
-                path: "/opt/dialtone/bin/robot-v4-cartesiand".to_string(),
-                digest: sample_sha.clone(),
-            }],
-            processes: vec![ProcessSpec {
-                name: "robot-edge-motion-server".to_string(),
-                path: "/opt/dialtone/bin/robot-v4-cartesiand".to_string(),
-                digest: sample_sha.clone(),
-                desired_state: "running".to_string(),
-                args: vec![
-                    "--nats".to_string(),
-                    format!("dialtone://{node}/controller/robot-v4-nats"),
-                ],
-                env: Vec::new(),
-                cwd: None,
-                startup_grace_secs: Some(5),
-                status: Some("running".to_string()),
-                pid: Some(4242),
-                restart_count: 0,
-                service_unit: Some("robot-edge-motion-server.service".to_string()),
-                deploy_ticket: None,
-            }],
-            deploy_slots: vec![DeploySlot {
-                name: "edge-1-motion-server".to_string(),
-                active: true,
-                path: "/opt/dialtone/slots/a/robot-v4-cartesiand".to_string(),
-                digest: sample_sha,
-                previous_path: Some("/opt/dialtone/slots/b/robot-v4-cartesiand".to_string()),
-                previous_digest: Some(prev_sha),
-                status: "ready".to_string(),
-            }],
-            deploy_manifests: Vec::new(),
-            deploy_build_caches: Vec::new(),
-            blob_fetches: Vec::new(),
-            service_endpoints,
-            key_leases: vec![KeyLeaseStatus {
-                name: "pendant-devkit".to_string(),
-                holder: node.to_string(),
-                kind: "ssh-private-key".to_string(),
-                available: true,
-                status: "healthy".to_string(),
-                source: "metadata".to_string(),
-                expires_at_unix: None,
-                warning: None,
-            }],
-            stats: Stats::default(),
-            events: vec![EventRecord {
-                id: "evt-1".to_string(),
-                kind: "mesh.boot".to_string(),
-                severity: "info".to_string(),
-                source: node.to_string(),
-                message: "dialtone iroh 1.3 mesh runtime initialized".to_string(),
-                timestamp_unix: now,
-                test_session_id: "session-default".to_string(),
-                daemon_owned: true,
-            }],
-            logs: vec![ServiceLogRecord {
-                service: "robot-edge-motion-server".to_string(),
-                level: "INFO".to_string(),
-                stream: "stdout".to_string(),
-                cursor: 1,
-                message: "connected to dialtone peer-qualified NATS endpoint".to_string(),
-                timestamp_unix: now,
-            }],
-            alerts: vec![AlertRecord {
-                id: "alert-edge-1-nominal".to_string(),
-                target_node: "edge-1".to_string(),
-                status: "active".to_string(),
-                severity: "info".to_string(),
-                source: "stats".to_string(),
-                summary: "Edge-1 stats nominal".to_string(),
-                stats_ref: "dialtone://edge-1/edge/stats".to_string(),
-                last_seen_unix: now,
-                acknowledged_by: None,
-            }],
-            robot_command_intents: Vec::new(),
-            cursor_jobs: vec![CursorJobRecord {
-                id: "cursor-job-1".to_string(),
-                host: "node-beta".to_string(),
-                remote_user: Some("operator".to_string()),
-                prompt: "audit mesh service endpoints".to_string(),
-                status: "completed".to_string(),
-                logs: vec![
-                    "audit started".to_string(),
-                    "0 forbidden dependencies".to_string(),
-                ],
-                updated_at_unix: now,
-            }],
-            kv: vec![
-                KeyValueRecord {
-                    key: "mesh/leader".to_string(),
-                    value: json!(node),
-                    updated_at_unix: now,
-                },
-                KeyValueRecord {
-                    key: "mesh/protocol".to_string(),
-                    value: json!("iroh-1.3.0"),
-                    updated_at_unix: now,
-                },
-            ],
-            kv_page: None,
-            probe: None,
-        }
     }
 }
 
@@ -1154,12 +886,6 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
         return write_json(&mut stream, 403, &json!({ "error": err }));
     }
 
-    if path == "/ws" {
-        if let Some(ws_key) = headers.get("sec-websocket-key") {
-            return handle_websocket_upgrade(stream, ws_key, state);
-        }
-    }
-
     // Routes write their response into a buffer while they hold the node-state lock; the
     // socket write happens after the lock is released, so a slow client never stalls the mesh.
     let mut out = Vec::new();
@@ -1191,7 +917,7 @@ fn route_request(
     prune_stale_peers(&mut st.nodes, now, DEFAULT_PEER_TTL_SECS);
 
     match (method, path) {
-        ("GET", "/") | ("GET", "/nodes") | ("GET", "/peer") | ("GET", "/hud") => {
+        ("GET", "/") => {
             st.reconcile_processes();
             let nonce = crate::hex_encode(&iroh::SecretKey::generate().to_bytes()[..16]);
             let html = render_hud(&st, query.get("peer-id").map(String::as_str), &nonce);
@@ -1231,7 +957,7 @@ fn route_request(
             });
             write_json(&mut stream, 200, &body)
         }
-        ("POST", "/api/mesh/join") | ("POST", "/api/config/join") => {
+        ("POST", "/api/mesh/join") => {
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
             let channel = normalize_channel_name(parsed.get("channel").and_then(Value::as_str));
             let raw_secret = parsed
@@ -1365,24 +1091,6 @@ fn route_request(
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
-        ("GET", "/install/v1/install.sh") => {
-            let script = render_install_v1_sh(&format!("http://{}", st.listen));
-            write_response(
-                &mut stream,
-                200,
-                "text/x-shellscript",
-                script.as_bytes(),
-                false,
-            )
-        }
-        ("GET", "/install/v1/manifest.json") => {
-            let manifest = json!({
-                "schema": "dialtone.install.v1",
-                "server": format!("http://{}", st.listen),
-                "node": st.node
-            });
-            write_json(&mut stream, 200, &manifest)
-        }
         ("GET", "/api/state") => {
             st.reconcile_processes();
             let include_kv = query
@@ -1420,25 +1128,12 @@ fn route_request(
                     "blob_bytes": blob_bytes,
                     "blob_fetches": st.blob_fetches.len(),
                     "kv_keys": st.kv.len(),
-                    "key_leases": st.key_leases.len(),
-                    "installed_programs": st.installed_programs.len(),
-                    "deploy_manifests": st.deploy_manifests.len()
+                    "installed_programs": st.installed_programs.len()
                 },
                 "nodes": st.nodes,
                 "mesh_rtt_ms": st.mesh_rtt_ms,
                 "processes": st.processes,
                 "service_endpoints": st.service_endpoints
-            });
-            write_json(&mut stream, 200, &body)
-        }
-        ("GET", "/api/iroh-runtime") => {
-            let body = json!({
-                "schema": "dialtone.iroh_runtime.v1",
-                "owner": "dialtone-rust-daemon",
-                "steady_state_data_plane": "iroh-quic",
-                "http_plane_role": "local-seed-control-only",
-                "node": st.node,
-                "diagnostics": st.iroh_runtime
             });
             write_json(&mut stream, 200, &body)
         }
@@ -1560,116 +1255,6 @@ fn route_request(
                     write_json(&mut stream, 200, &report)
                 }
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-            }
-        }
-        ("GET", "/api/blob-fetch-report") | ("POST", "/api/artifacts/fetch") => { // compat
-            // compat
-            let req = if method == "POST" {
-                serde_json::from_str::<TieredBlobFetchRequest>(body_part).map_err(|e| e.to_string())
-            } else {
-                Ok(TieredBlobFetchRequest {
-                    digest: query
-                        .get("digest")
-                        .or_else(|| query.get("sha256")) // compat
-                        .cloned()
-                        .unwrap_or_default(),
-                    uri: query.get("uri").cloned().unwrap_or_default(),
-                    provider_node: query
-                        .get("provider")
-                        .cloned()
-                        .unwrap_or_else(|| "node-beta".to_string()),
-                    expected_bytes: 1024,
-                    http_fallback_enabled: query
-                        .get("http_fallback")
-                        .map(|v| v == "1" || v == "true")
-                        .unwrap_or(false),
-                })
-            };
-            match req.and_then(|r| evaluate_tiered_blob_fetch(&st.store_dir, &r)) {
-                Ok(plan) => write_json(&mut stream, 200, &plan),
-                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-            }
-        }
-        ("GET", "/api/deploy-plan") | ("POST", "/api/deploy-plan") => {
-            let target = query
-                .get("target")
-                .cloned()
-                .unwrap_or_else(|| "robot-v4-default".to_string());
-            match generate_deploy_plan(&target) {
-                Ok(plan) => write_json(&mut stream, 200, &plan),
-                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-            }
-        }
-        ("POST", "/api/deploy/gossip-manifest") | ("POST", "/api/deploy/apply-manifest") => {
-            match serde_json::from_str::<DeployManifest>(body_part) {
-                Ok(manifest) => {
-                    match validate_manifest_contract(
-                        &manifest,
-                        &st.metadata.deploy_policy,
-                        &st.allowed_deploy_roots,
-                    ) {
-                        Ok(()) => {
-                            st.deploy_manifests.push(manifest.clone());
-                            write_json(
-                                &mut stream,
-                                200,
-                                &json!({ "status": "accepted", "manifest_id": manifest.id }),
-                            )
-                        }
-                        Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-                    }
-                }
-                Err(err) => write_json(&mut stream, 400, &json!({ "error": err.to_string() })),
-            }
-        }
-        ("POST", "/api/deploy/build-request") => {
-            match serde_json::from_str::<BuildProbeRequest>(body_part) {
-                Ok(req) => {
-                    let resp = probe_build_cache(&st.deploy_build_caches, &req);
-                    write_json(&mut stream, 200, &resp)
-                }
-                Err(err) => write_json(&mut stream, 400, &json!({ "error": err.to_string() })),
-            }
-        }
-        ("GET", "/api/build-decision") => {
-            let case = query
-                .get("case")
-                .map(String::as_str)
-                .unwrap_or("cache-reused");
-            match evaluate_deploy_build_decision(case) {
-                Ok(decision) => write_json(&mut stream, 200, &decision),
-                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-            }
-        }
-        ("GET", "/api/rollback-plan") | ("POST", "/api/rollback-plan") => {
-            let target_node = query
-                .get("node")
-                .cloned()
-                .unwrap_or_else(|| "edge-1".to_string());
-            if let Some(slot) = st.deploy_slots.first() {
-                match plan_rollback(&target_node, slot) {
-                    Ok(plan) => write_json(&mut stream, 200, &plan),
-                    Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-                }
-            } else {
-                write_json(&mut stream, 404, &json!({ "error": "no deploy slots" }))
-            }
-        }
-        ("POST", "/api/deploy/rollback") => {
-            if let Some(slot) = st.deploy_slots.first_mut() {
-                match execute_verified_rollback(slot) {
-                    Ok(()) => {
-                        let updated = slot.clone();
-                        write_json(
-                            &mut stream,
-                            200,
-                            &json!({ "status": "rolled_back", "slot": updated }),
-                        )
-                    }
-                    Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-                }
-            } else {
-                write_json(&mut stream, 404, &json!({ "error": "no deploy slots" }))
             }
         }
         ("GET", "/api/processes") => {
@@ -1910,24 +1495,6 @@ fn route_request(
                 }),
             )
         }
-        ("GET", "/api/process-intent") | ("POST", "/api/process-intent") => {
-            let target_node = query
-                .get("node")
-                .cloned()
-                .unwrap_or_else(|| "edge-1".to_string());
-            let action = query
-                .get("action")
-                .cloned()
-                .unwrap_or_else(|| "restart".to_string());
-            if let Some(proc) = st.processes.first() {
-                match plan_process_intent(&st.node, &target_node, proc, &action) {
-                    Ok(plan) => write_json(&mut stream, 200, &plan),
-                    Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-                }
-            } else {
-                write_json(&mut stream, 404, &json!({ "error": "no process" }))
-            }
-        }
         ("POST", "/api/probe")
         | ("GET", "/api/probe")
         | ("POST", "/api/e2e/tick") // compat
@@ -1949,108 +1516,12 @@ fn route_request(
                 }),
             )
         }
-        ("GET", "/api/alert-ack") | ("POST", "/api/alert-ack") => {
-            let actor = query
-                .get("actor")
-                .cloned()
-                .unwrap_or_else(|| "operator-a".to_string());
-            let note = query
-                .get("note")
-                .cloned()
-                .unwrap_or_else(|| "verified nominal".to_string());
-            if let Some(alert) = st.alerts.first() {
-                match plan_alert_ack(alert, &actor, &note) {
-                    Ok(plan) => write_json(&mut stream, 200, &plan),
-                    Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-                }
-            } else {
-                write_json(&mut stream, 404, &json!({ "error": "no alerts" }))
-            }
-        }
-        ("GET", "/api/program-catalog") => {
-            let cat = st.metadata.catalogs.first().cloned().unwrap_or_default();
-            write_json(&mut stream, 200, &cat)
-        }
-        ("GET", "/api/catalogs") => write_json(&mut stream, 200, &st.metadata.catalogs),
-        ("POST", "/api/commands/intent") => {
-            match serde_json::from_str::<RobotCommandIntentRecord>(body_part) {
-                Ok(intent) => {
-                    let merged = upsert_command_intent(&mut st.robot_command_intents, intent);
-                    write_json(&mut stream, 200, &json!({ "merged": merged }))
-                }
-                Err(err) => write_json(&mut stream, 400, &json!({ "error": err.to_string() })),
-            }
-        }
-        ("GET", "/api/cursor/jobs") => {
-            let offset = query
-                .get("offset")
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(0);
-            let limit = query
-                .get("limit")
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(50)
-                .clamp(1, 200);
-            let slice: Vec<CursorJobRecord> = st
-                .cursor_jobs
-                .iter()
-                .skip(offset)
-                .take(limit)
-                .cloned()
-                .collect();
-            write_json(&mut stream, 200, &slice)
-        }
-        _ if path.starts_with("/api/catalogs/") => {
-            let name = path.trim_start_matches("/api/catalogs/");
-            if let Some(cat) = st.metadata.catalogs.iter().find(|c| c.name == name) {
-                write_json(&mut stream, 200, cat)
-            } else {
-                write_json(&mut stream, 404, &json!({ "error": "catalog not found" }))
-            }
-        }
         _ => write_json(
             &mut stream,
             404,
             &json!({ "error": "not found", "path": path }),
         ),
     }
-}
-
-fn handle_websocket_upgrade(
-    mut stream: TcpStream,
-    ws_key: &str,
-    state: &Arc<Mutex<NodeState>>,
-) -> Result<(), String> {
-    let mut input = ws_key.as_bytes().to_vec();
-    input.extend_from_slice(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-    let accept = crate::base64_encode(&crate::sha1_digest(&input));
-
-    let handshake = format!(
-        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
-    );
-    stream
-        .write_all(handshake.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    let payload = {
-        let st = state.lock().map_err(|_| "state poisoned".to_string())?;
-        serde_json::to_vec(&json!({
-            "event": "state_snapshot",
-            "node": st.node,
-            "peers": st.nodes.len()
-        }))
-        .map_err(|e| e.to_string())?
-    };
-
-    let mut frame = vec![0x81];
-    if payload.len() < 126 {
-        frame.push(payload.len() as u8);
-    } else {
-        frame.push(126);
-        frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
-    }
-    frame.extend_from_slice(&payload);
-    stream.write_all(&frame).map_err(|e| e.to_string())
 }
 
 pub fn count_store(blob_dir: &std::path::Path) -> (usize, u64) {
@@ -2338,7 +1809,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&IrohTransportConfig::local_offline(), &ep_addr, None, "n1");
-        let mut node = NodeState::new_seeded(
+        let mut node = NodeState::new_live(
             "node-alpha",
             "hub",
             &addr.to_string(),
@@ -2384,7 +1855,7 @@ mod tests {
     }
 
     #[test]
-    fn http_and_websocket_server_serves_ui_state_blobs_catalogs_and_ws_upgrade() {
+    fn http_server_serves_hud_and_state_and_rejects_cross_origin_posts() {
         let tmp_dir = env::temp_dir().join(format!("dialtone-http-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2394,7 +1865,7 @@ mod tests {
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-123");
 
-        let state = Arc::new(Mutex::new(NodeState::new_seeded(
+        let state = Arc::new(Mutex::new(NodeState::new_live(
             "node-alpha",
             "hub",
             &addr.to_string(),
@@ -2404,7 +1875,7 @@ mod tests {
 
         let state_bg = state.clone();
         let handle = thread::spawn(move || {
-            serve_http_blocking(listener, state_bg, Some(6)).unwrap();
+            serve_http_blocking(listener, state_bg, Some(3)).unwrap();
         });
 
         // 1. GET / hud UI
@@ -2419,23 +1890,6 @@ mod tests {
         );
         assert!(resp_state.contains("200 OK"));
         assert!(resp_state.contains("\"kv_page\""));
-        assert!(resp_state.contains("\"has_more\":true"));
-
-        // 3. GET /api/catalogs/jobs
-        let resp_cat = raw_http_request(
-            addr,
-            "GET /api/catalogs/jobs HTTP/1.1\r\nHost: localhost\r\n\r\n",
-        );
-        assert!(resp_cat.contains("200 OK"));
-        assert!(resp_cat.contains("Mesh Health Audit"));
-
-        // 4. GET /api/rollback-plan?node=edge-1
-        let resp_rb = raw_http_request(
-            addr,
-            "GET /api/rollback-plan?node=edge-1 HTTP/1.1\r\nHost: localhost\r\n\r\n",
-        );
-        assert!(resp_rb.contains("200 OK"));
-        assert!(resp_rb.contains("\"side_effect_free_preview\":true"));
 
         // 5. Reject external Host / cross-origin POST (CSRF / DNS rebinding defense)
         let resp_csrf = raw_http_request(
@@ -2443,14 +1897,6 @@ mod tests {
             "POST /api/daemon/install HTTP/1.1\r\nHost: localhost\r\nOrigin: https://evil.example.com\r\nContent-Length: 2\r\n\r\n{}",
         );
         assert!(resp_csrf.contains("403 Forbidden"));
-
-        // 6. GET /ws WebSocket upgrade
-        let resp_ws = raw_http_request(
-            addr,
-            "GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
-        );
-        assert!(resp_ws.contains("101 Switching Protocols"));
-        assert!(resp_ws.contains("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
 
         handle.join().unwrap();
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -2473,7 +1919,7 @@ mod tests {
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-auth");
 
-        let mut seeded = NodeState::new_seeded(
+        let mut seeded = NodeState::new_live(
             "node-alpha",
             "hub",
             &addr.to_string(),
@@ -2528,7 +1974,7 @@ mod tests {
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-conc");
 
-        let state = Arc::new(Mutex::new(NodeState::new_seeded(
+        let state = Arc::new(Mutex::new(NodeState::new_live(
             "node-alpha",
             "hub",
             &addr.to_string(),
@@ -2572,8 +2018,7 @@ mod tests {
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-probe");
 
-        let mut st =
-            NodeState::new_seeded("node-alpha", "hub", "127.0.0.1:0", tmp_dir.clone(), diag);
+        let mut st = NodeState::new_live("node-alpha", "hub", "127.0.0.1:0", tmp_dir.clone(), diag);
 
         let report1 = st.run_probe();
         assert_eq!(report1.cycle, 1);

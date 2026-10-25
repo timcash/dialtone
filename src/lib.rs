@@ -10,7 +10,6 @@ pub mod service;
 pub mod stats;
 pub mod supervisor;
 
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
@@ -38,190 +37,56 @@ pub fn run_cmd(prog: &str, args: &[&str]) -> Option<String> {
 }
 
 pub fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
+    hex::encode(bytes)
 }
 
 pub fn hex_decode(raw: &str) -> Result<Vec<u8>, String> {
-    let s = raw.trim();
-    if !s.len().is_multiple_of(2) {
-        return Err("odd hex length".to_string());
-    }
-    let mut out = Vec::with_capacity(s.len() / 2);
-    let bytes = s.as_bytes();
-    for i in (0..bytes.len()).step_by(2) {
-        let hi = (bytes[i] as char)
-            .to_digit(16)
-            .ok_or_else(|| "invalid hex digit".to_string())?;
-        let lo = (bytes[i + 1] as char)
-            .to_digit(16)
-            .ok_or_else(|| "invalid hex digit".to_string())?;
-        out.push(((hi << 4) | lo) as u8);
-    }
-    Ok(out)
+    hex::decode(raw.trim()).map_err(|e| format!("invalid hex: {e}"))
 }
 
+/// Standard alphabet, any padding, no trailing-bit check: decodes whatever peers and older
+/// builds produced (standard or URL-safe after normalisation, padded or not).
+const BASE64_LENIENT: base64::engine::GeneralPurpose = base64::engine::GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    base64::engine::GeneralPurposeConfig::new()
+        .with_encode_padding(true)
+        .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent)
+        .with_decode_allow_trailing_bits(true),
+);
+
 pub fn base64_encode(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
-        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
-        if chunk.len() > 1 {
-            out.push(TABLE[((triple >> 6) & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-        if chunk.len() > 2 {
-            out.push(TABLE[(triple & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-    }
-    out
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
 }
 
 pub fn base64url_encode(bytes: &[u8]) -> String {
-    base64_encode(bytes)
-        .trim_end_matches('=')
-        .replace('+', "-")
-        .replace('/', "_")
+    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes)
 }
 
+/// Decode standard or URL-safe base64, with or without padding; whitespace is ignored.
 pub fn base64_decode(raw: &str) -> Result<Vec<u8>, String> {
-    fn val(b: u8) -> Result<u8, String> {
-        match b {
-            b'A'..=b'Z' => Ok(b - b'A'),
-            b'a'..=b'z' => Ok(b - b'a' + 26),
-            b'0'..=b'9' => Ok(b - b'0' + 52),
-            b'+' | b'-' => Ok(62),
-            b'/' | b'_' => Ok(63),
-            _ => Err(format!("invalid base64 byte: {b}")),
-        }
-    }
-    let clean: Vec<u8> = raw
-        .bytes()
-        .filter(|b| !b.is_ascii_whitespace() && *b != b'=')
+    let normalised: String = raw
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace() && *c != '=')
+        .map(|c| match c {
+            '-' => '+',
+            '_' => '/',
+            other => other,
+        })
         .collect();
-    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
-    for chunk in clean.chunks(4) {
-        if chunk.len() < 2 {
-            return Err("invalid base64 chunk length".to_string());
-        }
-        let c0 = val(chunk[0])? as u32;
-        let c1 = val(chunk[1])? as u32;
-        out.push(((c0 << 2) | (c1 >> 4)) as u8);
-        if chunk.len() > 2 {
-            let c2 = val(chunk[2])? as u32;
-            out.push((((c1 & 0x0f) << 4) | (c2 >> 2)) as u8);
-            if chunk.len() > 3 {
-                let c3 = val(chunk[3])? as u32;
-                out.push((((c2 & 0x03) << 6) | c3) as u8);
-            }
-        }
-    }
-    Ok(out)
-}
-
-/// Compact RFC 3174 SHA-1 used strictly for RFC 6455 `Sec-WebSocket-Accept` handshake.
-pub fn sha1_digest(data: &[u8]) -> [u8; 20] {
-    let mut h0: u32 = 0x67452301;
-    let mut h1: u32 = 0xefcdab89;
-    let mut h2: u32 = 0x98badcfe;
-    let mut h3: u32 = 0x10325476;
-    let mut h4: u32 = 0xc3d2e1f0;
-
-    let mut msg = data.to_vec();
-    let bit_len = (data.len() as u64) * 8;
-    msg.push(0x80);
-    while (msg.len() % 64) != 56 {
-        msg.push(0);
-    }
-    msg.extend_from_slice(&bit_len.to_be_bytes());
-
-    for chunk in msg.as_chunks::<64>().0 {
-        let mut w = [0u32; 80];
-        for i in 0..16 {
-            w[i] = u32::from_be_bytes([
-                chunk[i * 4],
-                chunk[i * 4 + 1],
-                chunk[i * 4 + 2],
-                chunk[i * 4 + 3],
-            ]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-        let (mut a, mut b, mut c, mut d, mut e) = (h0, h1, h2, h3, h4);
-        for (i, &wi) in w.iter().enumerate() {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), 0x5a827999u32),
-                20..=39 => (b ^ c ^ d, 0x6ed9eba1u32),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8f1bbcdcu32),
-                _ => (b ^ c ^ d, 0xca62c1d6u32),
-            };
-            let temp = a
-                .rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(wi);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-        h0 = h0.wrapping_add(a);
-        h1 = h1.wrapping_add(b);
-        h2 = h2.wrapping_add(c);
-        h3 = h3.wrapping_add(d);
-        h4 = h4.wrapping_add(e);
-    }
-
-    let mut out = [0u8; 20];
-    out[0..4].copy_from_slice(&h0.to_be_bytes());
-    out[4..8].copy_from_slice(&h1.to_be_bytes());
-    out[8..12].copy_from_slice(&h2.to_be_bytes());
-    out[12..16].copy_from_slice(&h3.to_be_bytes());
-    out[16..20].copy_from_slice(&h4.to_be_bytes());
-    out
+    base64::Engine::decode(&BASE64_LENIENT, normalised).map_err(|e| format!("invalid base64: {e}"))
 }
 
 use crate::api::{serve_http_blocking, NodeState};
-use crate::blob::{
-    digest_of, evaluate_tiered_blob_fetch, put_blob, transfer_blob_via_iroh_ticket,
-    BlobTransportReport, TieredBlobFetchRequest,
-};
-use crate::deploy::{
-    evaluate_deploy_build_decision, execute_verified_rollback, generate_deploy_plan, plan_rollback,
-    probe_build_cache, validate_manifest_contract, BuildCacheRecord, BuildProbeRequest,
-    DeployManifest, DeploySlot,
-};
-use crate::mesh::{
-    load_peer_cache, save_peer_cache, verify_live_gossip_exchange, Beat, DEFAULT_PEER_TTL_SECS,
-};
+use crate::blob::{digest_of, transfer_blob_via_iroh_ticket, BlobTransportReport};
+use crate::deploy::{execute_verified_rollback, plan_rollback, DeploySlot};
+use crate::mesh::{verify_live_gossip_exchange, Beat};
 use crate::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
     load_or_create_secret_key_at, IrohTransportConfig, IrohTransportDiagnostics,
 };
-use crate::record::{evaluate_proof_case, paginate_kv_records, plan_alert_ack};
-use crate::service::{
-    resolve_service, DeployPolicyConfig, KeyLeaseDefinition, PeerRef, ProcessSpec,
-};
-use crate::supervisor::{
-    dispatch_rtcore_udp_command_loopback, hydrate_process_digests, plan_process_intent,
-    reconcile_systemd_intent_drop_in, RobotCommandIntentRecord, Supervisor,
-};
+use crate::record::{paginate_kv_records, KeyValueRecord};
+use crate::service::ProcessSpec;
+use crate::supervisor::Supervisor;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SelfTestReport {
@@ -231,15 +96,12 @@ pub struct SelfTestReport {
     pub capabilities_verified: Vec<String>,
     #[serde(alias = "persistent_endpoint_id")] // compat
     pub persistent_node_id: String,
-    pub resolved_service_uri: String,
     pub gossip_received_from: String,
     pub gossip_receiver_node: String,
     pub blob_transfer: BlobTransportReport,
-    pub build_cache_hit: bool,
     pub rollback_verified: bool,
-    pub systemd_drop_in_repaired: bool,
-    pub rtcore_udp_bytes_sent: usize,
-    pub http_and_ws_verified: bool,
+    pub process_started_and_stopped: bool,
+    pub api_verified: bool,
 }
 
 pub async fn collect_node_diagnostics(
@@ -259,126 +121,36 @@ pub async fn collect_node_diagnostics(
     Ok(diagnostics)
 }
 
-/// Comprehensive end-to-end verification across all 7 capability domains in the single binary.
+/// End-to-end check of the node's real capabilities, each exercised for real (no fixtures):
+/// Key persistence, a live two-node gossip exchange (signed beats, allowlist hooks), a live
+/// iroh-blobs transfer, A/B slot rollback, process supervision, KV paging, and the API.
 pub async fn run_self_test() -> Result<SelfTestReport, String> {
     let tmp_root = env::temp_dir().join(format!("dialtone-self-test-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp_root);
     fs::create_dir_all(&tmp_root).map_err(|e| e.to_string())?;
 
-    // 1. Cryptographic Mesh Identity & Peer Addressing
+    // 1. Key: the node's identity persists across loads.
     let key_path = tmp_root.join("iroh-secret-key");
     let key1 = load_or_create_secret_key_at(&key_path)?;
     let key2 = load_or_create_secret_key_at(&key_path)?;
     if key1.public() != key2.public() {
-        return Err("persistent secret key public identity mismatch".to_string());
+        return Err("persistent Key public identity mismatch".to_string());
     }
     let persistent_node_id = key1.public().to_string();
 
-    // 2. Multi-Transport Discovery & Iroh Gossip Control Plane + TTL Peer Cache
+    // 2. Mesh: two nodes that allowlist only each other exchange a signed, encrypted beat.
     let (received_beat, peer_b_beat): (Beat, Beat) =
         verify_live_gossip_exchange("node-alpha", "edge-1").await?;
-    let peer_cache_path = tmp_root.join("peer-cache.json");
-    save_peer_cache(
-        &peer_cache_path,
-        &[received_beat.clone(), peer_b_beat.clone()],
-    )?;
-    let loaded_peers = load_peer_cache(
-        &peer_cache_path,
-        received_beat.updated_at_unix,
-        DEFAULT_PEER_TTL_SECS,
-    )?;
-    if loaded_peers.len() != 2 {
-        return Err("TTL peer cache failed to persist fresh peers".to_string());
-    }
 
-    let target_ref = PeerRef::expand_template("dialtone://{node}/controller/nats", "node-alpha")?;
-    let resolved = resolve_service(&target_ref, &received_beat.service_endpoints)?;
-    let resolved_service_uri = resolved.url.clone();
-
-    // 3. Content-Addressed Blob Store & Native Iroh Blob Transport
-    let blob_dir = tmp_root.join("blobs");
+    // 3. Blob: a blob crosses iroh-blobs QUIC and its digest is re-verified.
     let blob_transfer = transfer_blob_via_iroh_ticket(
-        b"dialtone-self-test-verified-blob-payload",
-        &blob_dir,
+        b"dialtone-self-test-verified-blob",
+        &tmp_root.join("blobs"),
         &IrohTransportConfig::local_offline(),
     )
     .await?;
-    let store_dir = tmp_root.join("tiered-cache");
-    let (cached_sha, _) = put_blob(&store_dir, b"cached-item", None)?;
-    let tiered_hit = evaluate_tiered_blob_fetch(
-        &store_dir,
-        &TieredBlobFetchRequest {
-            digest: cached_sha,
-            uri: "iroh-blobs://ticket/test".to_string(),
-            provider_node: "node-beta".to_string(),
-            expected_bytes: 11,
-            http_fallback_enabled: false,
-        },
-    )?;
-    if tiered_hit.transferred_bytes != 0 || tiered_hit.method != "local-cache" {
-        return Err("tiered blob cache hit did not short-circuit with 0 bytes".to_string());
-    }
 
-    // 4. Manifest-Driven Deployment, Distributed Build Cache & Rollback
-    let policy = DeployPolicyConfig::default();
-    let manifest = DeployManifest {
-        schema: "dialtone.blob_manifest.v1".to_string(),
-        id: "self-test-manifest".to_string(),
-        publisher_node: "node-alpha".to_string(),
-        target_host: "edge-1".to_string(),
-        component: "cartesiand".to_string(),
-        source_tree_hash: "tree-1".to_string(),
-        source_bundle_digest: blob_transfer.digest.clone(),
-        source_bundle_uri: blob_transfer.ticket_uri.clone(),
-        program_digest: blob_transfer.digest.clone(),
-        program_ticket: blob_transfer.ticket_uri.clone(),
-        runtime_path: "/opt/dialtone/bin/cartesiand".to_string(),
-        build_inputs: vec!["src/main.rs".to_string()],
-        whole_repo_sync: false,
-        ssh_required: false,
-        git_required: false,
-    };
-    validate_manifest_contract(&manifest, &policy, &["/opt/dialtone/".to_string()])?;
-    let default_plan = generate_deploy_plan("robot-v4-default")?;
-    if default_plan.includes_daemon_self_update {
-        return Err("default app deploy plan must exclude daemon self-updates".to_string());
-    }
-    let _ = evaluate_deploy_build_decision("peer-local-async")?;
-
-    let caches = vec![BuildCacheRecord {
-        peer_node: "edge-1".to_string(),
-        target_host: "edge-1".to_string(),
-        component: "cartesiand".to_string(),
-        source_tree_hash: "tree-1".to_string(),
-        source_bundle_digest: blob_transfer.digest.clone(),
-        build_profile: "release".to_string(),
-        toolchain: "1.95.0".to_string(),
-        platform_os: "linux".to_string(),
-        platform_arch: "aarch64".to_string(),
-        target_triple: "aarch64-unknown-linux-gnu".to_string(),
-        program_digest: blob_transfer.digest.clone(),
-        program_ticket: blob_transfer.ticket_uri.clone(),
-        status: "ready".to_string(),
-    }];
-    let probe = probe_build_cache(
-        &caches,
-        &BuildProbeRequest {
-            target_host: "edge-2".to_string(),
-            component: "cartesiand".to_string(),
-            source_tree_hash: "tree-1".to_string(),
-            source_bundle_digest: blob_transfer.digest.clone(),
-            build_profile: "release".to_string(),
-            toolchain: "1.95.0".to_string(),
-            platform_os: "linux".to_string(),
-            platform_arch: "aarch64".to_string(),
-            target_triple: "aarch64-unknown-linux-gnu".to_string(),
-            cache_only: true,
-        },
-    );
-    if !probe.cache_hit || probe.compiler_invoked {
-        return Err("build-cache probe failed".to_string());
-    }
-
+    // 4. Slot: an A/B rollback is planned without side effects, then executed with digest checks.
     let slot_a = tmp_root.join("slot-a");
     let slot_b = tmp_root.join("slot-b");
     fs::write(&slot_a, b"v2-bytes").map_err(|e| e.to_string())?;
@@ -392,13 +164,12 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
         previous_digest: Some(digest_of(b"v1-bytes")),
         status: "ready".to_string(),
     };
-    let rb_plan = plan_rollback("edge-1", &slot)?;
-    if !rb_plan.side_effect_free_preview {
+    if !plan_rollback("edge-1", &slot)?.side_effect_free_preview {
         return Err("rollback plan must be side-effect-free".to_string());
     }
     execute_verified_rollback(&mut slot)?;
 
-    // 5. Daemon-Owned Process Supervision & Intent Convergence
+    // 5. Supervisor: a real process is started, then stopped.
     let (sleep_path, sleep_args) = if cfg!(windows) {
         (
             r"C:\Windows\System32\ping.exe".to_string(),
@@ -407,141 +178,118 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
     } else {
         ("/bin/sleep".to_string(), vec!["5".to_string()])
     };
-    let mut proc_specs = vec![ProcessSpec {
+    let mut specs = vec![ProcessSpec {
         name: "self-test-sleep".to_string(),
         path: sleep_path,
-        digest: "sha256:unknown".to_string(),
+        digest: "sha256:self-test".to_string(),
         desired_state: "running".to_string(),
         args: sleep_args,
-        env: vec!["DIALTONE_SYSTEMD_RECONCILE_INTENT=1".to_string()],
+        env: Vec::new(),
         cwd: None,
-        startup_grace_secs: Some(2),
+        startup_grace_secs: None,
         status: None,
         pid: None,
         restart_count: 0,
-        service_unit: Some("self-test-sleep.service".to_string()),
+        service_unit: None,
         deploy_ticket: None,
     }];
-    hydrate_process_digests(&mut proc_specs, &[], &HashMap::new());
-    let _ = plan_process_intent("node-alpha", "edge-1", &proc_specs[0], "restart")?;
     let mut supervisor = Supervisor::new();
-    supervisor.reconcile(&mut proc_specs)?;
-    proc_specs[0].desired_state = "stopped".to_string();
-    supervisor.reconcile(&mut proc_specs)?;
-
-    let unit_dir = tmp_root.join("systemd-unit.d");
-    let sys_report =
-        reconcile_systemd_intent_drop_in(&unit_dir, &proc_specs[0], true, &[], 3_500, 2_000)?;
-
-    // 6. Service Discovery, Generic Catalogs & Command Journals
-    let mut cmd_journal = Vec::new();
-    let rtcore_intent = RobotCommandIntentRecord {
-        id: "cmd-self-test".to_string(),
-        command_id: "arm-1".to_string(),
-        publisher_node: "node-alpha".to_string(),
-        target_node: "node-beta".to_string(),
-        service_ref: "dialtone://node-beta/realtime-core/rtcore-udp".to_string(),
-        command: "arm".to_string(),
-        runtime_mode: "live".to_string(),
-        binding_epoch: 7,
-        delivery: "at-least-once".to_string(),
-        status: "pending".to_string(),
-        updated_at_unix: 100,
-        message: String::new(),
-    };
-    let rtcore_udp_bytes_sent =
-        dispatch_rtcore_udp_command_loopback(&mut cmd_journal, rtcore_intent, "node-alpha")?;
-
-    // 7. Metadata-Driven Policy, Operational Evidence & Rust-Served HTTP/WS UI
-    let lease = KeyLeaseDefinition {
-        name: "self-test-lease".to_string(),
-        kind: "file".to_string(),
-        env: Vec::new(),
-        path: Some(key_path.to_string_lossy().to_string()),
-        expires_at_unix: None,
-    };
-    let lease_status = lease.evaluate("node-alpha", 100);
-    if !lease_status.available {
-        return Err("key lease evaluation failed on existing file".to_string());
-    }
-    let valid_proof = evaluate_proof_case("valid", "sess-self-test")?;
-    let stale_proof = evaluate_proof_case("stale", "sess-self-test")?;
-    if !valid_proof.accepted || stale_proof.accepted {
-        return Err("proof validation gate failed".to_string());
+    supervisor.reconcile(&mut specs)?;
+    let started = specs[0].status.as_deref() == Some("running") && specs[0].pid.is_some();
+    specs[0].desired_state = "stopped".to_string();
+    supervisor.reconcile(&mut specs)?;
+    let process_started_and_stopped = started && specs[0].pid.is_none();
+    if !process_started_and_stopped {
+        return Err("supervisor did not start and stop the process".to_string());
     }
 
+    // 6. Record: KV records page with bounds.
+    let kv: Vec<KeyValueRecord> = (0..3)
+        .map(|i| KeyValueRecord {
+            key: format!("self-test/{i}"),
+            value: serde_json::json!(i),
+            updated_at_unix: now_unix(),
+        })
+        .collect();
+    let (page, meta) = paginate_kv_records(&kv, true, Some(1), Some(1))?;
+    if page.len() != 1 || meta.is_none() {
+        return Err("KV pagination returned the wrong page".to_string());
+    }
+
+    // 7. API: a node serves its live state.
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
-    let runtime_state = Arc::new(Mutex::new(NodeState::new_seeded(
+    let state = Arc::new(Mutex::new(NodeState::new_live(
         "node-alpha",
-        "hub",
+        "up",
         &addr.to_string(),
-        tmp_root.join("http-blobs"),
+        tmp_root.join("api-blobs"),
         received_beat.iroh_transport.clone(),
     )));
-    {
-        let st = runtime_state.lock().map_err(|_| "poisoned".to_string())?;
-        let (_, meta) = paginate_kv_records(&st.kv, true, Some(0), Some(1))?;
-        if meta.is_none() {
-            return Err("KV pagination metadata missing".to_string());
-        }
-        let _ = plan_alert_ack(&st.alerts[0], "operator-self-test", "ok")?;
-    }
-
-    let state_bg = runtime_state.clone();
+    let state_bg = state.clone();
     let server_thread = thread::spawn(move || {
-        let _ = serve_http_blocking(listener, state_bg, Some(2));
+        let _ = serve_http_blocking(listener, state_bg, Some(1));
     });
-
-    let mut stream1 = TcpStream::connect(addr).map_err(|e| e.to_string())?;
-    stream1
-        .write_all(b"GET /api/state?kv_offset=0&kv_limit=1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+    let mut stream = TcpStream::connect(addr).map_err(|e| e.to_string())?;
+    stream
+        .write_all(b"GET /api/state HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .map_err(|e| e.to_string())?;
-    let mut resp1 = Vec::new();
-    stream1.read_to_end(&mut resp1).map_err(|e| e.to_string())?;
-    let text1 = String::from_utf8_lossy(&resp1);
-
-    let mut stream2 = TcpStream::connect(addr).map_err(|e| e.to_string())?;
-    stream2
-        .write_all(
-            b"GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
-        )
-        .map_err(|e| e.to_string())?;
-    let mut resp2 = Vec::new();
-    stream2.read_to_end(&mut resp2).map_err(|e| e.to_string())?;
-    let text2 = String::from_utf8_lossy(&resp2);
+    let mut resp = Vec::new();
+    stream.read_to_end(&mut resp).map_err(|e| e.to_string())?;
     let _ = server_thread.join();
-
-    let http_and_ws_verified =
-        text1.contains("200 OK") && text2.contains("101 Switching Protocols");
-    if !http_and_ws_verified {
-        return Err("HTTP /api/state or WebSocket /ws check failed".to_string());
+    let api_verified = String::from_utf8_lossy(&resp).contains("200 OK");
+    if !api_verified {
+        return Err("API GET /api/state check failed".to_string());
     }
 
     let _ = fs::remove_dir_all(&tmp_root);
 
     Ok(SelfTestReport {
-        schema: "dialtone.self_test.v2".to_string(),
+        schema: "dialtone.self_test.v3".to_string(),
         iroh_version: "1.3.0".to_string(),
         status: "passed".to_string(),
         capabilities_verified: vec![
-            "1. Cryptographic Mesh Identity & Peer Addressing".to_string(),
-            "2. Multi-Transport Discovery & Iroh Gossip Control Plane".to_string(),
-            "3. Content-Addressed Blob Store & Native Iroh Blob Transport".to_string(),
-            "4. Manifest-Driven Deployment, Distributed Build Cache & Rollback".to_string(),
-            "5. Daemon-Owned Process Supervision & Intent Convergence".to_string(),
-            "6. Service Discovery, Generic Catalogs & Command Journals".to_string(),
-            "7. Metadata-Driven Policy & Operational Evidence UI".to_string(),
+            "1. Key: persistent node identity".to_string(),
+            "2. Mesh: signed, encrypted beat between allowlisted nodes over iroh-gossip"
+                .to_string(),
+            "3. Blob: iroh-blobs transfer with digest re-verification".to_string(),
+            "4. Slot: side-effect-free rollback plan and verified A/B flip".to_string(),
+            "5. Supervisor: real process start and stop".to_string(),
+            "6. Record: bounded KV paging".to_string(),
+            "7. API: live node state served over HTTP".to_string(),
         ],
         persistent_node_id,
-        resolved_service_uri,
         gossip_received_from: received_beat.node,
         gossip_receiver_node: peer_b_beat.node,
         blob_transfer,
-        build_cache_hit: probe.cache_hit,
         rollback_verified: slot.status == "rolled_back",
-        systemd_drop_in_repaired: sys_report.updated_drop_in,
-        rtcore_udp_bytes_sent,
-        http_and_ws_verified,
+        process_started_and_stopped,
+        api_verified,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The encoders replaced hand-written code; these vectors are what that code produced and
+    /// accepted (beat envelopes and API payloads from older builds must still decode).
+    #[test]
+    fn hex_and_base64_match_the_previous_hand_written_codecs() {
+        assert_eq!(hex_encode(&[0x0a, 0xff, 0x10]), "0aff10");
+        assert_eq!(hex_decode(" 0AfF10 ").unwrap(), vec![0x0a, 0xff, 0x10]);
+        assert!(hex_decode("abc").is_err());
+
+        assert_eq!(base64_encode(b"dialtone"), "ZGlhbHRvbmU=");
+        assert_eq!(base64url_encode(b"dialtone"), "ZGlhbHRvbmU");
+        assert_eq!(base64_encode(&[0xfb, 0xff]), "+/8=");
+        assert_eq!(base64url_encode(&[0xfb, 0xff]), "-_8");
+        for form in ["ZGlhbHRvbmU=", "ZGlhbHRvbmU", "ZGlh bHRv\nbmU="] {
+            assert_eq!(base64_decode(form).unwrap(), b"dialtone", "{form}");
+        }
+        for form in ["+/8=", "+/8", "-_8", "-_8="] {
+            assert_eq!(base64_decode(form).unwrap(), vec![0xfb, 0xff], "{form}");
+        }
+        assert!(base64_decode("@@@@").is_err());
+    }
 }

@@ -31,9 +31,7 @@ pub(crate) fn render_hud(
             "blob_bytes": blob_bytes,
             "blob_fetches": state.blob_fetches.len(),
             "kv_keys": state.kv.len(),
-            "key_leases": state.key_leases.len(),
-            "installed_programs": state.installed_programs.len(),
-            "deploy_manifests": state.deploy_manifests.len()
+            "installed_programs": state.installed_programs.len()
         },
         "nodes": state.nodes,
         "mesh_rtt_ms": state.mesh_rtt_ms,
@@ -476,20 +474,6 @@ pub(crate) fn render_hud(
     gap: 12px;
     align-items: center;
   }
-  .mesh-input {
-    flex: 1 1 280px;
-    min-height: 46px;
-    padding: 8px 12px;
-    border: none;
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--ink);
-    font-family: var(--mono);
-    font-size: clamp(14px, 1.4vw, 18px);
-  }
-  .mesh-input:focus {
-    outline: none;
-    background: rgba(255, 255, 255, 0.14);
-  }
   .mesh-output {
     padding: 8px 0;
     border: none;
@@ -649,24 +633,17 @@ pub(crate) fn render_hud(
         </div>
       </section>
 
-      <!-- 5. Mesh Connection & Onboarding (Primary Entry Point) -->
+      <!-- 5. Mesh setup: the CLI commands for this node (the HUD carries no API token) -->
       <section class="menu-section" id="menu-mesh-section">
         <div class="menu-section-title">
-          <span>05 // MESH CONNECTION &amp; ONBOARDING</span>
+          <span>05 // MESH SETUP (CLI)</span>
           <span class="hi" id="menu-mesh-state-label">CHECKING...</span>
         </div>
-        <div class="btn-row">
-          <button id="btn-init-mesh" class="ctrl-btn is-focus" type="button">INIT NEW PRIVATE MESH</button>
-          <button id="btn-invite-mesh" class="ctrl-btn" type="button">GENERATE INVITE</button>
-        </div>
-        <div class="mesh-form-row">
-          <input id="input-join-ticket" class="mesh-input" type="text" placeholder="Paste iroh-gossip://invite/... ticket URI to join mesh">
-          <button id="btn-join-mesh" class="ctrl-btn is-focus" type="button">JOIN MESH</button>
-        </div>
-        <pre id="menu-mesh-output" class="mesh-output">CLI Quickstart:
-  1. Create mesh:  dialtone channel init
-  2. Invite peer:  dialtone channel invite --ttl-secs 900
-  3. Join mesh:    dialtone channel join "&lt;ticket&gt;"</pre>
+        <pre id="menu-mesh-output" class="mesh-output">Run these on this node:
+  New mesh       dialtone secret            then: dialtone join &lt;secret&gt;
+  Invite a node  dialtone invite --ttl 15m
+  Join a mesh    dialtone join &lt;secret&gt; --invite &lt;invite&gt;
+  Allow a node   dialtone allowlist add &lt;node_id&gt;</pre>
       </section>
     </div>
   </aside>
@@ -3179,32 +3156,6 @@ bindToggle("toggle-h3-land", "H3 LAND", () => cfgShowLand, v => { cfgShowLand = 
 bindToggle("toggle-quic-arcs", "QUIC ARCS", () => cfgShowArcs, v => { cfgShowArcs = v; });
 bindToggle("toggle-clouds", "CLOUDS", () => cfgShowClouds, v => { cfgShowClouds = v; });
 bindToggle("toggle-drones", "SYMBOL ACTIVITY", () => cfgShowActivity, v => { cfgShowActivity = v; });
-
-// Mesh actions (Init / Invite / Join). The page carries no API token, so these point at the
-// CLI until the API grows /api/channel/* routes (goal.md roadmap, Phase 3).
-const MESH_CLI_HINT = {
-  "/api/channel/init": "dialtone secret   # then: dialtone join <secret>",
-  "/api/channel/invite": "dialtone invite --ttl 15m",
-  "/api/channel/join": "dialtone join <secret> --invite <invite>"
-};
-async function callMeshApi(path) {
-  document.getElementById("menu-mesh-output").textContent = `Run on this node:\n  ${MESH_CLI_HINT[path]}`;
-}
-
-document.getElementById("btn-init-mesh").addEventListener("click", () => {
-  callMeshApi("/api/channel/init", {});
-});
-document.getElementById("btn-invite-mesh").addEventListener("click", () => {
-  callMeshApi("/api/channel/invite", { ttl_secs: 900 });
-});
-document.getElementById("btn-join-mesh").addEventListener("click", () => {
-  const ticket = document.getElementById("input-join-ticket").value.trim();
-  if (!ticket) {
-    document.getElementById("menu-mesh-output").textContent = "Paste an iroh-gossip://invite/... ticket first.";
-    return;
-  }
-  callMeshApi("/api/channel/join", { ticket });
-});
 
 // ---------------------------------------------------------------------------
 // 10. Pointer Orbit, Raycast Picking & Frame Loop

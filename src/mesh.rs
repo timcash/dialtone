@@ -314,16 +314,6 @@ pub fn derive_topic_id_from_secret(secret: &str) -> TopicId {
     derive_channel_topic_id(DEFAULT_CHANNEL_NAME, trimmed)
 }
 
-/// Produce a short, non-reversible channel fingerprint (`ch-<12 hex chars>`) for UI display.
-pub fn secret_channel_fingerprint(secret: &str) -> String {
-    if secret.trim().is_empty() {
-        return "locked-standby".to_string();
-    }
-    let topic = derive_topic_id_from_secret(secret);
-    let hex = crate::hex_encode(topic.as_bytes());
-    format!("ch-{}", &hex[..12])
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Seed {
     #[serde(alias = "endpoint_id")] // compat
@@ -1905,27 +1895,6 @@ pub fn prune_stale_peers(peers: &mut Vec<Beat>, now: u64, ttl_secs: u64) -> usiz
     before.saturating_sub(peers.len())
 }
 
-pub fn save_peer_cache(path: &Path, peers: &[Beat]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("create peer cache dir {}: {e}", parent.display()))?;
-    }
-    let json = serde_json::to_string_pretty(peers).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| format!("write peer cache {}: {e}", path.display()))
-}
-
-pub fn load_peer_cache(path: &Path, now: u64, ttl_secs: u64) -> Result<Vec<Beat>, String> {
-    let raw = match fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("read peer cache {}: {e}", path.display())),
-    };
-    let mut peers: Vec<Beat> =
-        serde_json::from_str(&raw).map_err(|e| format!("parse peer cache: {e}"))?;
-    prune_stale_peers(&mut peers, now, ttl_secs);
-    Ok(peers)
-}
-
 /// Live in-process two-peer `iroh-gossip` beat exchange over QUIC protected by Argon2id + XChaCha20-Poly1305.
 pub async fn verify_live_gossip_exchange(
     node_a: &str,
@@ -2691,55 +2660,6 @@ mod tests {
 
         let keys = derive_channel_keys_v2("dialtone", "dt-StrongTestPassword_2026_Argon2id!"); // compat
         assert_ne!(keys.topic_id.as_bytes(), &legacy_public_bytes);
-    }
-
-    #[test]
-    fn peer_cache_persists_and_prunes_stale_entries_on_load() {
-        let path = env::temp_dir().join(format!("dialtone-peer-cache-{}", std::process::id()));
-        let _ = fs::remove_file(&path);
-        let cfg = IrohTransportConfig::local_offline();
-        let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
-        let diag = build_diagnostics(&cfg, &addr, None, "ep-1");
-
-        let fresh = Beat {
-            schema: BEAT_SCHEMA.to_string(),
-            node: "node-alpha".to_string(),
-            node_id: "ep-1".to_string(),
-            ticket: "iroh-gossip-v1:fresh".to_string(),
-            counter: 1,
-            updated_at_unix: 1_000,
-            kind: "regular".to_string(),
-            beat_interval_secs: BEAT_INTERVAL_SECS,
-            summary_interval_secs: SUMMARY_INTERVAL_SECS,
-            sent_mono_ms: 1_000,
-            rtt_probe_requested: false,
-            peer_echoes: HashMap::new(),
-            peer_rtt_ms: std::collections::BTreeMap::new(),
-            summary_stats: None,
-            sent_unix_ms: 0,
-            os: default_os(),
-            arch: default_arch(),
-            role: node_role_for("node-alpha"),
-            capabilities: node_capabilities_for("node-alpha"),
-            stats: sample_stats("node-alpha", None, 1),
-            service_endpoints: Vec::new(),
-            processes: Vec::new(),
-            iroh_transport: diag.clone(),
-            observed_remote_addrs: Vec::new(),
-            tailnet_used: false,
-            geo_location: None,
-            probe: None,
-            store: None,
-        };
-        let mut stale = fresh.clone();
-        stale.node = "stale-peer".to_string();
-        stale.updated_at_unix = 500;
-
-        save_peer_cache(&path, &[fresh, stale]).unwrap();
-        let loaded = load_peer_cache(&path, 1_100, DEFAULT_PEER_TTL_SECS).unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].node, "node-alpha");
-        let _ = fs::remove_file(&path);
     }
 
     #[test]
