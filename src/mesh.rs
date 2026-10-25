@@ -856,47 +856,24 @@ pub fn default_arch() -> String {
     std::env::consts::ARCH.to_string()
 }
 
-pub fn node_role_for(node: &str) -> String {
-    match node {
-        "node-alpha" => "mesh-command-controller".to_string(),
-        "node-gamma" => "os-arch-build-server".to_string(),
-        "node-beta" => "gpu-workstation-dev".to_string(),
-        "edge-1" => "robot-v4-motion-server".to_string(),
-        "pendant-1" => "teach-pendant-client".to_string(),
-        _ => "mesh-peer-node".to_string(),
-    }
+pub fn node_role_for(_node: &str) -> String {
+    "mesh-peer-node".to_string()
 }
 
-pub fn node_capabilities_for(node: &str) -> Vec<String> {
-    let mut caps = vec![
-        "iroh-1.3-quic-endpoint".to_string(),
-        "iroh-gossip-mesh".to_string(),
-        "iroh-blobs-digest-store".to_string(),
-        "no-tailnet-physical-bind".to_string(),
-        "process-supervisor".to_string(),
-        "rtcore-udp-journal".to_string(),
-        "3d-scifi-hud-ui".to_string(),
-    ];
-    match node {
-        "node-alpha" => {
-            caps.push("mesh-rendezvous-hub".to_string());
-            caps.push("darwin-arm64-builder".to_string());
-        }
-        "node-gamma" => {
-            caps.push("distributed-build-cache".to_string());
-            caps.push("windows-x86_64-compile-cluster".to_string());
-        }
-        "node-beta" => {
-            caps.push("windows-x86_64-rustc-1.96".to_string());
-            caps.push("gpu-simulation-host".to_string());
-        }
-        "edge-1" => {
-            caps.push("nats-jetstream-broker".to_string());
-            caps.push("cartesian-motion-planner".to_string());
-        }
-        _ => {}
-    }
-    caps
+/// What every dialtone node can do (the same on every node; nothing here is configured).
+pub fn node_capabilities_for(_node: &str) -> Vec<String> {
+    [
+        "iroh-1.3-quic-endpoint",
+        "iroh-gossip-mesh",
+        "iroh-blobs-digest-store",
+        "no-tailnet-physical-bind",
+        "process-supervisor",
+        "device-listing",
+        "3d-scifi-hud-ui",
+    ]
+    .iter()
+    .map(|c| c.to_string())
+    .collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
