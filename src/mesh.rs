@@ -31,8 +31,9 @@ use crate::service::Service;
 use crate::stats::{sample_stats, Stats, StatsSummary};
 
 pub const BEAT_SCHEMA: &str = "dialtone.iroh.beat.v1";
-/// v3: the encrypted plaintext is a `SignedBeat` (beat JSON + the sender Key's Ed25519 signature).
-pub const DIALTONE_ENVELOPE_SCHEMA_V3: &str = "dialtone.iroh.envelope.v3";
+/// v4: the encrypted plaintext is a `SignedMessage` (a typed `Message` as JSON + the sender
+/// Key's Ed25519 signature). v3 carried only beats.
+pub const DIALTONE_ENVELOPE_SCHEMA_V4: &str = "dialtone.iroh.envelope.v4";
 /// Beats sent more than this far from local time (either direction) are rejected.
 pub const REPLAY_WINDOW_MS: u64 = 5 * 60 * 1000;
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
@@ -1576,7 +1577,97 @@ pub struct Beat {
     pub tailnet_used: bool,
 }
 
-/// Encrypted wire frame for `Beat` over `iroh-gossip` using XChaCha20-Poly1305 (Issue #5).
+/// A node's inventory: the programs it runs and the services it offers. Sent when it
+/// changes, when a neighbor joins and with every summary, never in plain beats.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Inventory {
+    pub node: String,
+    pub node_id: String,
+    #[serde(default)]
+    pub processes: Vec<crate::service::ProcessSpec>,
+    #[serde(default)]
+    pub service_endpoints: Vec<Service>,
+    #[serde(default)]
+    pub sent_unix_ms: u64,
+}
+
+/// What nodes say to each other on a channel. Every message is signed by its sender.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Message {
+    /// Every beat interval: liveness, stats and RTT echoes.
+    Beat(Beat),
+    /// Every 30s and when a neighbor joins: a beat with the rolling stats summary.
+    Summary(Beat),
+    /// Reply to a peer that asked for an RTT probe.
+    Echo(Beat),
+    /// The sender's programs and services.
+    Inventory(Inventory),
+}
+
+impl Message {
+    pub fn node_id(&self) -> &str {
+        match self {
+            Message::Beat(b) | Message::Summary(b) | Message::Echo(b) => &b.node_id,
+            Message::Inventory(i) => &i.node_id,
+        }
+    }
+
+    pub fn node(&self) -> &str {
+        match self {
+            Message::Beat(b) | Message::Summary(b) | Message::Echo(b) => &b.node,
+            Message::Inventory(i) => &i.node,
+        }
+    }
+
+    pub fn sent_unix_ms(&self) -> u64 {
+        match self {
+            Message::Beat(b) | Message::Summary(b) | Message::Echo(b) => b.sent_unix_ms,
+            Message::Inventory(i) => i.sent_unix_ms,
+        }
+    }
+
+    /// Replay-check stream: beats of all kinds share one, inventories have their own, so a
+    /// late inventory is not rejected for arriving after a newer beat.
+    pub fn replay_key(&self) -> String {
+        match self {
+            Message::Inventory(i) => format!("{}#inventory", i.node_id),
+            _ => self.node_id().to_string(),
+        }
+    }
+
+    /// The beat this message carries, with `kind` named after the message type.
+    pub fn into_beat(self) -> Option<Beat> {
+        let (mut beat, kind) = match self {
+            Message::Beat(b) => (b, "regular"),
+            Message::Summary(b) => (b, "summary"),
+            Message::Echo(b) => (b, "rtt_echo"),
+            Message::Inventory(_) => return None,
+        };
+        beat.kind = kind.to_string();
+        Some(beat)
+    }
+
+    /// Prepare for the wire: stamp `sent_unix_ms`, keep inventory out of beats and strip
+    /// process `env` / `args` (they may hold secrets).
+    fn for_wire(&self, sent_unix_ms: u64) -> Message {
+        let mut msg = self.clone();
+        match &mut msg {
+            Message::Beat(b) | Message::Summary(b) | Message::Echo(b) => {
+                b.sent_unix_ms = sent_unix_ms;
+                b.processes.clear();
+                b.service_endpoints.clear();
+            }
+            Message::Inventory(i) => {
+                i.sent_unix_ms = sent_unix_ms;
+                i.processes = i.processes.iter().map(process_advert).collect();
+            }
+        }
+        msg
+    }
+}
+
+/// Encrypted wire frame for a `Message` over `iroh-gossip` using XChaCha20-Poly1305.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EncryptedGossipEnvelope {
     pub schema: String,
@@ -1595,10 +1686,10 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-/// What a sealed frame carries: the exact beat JSON that was signed, and its signature.
+/// What a sealed frame carries: the exact message JSON that was signed, and its signature.
 #[derive(Serialize, Deserialize)]
-struct SignedBeat {
-    beat: String,
+struct SignedMessage {
+    msg: String,
     sig: String,
 }
 
@@ -1640,21 +1731,19 @@ pub fn process_advert(spec: &crate::service::ProcessSpec) -> crate::service::Pro
     advert
 }
 
-/// Sign a `Beat` with this node's Key, then encrypt it with XChaCha20-Poly1305 (random
-/// 24-byte nonce, `DIALTONE_ENVELOPE_SCHEMA_V3` as AAD). Process `env` / `args` never
+/// Sign a `Message` with this node's Key, then encrypt it with XChaCha20-Poly1305 (random
+/// 24-byte nonce, `DIALTONE_ENVELOPE_SCHEMA_V4` as AAD). Process `env` / `args` never
 /// leave the node, and `sent_unix_ms` is stamped here so every frame is unique.
-pub fn seal_beat(
-    beat: &Beat,
+pub fn seal_message(
+    msg: &Message,
     keys: &ChannelKeys,
     key: &iroh::SecretKey,
 ) -> Result<Vec<u8>, String> {
-    let mut wire = beat.clone();
-    wire.sent_unix_ms = next_sent_unix_ms();
-    wire.processes = beat.processes.iter().map(process_advert).collect();
-    let beat_json = serde_json::to_string(&wire).map_err(|e| e.to_string())?;
-    let sig = key.sign(beat_json.as_bytes());
-    let plaintext = serde_json::to_vec(&SignedBeat {
-        beat: beat_json,
+    let wire = msg.for_wire(next_sent_unix_ms());
+    let msg_json = serde_json::to_string(&wire).map_err(|e| e.to_string())?;
+    let sig = key.sign(msg_json.as_bytes());
+    let plaintext = serde_json::to_vec(&SignedMessage {
+        msg: msg_json,
         sig: crate::hex_encode(&sig.to_bytes()),
     })
     .map_err(|e| e.to_string())?;
@@ -1668,28 +1757,28 @@ pub fn seal_beat(
             nonce,
             Payload {
                 msg: &plaintext,
-                aad: DIALTONE_ENVELOPE_SCHEMA_V3.as_bytes(),
+                aad: DIALTONE_ENVELOPE_SCHEMA_V4.as_bytes(),
             },
         )
         .map_err(|_| "XChaCha20-Poly1305 encryption failed".to_string())?;
 
     let env = EncryptedGossipEnvelope {
-        schema: DIALTONE_ENVELOPE_SCHEMA_V3.to_string(),
+        schema: DIALTONE_ENVELOPE_SCHEMA_V4.to_string(),
         nonce: crate::hex_encode(nonce_bytes),
         ciphertext: crate::base64url_encode(&ciphertext),
     };
     serde_json::to_vec(&env).map_err(|e| e.to_string())
 }
 
-/// Decrypt a gossip frame and verify that the beat inside was signed by the Key of the
+/// Decrypt a gossip frame and verify that the message inside was signed by the Key of the
 /// `node_id` it names. Drops plaintext frames, other envelope versions, tampered
-/// ciphertext, and beats whose signature does not match their claimed NodeId.
-pub fn open_beat(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Beat, String> {
+/// ciphertext, and messages whose signature does not match their claimed NodeId.
+pub fn open_message(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Message, String> {
     let env: EncryptedGossipEnvelope = serde_json::from_slice(raw_frame)
         .map_err(|_| "gossip frame is not a valid encrypted envelope".to_string())?;
-    if env.schema != DIALTONE_ENVELOPE_SCHEMA_V3 {
+    if env.schema != DIALTONE_ENVELOPE_SCHEMA_V4 {
         return Err(format!(
-            "unsupported gossip envelope schema '{}' (expected {DIALTONE_ENVELOPE_SCHEMA_V3})",
+            "unsupported gossip envelope schema '{}' (expected {DIALTONE_ENVELOPE_SCHEMA_V4})",
             env.schema
         ));
     }
@@ -1705,31 +1794,31 @@ pub fn open_beat(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Beat, String> {
             nonce,
             Payload {
                 msg: &ciphertext,
-                aad: DIALTONE_ENVELOPE_SCHEMA_V3.as_bytes(),
+                aad: DIALTONE_ENVELOPE_SCHEMA_V4.as_bytes(),
             },
         )
         .map_err(|_| {
             "XChaCha20-Poly1305 decryption failed (wrong key or tampered frame)".to_string()
         })?;
 
-    let signed: SignedBeat =
-        serde_json::from_slice(&plaintext).map_err(|e| format!("invalid signed beat: {e}"))?;
-    let beat: Beat = serde_json::from_str(&signed.beat)
-        .map_err(|e| format!("invalid decrypted beat JSON: {e}"))?;
-    let signer: iroh::PublicKey = beat
-        .node_id
+    let signed: SignedMessage =
+        serde_json::from_slice(&plaintext).map_err(|e| format!("invalid signed message: {e}"))?;
+    let msg: Message = serde_json::from_str(&signed.msg)
+        .map_err(|e| format!("invalid decrypted message JSON: {e}"))?;
+    let signer: iroh::PublicKey = msg
+        .node_id()
         .parse()
-        .map_err(|_| format!("beat names an invalid node_id '{}'", beat.node_id))?;
+        .map_err(|_| format!("message names an invalid node_id '{}'", msg.node_id()))?;
     let sig_bytes: [u8; 64] = crate::hex_decode(&signed.sig)?
         .try_into()
-        .map_err(|_| "beat signature must be 64 bytes".to_string())?;
+        .map_err(|_| "message signature must be 64 bytes".to_string())?;
     signer
         .verify(
-            signed.beat.as_bytes(),
+            signed.msg.as_bytes(),
             &iroh::Signature::from_bytes(&sig_bytes),
         )
-        .map_err(|_| format!("beat signature does not match node_id {}", beat.node_id))?;
-    Ok(beat)
+        .map_err(|_| format!("message signature does not match node_id {}", msg.node_id()))?;
+    Ok(msg)
 }
 
 /// Rejects a beat unless it is strictly newer than the last one accepted from the same
@@ -1880,12 +1969,27 @@ pub fn merge_beat(nodes: &mut Vec<Beat>, mut beat: Beat) {
         if beat.kind == "rtt_echo" {
             beat.kind = existing.kind.clone();
         }
+        // Inventory arrives in its own message; a beat never changes it.
+        beat.processes = std::mem::take(&mut existing.processes);
+        beat.service_endpoints = std::mem::take(&mut existing.service_endpoints);
         *existing = beat;
     } else {
         if beat.kind == "rtt_echo" {
             beat.kind = "regular".to_string();
         }
         nodes.push(beat);
+    }
+}
+
+/// Apply a node's inventory to its entry. Returns false when the node has no entry yet.
+pub fn merge_inventory(nodes: &mut [Beat], inventory: &Inventory) -> bool {
+    match nodes.iter_mut().find(|n| n.node_id == inventory.node_id) {
+        Some(node) => {
+            node.processes = inventory.processes.clone();
+            node.service_endpoints = inventory.service_endpoints.clone();
+            true
+        }
+        None => false,
     }
 }
 
@@ -2026,13 +2130,17 @@ pub async fn verify_live_gossip_exchange(
 
     let received_beat: Beat = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let encrypted_payload_a = seal_beat(&beat_a, &keys, &key_a)?;
+            let encrypted_payload_a =
+                seal_message(&Message::Summary(beat_a.clone()), &keys, &key_a)?;
             let _ = sender_a.broadcast(encrypted_payload_a.into()).await;
             while let Ok(Some(event)) =
                 tokio::time::timeout(Duration::from_millis(120), receiver_b.next()).await
             {
                 if let GossipEvent::Received(msg) = event.map_err(|e| e.to_string())? {
-                    if let Ok(parsed) = open_beat(&msg.content, &keys) {
+                    if let Some(parsed) = open_message(&msg.content, &keys)
+                        .ok()
+                        .and_then(Message::into_beat)
+                    {
                         if parsed.node == node_a {
                             return Ok::<Beat, String>(parsed);
                         }
@@ -2250,7 +2358,7 @@ mod tests {
             store: None,
         };
 
-        let wire_bytes = seal_beat(&beat, &k1, &node_key).unwrap();
+        let wire_bytes = seal_message(&Message::Beat(beat), &k1, &node_key).unwrap();
         let wire_str = String::from_utf8_lossy(&wire_bytes);
         // Captured gossip frames must contain NO plaintext fields
         assert!(!wire_str.contains("node-alpha"));
@@ -2259,16 +2367,16 @@ mod tests {
         assert!(!wire_str.contains("stats"));
 
         // Round-trip decrypts cleanly with k1 and fails with k_other or tampered ciphertext
-        let decrypted = open_beat(&wire_bytes, &k1).unwrap();
+        let decrypted = open_message(&wire_bytes, &k1).unwrap().into_beat().unwrap();
         assert_eq!(decrypted.node, "node-alpha");
         assert_eq!(decrypted.counter, 42);
-        assert!(open_beat(&wire_bytes, &k_other).is_err());
+        assert!(open_message(&wire_bytes, &k_other).is_err());
 
         let mut tampered_env: EncryptedGossipEnvelope =
             serde_json::from_slice(&wire_bytes).unwrap();
         tampered_env.ciphertext.push_str("AA");
         let tampered_bytes = serde_json::to_vec(&tampered_env).unwrap();
-        assert!(open_beat(&tampered_bytes, &k1).is_err());
+        assert!(open_message(&tampered_bytes, &k1).is_err());
     }
 
     fn test_beat(node_key: &iroh::SecretKey) -> Beat {
@@ -2318,17 +2426,38 @@ mod tests {
         let mallory = iroh::SecretKey::generate();
 
         let beat = test_beat(&alice);
-        let opened = open_beat(&seal_beat(&beat, &keys, &alice).unwrap(), &keys).unwrap();
+        let opened = open_message(
+            &seal_message(&Message::Beat(beat.clone()), &keys, &alice).unwrap(),
+            &keys,
+        )
+        .unwrap()
+        .into_beat()
+        .unwrap();
         assert_eq!(opened.node_id, alice.public().to_string());
         assert!(opened.sent_unix_ms > 0);
 
         // Mallory knows the channel secret but not Alice's Key: claiming Alice's NodeId fails.
-        let forged = open_beat(&seal_beat(&beat, &keys, &mallory).unwrap(), &keys);
+        let forged = open_message(
+            &seal_message(&Message::Beat(beat.clone()), &keys, &mallory).unwrap(),
+            &keys,
+        );
         assert!(forged.unwrap_err().contains("signature does not match"));
 
         // Every sealed beat is strictly newer than the previous one from this process.
-        let a = open_beat(&seal_beat(&beat, &keys, &alice).unwrap(), &keys).unwrap();
-        let b = open_beat(&seal_beat(&beat, &keys, &alice).unwrap(), &keys).unwrap();
+        let a = open_message(
+            &seal_message(&Message::Beat(beat.clone()), &keys, &alice).unwrap(),
+            &keys,
+        )
+        .unwrap()
+        .into_beat()
+        .unwrap();
+        let b = open_message(
+            &seal_message(&Message::Beat(beat.clone()), &keys, &alice).unwrap(),
+            &keys,
+        )
+        .unwrap()
+        .into_beat()
+        .unwrap();
         assert!(b.sent_unix_ms > a.sent_unix_ms);
     }
 
@@ -2358,7 +2487,7 @@ mod tests {
     fn process_env_never_leaves_the_node_and_offers_become_deploy_tickets() {
         let keys = derive_channel_keys_v2("dialtone", "dt-Process_Advert_Test_Secret_2026!");
         let alice = iroh::SecretKey::generate();
-        let mut beat = test_beat(&alice);
+        let beat = test_beat(&alice);
         let spec = |name: &str, env: Vec<&str>| crate::service::ProcessSpec {
             name: name.to_string(),
             path: "/tmp/p".to_string(),
@@ -2374,7 +2503,7 @@ mod tests {
             service_unit: None,
             deploy_ticket: None,
         };
-        beat.processes = vec![
+        let processes = vec![
             spec(
                 "offered",
                 vec![
@@ -2391,7 +2520,26 @@ mod tests {
                 ],
             ),
         ];
-        let opened = open_beat(&seal_beat(&beat, &keys, &alice).unwrap(), &keys).unwrap();
+        // A beat never carries inventory, even when the caller left processes in it.
+        let mut stuffed = beat.clone();
+        stuffed.processes = processes.clone();
+        let msg = Message::Beat(stuffed);
+        let opened = open_message(&seal_message(&msg, &keys, &alice).unwrap(), &keys).unwrap();
+        assert!(opened.into_beat().unwrap().processes.is_empty());
+
+        let inventory = Message::Inventory(Inventory {
+            node: beat.node.clone(),
+            node_id: beat.node_id.clone(),
+            processes,
+            service_endpoints: Vec::new(),
+            sent_unix_ms: 0,
+        });
+        let Message::Inventory(opened) =
+            open_message(&seal_message(&inventory, &keys, &alice).unwrap(), &keys).unwrap()
+        else {
+            panic!("expected an inventory");
+        };
+        assert!(opened.sent_unix_ms > 0);
         for p in &opened.processes {
             assert!(
                 p.env.is_empty() && p.args.is_empty(),
@@ -2404,6 +2552,67 @@ mod tests {
             Some("iroh-blobs://ticket/x")
         );
         assert_eq!(opened.processes[1].deploy_ticket, None);
+    }
+
+    #[test]
+    fn messages_are_typed_and_inventory_survives_beats_until_the_next_inventory() {
+        let keys = derive_channel_keys_v2("dialtone", "dt-Typed_Message_Test_Secret_2026!");
+        let alice = iroh::SecretKey::generate();
+        let beat = test_beat(&alice);
+        for (msg, kind) in [
+            (Message::Beat(beat.clone()), "regular"),
+            (Message::Summary(beat.clone()), "summary"),
+            (Message::Echo(beat.clone()), "rtt_echo"),
+        ] {
+            let opened = open_message(&seal_message(&msg, &keys, &alice).unwrap(), &keys).unwrap();
+            assert_eq!(opened.node_id(), alice.public().to_string());
+            assert_eq!(opened.replay_key(), alice.public().to_string());
+            assert_eq!(opened.into_beat().unwrap().kind, kind);
+        }
+
+        let spec = crate::service::ProcessSpec {
+            name: "web".to_string(),
+            path: "/tmp/web".to_string(),
+            digest: format!("sha256:{}", "d".repeat(64)),
+            desired_state: "running".to_string(),
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+            startup_grace_secs: None,
+            status: Some("running".to_string()),
+            pid: Some(7),
+            restart_count: 0,
+            service_unit: None,
+            deploy_ticket: None,
+        };
+        let inventory = Inventory {
+            node: beat.node.clone(),
+            node_id: beat.node_id.clone(),
+            processes: vec![spec],
+            service_endpoints: Vec::new(),
+            sent_unix_ms: 0,
+        };
+        assert!(Message::Inventory(inventory.clone())
+            .replay_key()
+            .ends_with("#inventory"));
+
+        let mut nodes = Vec::new();
+        assert!(!merge_inventory(&mut nodes, &inventory), "no entry yet");
+        merge_beat(&mut nodes, beat.clone());
+        assert!(merge_inventory(&mut nodes, &inventory));
+        // Later beats (which carry no inventory) keep it.
+        let mut next = beat.clone();
+        next.counter = 2;
+        merge_beat(&mut nodes, next);
+        assert_eq!(nodes[0].counter, 2);
+        assert_eq!(nodes[0].processes.len(), 1);
+        // An empty inventory clears it.
+        let cleared = Inventory {
+            processes: Vec::new(),
+            ..inventory
+        };
+        merge_inventory(&mut nodes, &cleared);
+        assert!(nodes[0].processes.is_empty());
     }
 
     #[test]
@@ -2741,10 +2950,8 @@ mod tests {
             .unwrap();
         assert_eq!(received.schema, BEAT_SCHEMA);
         assert_eq!(received.node, "node-alpha");
-        assert_eq!(
-            received.service_endpoints[0].url,
-            "dialtone://node-alpha/controller/nats"
-        );
+        // Services and processes travel in Inventory messages, never in beats.
+        assert!(received.service_endpoints.is_empty());
         assert_eq!(peer_b.node, "edge-1");
     }
 }

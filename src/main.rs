@@ -17,7 +17,7 @@ use dialtone::mesh::{
     default_os, default_seeds, default_store_dir, derive_standby_topic_id,
     detect_default_node_name, is_allowed_peer_in_list, load_mesh_config, monotonic_now_ms,
     new_invite, new_secret, node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
-    parse_duration_secs, redeem_invite, revoke_peer_in_config, save_mesh_config, seal_beat,
+    parse_duration_secs, redeem_invite, revoke_peer_in_config, save_mesh_config,
     spawn_background_public_ip_geo_probe, validate_secret, Beat, ChannelKeys, LiveAllowlist,
     MeshControlCommand, PeerRttEcho, SeedList, StoreStats, BEAT_INTERVAL_SECS, BEAT_SCHEMA,
     DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_INTERVAL_SECS,
@@ -1112,7 +1112,8 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         let json = serde_json::to_string_pretty(&initial_self_beat).map_err(|e| e.to_string())?;
         println!("{json}");
         if let Some(ref keys) = active_keys {
-            if let Ok(enc) = seal_beat(&initial_self_beat, keys, &node_key) {
+            let msg = dialtone::mesh::Message::Summary(initial_self_beat.clone());
+            if let Ok(enc) = dialtone::mesh::seal_message(&msg, keys, &node_key) {
                 let _ = sender.broadcast(enc.into()).await;
             }
         }

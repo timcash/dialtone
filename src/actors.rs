@@ -1,7 +1,8 @@
 //! The running node as actors: one task per job, joined by channels and stopped by one
 //! cancellation token.
 //!
-//! - **Mesh** owns the gossip subscription: beats, RTT echoes, peer discovery, channel joins.
+//! - **Mesh** owns the gossip subscription: beats, summaries, RTT echoes and inventories
+//!   (see `Message`), peer discovery and channel joins.
 //! - **Stats** samples the host every second and keeps the rolling summary.
 //! - **Supervisor** reconciles processes every second and tells Mesh when they change.
 //! - **Links** observes how each peer is reached (direct, relay, tailnet).
@@ -21,11 +22,11 @@ use dialtone::api::NodeState;
 use dialtone::blob::Blobs;
 use dialtone::mesh::{
     build_mesh_rtt_matrix, cached_local_public_ip_geo, compute_rtt_ms_from_echo, default_seeds,
-    is_valid_node_name, merge_beat, monotonic_now_ms, normalize_channel_name, now_unix,
-    observe_peer_remote_addrs, open_beat, place_nodes, prune_stale_peers, seal_beat,
-    try_load_mesh_config, Beat, ChannelKeys, LiveAllowlist, MeshControlCommand, ReplayGuard,
-    SeedList, BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS,
-    SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
+    is_valid_node_name, merge_beat, merge_inventory, monotonic_now_ms, normalize_channel_name,
+    now_unix, observe_peer_remote_addrs, open_message, place_nodes, prune_stale_peers,
+    seal_message, try_load_mesh_config, Beat, ChannelKeys, Inventory, LiveAllowlist,
+    MeshControlCommand, Message, ReplayGuard, SeedList, BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME,
+    DEFAULT_PEER_TTL_SECS, SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{advertised_endpoint_addr, build_diagnostics, IrohTransportConfig};
 use dialtone::service::ProcessSpec;
@@ -68,7 +69,7 @@ impl Ctx {
 /// The processes and services this node runs, sent by Supervisor when they change.
 pub(crate) type ProcessesChanged = (Vec<ProcessSpec>, Vec<dialtone::service::Service>);
 
-/// The programs a peer says it runs, sent by Mesh to Deploy for every admitted beat.
+/// The programs a peer says it runs, sent by Mesh to Deploy for every admitted inventory.
 pub(crate) struct PeerPrograms {
     node: String,
     node_id: String,
@@ -413,6 +414,8 @@ struct Mesh {
     last_rx_from_peer: HashMap<String, (u64, u64)>,
     measured_rtt_ms: BTreeMap<String, f64>,
     last_echo_reply_mono_ms: HashMap<String, u64>,
+    /// Latest inventory per peer NodeId, applied again when its entry is first created.
+    inventories: HashMap<String, Inventory>,
     control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
     rtt_tx: watch::Sender<BTreeMap<String, f64>>,
     summary_rx: watch::Receiver<Option<StatsSummary>>,
@@ -450,6 +453,7 @@ impl Mesh {
             last_rx_from_peer: HashMap::new(),
             measured_rtt_ms: BTreeMap::new(),
             last_echo_reply_mono_ms: HashMap::new(),
+            inventories: HashMap::new(),
             control_rx: start.control_rx,
             rtt_tx,
             summary_rx,
@@ -631,30 +635,38 @@ impl Mesh {
         beat
     }
 
-    /// Copy this node's processes, services and last probe into `beat`.
-    fn attach_processes(&self, beat: &mut Beat) {
-        self.ctx.with_state(|st| {
-            beat.processes = st.processes.clone();
-            beat.service_endpoints = st.service_endpoints.clone();
-            beat.probe = st.probe.clone();
-        });
+    /// This node's inventory as the node state has it now.
+    fn own_inventory(&self) -> Inventory {
+        let (processes, service_endpoints) = self
+            .ctx
+            .with_state(|st| (st.processes.clone(), st.service_endpoints.clone()))
+            .unwrap_or_default();
+        Inventory {
+            node: self.node.clone(),
+            node_id: self.ctx.node_id.clone(),
+            processes,
+            service_endpoints,
+            sent_unix_ms: 0,
+        }
     }
 
-    async fn broadcast(&mut self, beat: &Beat, timeout: Duration) {
+    async fn broadcast(&mut self, msg: &Message, timeout: Duration) {
         let Some(keys) = &self.keys else { return };
-        if let Ok(wire) = seal_beat(beat, keys, &self.node_key) {
+        if let Ok(wire) = seal_message(msg, keys, &self.node_key) {
             let _ = tokio::time::timeout(timeout, self.sender.broadcast(wire.into())).await;
         }
     }
 
-    async fn on_processes_changed(&mut self, (processes, services): ProcessesChanged) {
-        if self.keys.is_none() {
-            return;
-        }
-        let mut beat = self.fresh_beat();
-        beat.processes = processes;
-        beat.service_endpoints = services;
-        self.broadcast(&beat, Duration::from_millis(500)).await;
+    async fn on_processes_changed(&mut self, (processes, service_endpoints): ProcessesChanged) {
+        let inventory = Inventory {
+            node: self.node.clone(),
+            node_id: self.ctx.node_id.clone(),
+            processes,
+            service_endpoints,
+            sent_unix_ms: 0,
+        };
+        self.broadcast(&Message::Inventory(inventory), Duration::from_millis(500))
+            .await;
     }
 
     async fn on_beat_tick(&mut self) {
@@ -665,12 +677,14 @@ impl Mesh {
             }
             let pruned = prune_stale_peers(&mut st.nodes, now, DEFAULT_PEER_TTL_SECS);
             let live: HashSet<String> = st.nodes.iter().map(|n| n.node.clone()).collect();
-            (pruned, live)
+            let live_ids: HashSet<String> = st.nodes.iter().map(|n| n.node_id.clone()).collect();
+            (pruned, live, live_ids)
         });
-        if let Some((pruned, live)) = pruned {
+        if let Some((pruned, live, live_ids)) = pruned {
             if pruned > 0 {
                 self.measured_rtt_ms.retain(|name, _| live.contains(name));
                 self.last_rx_from_peer.retain(|name, _| live.contains(name));
+                self.inventories.retain(|id, _| live_ids.contains(id));
                 self.rtt_tx.send_replace(self.measured_rtt_ms.clone());
                 println!("[mesh] pruned {pruned} peer(s) silent for over {DEFAULT_PEER_TTL_SECS}s");
             }
@@ -744,7 +758,16 @@ impl Mesh {
                 serde_json::to_string_pretty(&beat).unwrap_or_default()
             );
         }
-        self.broadcast(&beat, Duration::from_millis(600)).await;
+        if is_summary {
+            self.broadcast(&Message::Summary(beat), Duration::from_millis(600))
+                .await;
+            // Inventory goes out when it changes; summaries refresh it in case one was lost.
+            let inventory = Message::Inventory(self.own_inventory());
+            self.broadcast(&inventory, Duration::from_millis(600)).await;
+        } else {
+            self.broadcast(&Message::Beat(beat), Duration::from_millis(600))
+                .await;
+        }
         self.counter += 1;
     }
 
@@ -760,16 +783,19 @@ impl Mesh {
         let mut beat = self.fresh_beat();
         beat.kind = "summary".to_string();
         beat.rtt_probe_requested = true;
-        self.attach_processes(&mut beat);
-        self.broadcast(&beat, Duration::from_millis(600)).await;
+        self.ctx.with_state(|st| beat.probe = st.probe.clone());
+        self.broadcast(&Message::Summary(beat), Duration::from_millis(600))
+            .await;
+        let inventory = Message::Inventory(self.own_inventory());
+        self.broadcast(&inventory, Duration::from_millis(600)).await;
     }
 
-    /// Admit a beat only if it opens with the channel key, its signature matches a listed
-    /// node, its name is valid and it is not a replay.
-    fn admit(&mut self, content: &[u8]) -> Option<Beat> {
+    /// Admit a message only if it opens with the channel key, its signature matches a
+    /// listed node, its name is valid and it is not a replay.
+    fn admit(&mut self, content: &[u8]) -> Option<Message> {
         let keys = self.keys.as_ref()?;
-        let beat = match open_beat(content, keys) {
-            Ok(beat) => beat,
+        let msg = match open_message(content, keys) {
+            Ok(msg) => msg,
             Err(reason) => {
                 eprintln!(
                     "[gossip-auth-reject] dropped gossip payload on channel '{}': {}",
@@ -778,21 +804,21 @@ impl Mesh {
                 return None;
             }
         };
-        // open_beat verified the signature, so beat.node_id is the real sender.
-        if beat.node_id == self.ctx.node_id {
+        // open_message verified the signature, so msg.node_id() is the real sender.
+        let node_id = msg.node_id().to_string();
+        if node_id == self.ctx.node_id {
             return None;
         }
-        if !self.ctx.allowlist.contains_str(&beat.node_id) {
+        if !self.ctx.allowlist.contains_str(&node_id) {
             eprintln!(
-                "[gossip-allowlist-reject] dropped beat from unlisted node_id={} on channel '{}' (run 'dialtone allowlist add {}' to authorize)",
-                beat.node_id, self.channel, beat.node_id
+                "[gossip-allowlist-reject] dropped message from unlisted node_id={node_id} on channel '{}' (run 'dialtone allowlist add {node_id}' to authorize)",
+                self.channel
             );
             return None;
         }
-        if !is_valid_node_name(&beat.node) {
+        if !is_valid_node_name(msg.node()) {
             eprintln!(
-                "[gossip-auth-reject] dropped beat from node_id={} with an invalid node name",
-                beat.node_id
+                "[gossip-auth-reject] dropped message from node_id={node_id} with an invalid node name"
             );
             return None;
         }
@@ -802,15 +828,15 @@ impl Mesh {
             .unwrap_or(0);
         if let Err(reason) = self
             .replay_guard
-            .admit(&beat.node_id, beat.sent_unix_ms, now_ms)
+            .admit(&msg.replay_key(), msg.sent_unix_ms(), now_ms)
         {
             eprintln!(
-                "[gossip-replay-reject] dropped beat from node={} node_id={}: {}",
-                beat.node, beat.node_id, reason
+                "[gossip-replay-reject] dropped message from node={} node_id={node_id}: {reason}",
+                msg.node()
             );
             return None;
         }
-        Some(beat)
+        Some(msg)
     }
 
     /// Update RTT to the beat's sender from its echo of our last beat.
@@ -884,9 +910,38 @@ impl Mesh {
     }
 
     async fn on_received(&mut self, content: &[u8]) {
-        let Some(mut beat) = self.admit(content) else {
+        let Some(msg) = self.admit(content) else {
             return;
         };
+        match msg {
+            Message::Inventory(inventory) => self.on_inventory(inventory),
+            beat => {
+                if let Some(beat) = beat.into_beat() {
+                    self.on_beat(beat).await;
+                }
+            }
+        }
+    }
+
+    fn on_inventory(&mut self, inventory: Inventory) {
+        println!(
+            "[gossip-rx] node={} inventory processes={} services={}",
+            inventory.node,
+            inventory.processes.len(),
+            inventory.service_endpoints.len()
+        );
+        let _ = self.deploy_tx.send(PeerPrograms {
+            node: inventory.node.clone(),
+            node_id: inventory.node_id.clone(),
+            processes: inventory.processes.clone(),
+        });
+        self.ctx
+            .with_state(|st| merge_inventory(&mut st.nodes, &inventory));
+        self.inventories
+            .insert(inventory.node_id.clone(), inventory);
+    }
+
+    async fn on_beat(&mut self, mut beat: Beat) {
         let rx_mono = monotonic_now_ms();
         self.measure_rtt(&mut beat, rx_mono);
         self.discover_peers(&beat).await;
@@ -920,15 +975,14 @@ impl Mesh {
         // early TTL pruning.
         beat.updated_at_unix = now_unix();
 
-        let _ = self.deploy_tx.send(PeerPrograms {
-            node: beat.node.clone(),
-            node_id: beat.node_id.clone(),
-            processes: beat.processes.clone(),
-        });
         let measured = self.measured_rtt_ms.clone();
+        let inventory = self.inventories.get(&beat.node_id).cloned();
         self.ctx.with_state(|st| {
             let first_seen = !st.nodes.iter().any(|n| n.node_id == beat.node_id);
             merge_beat(&mut st.nodes, beat);
+            if let (true, Some(inv)) = (first_seen, &inventory) {
+                merge_inventory(&mut st.nodes, inv);
+            }
             if let Some(me) = st.self_entry_mut() {
                 me.peer_rtt_ms = measured;
                 if let Some(geo) = cached_local_public_ip_geo() {
@@ -964,11 +1018,8 @@ impl Mesh {
             let mut echo = self.fresh_beat();
             echo.kind = "rtt_echo".to_string();
             echo.rtt_probe_requested = !self.measured_rtt_ms.contains_key(&peer);
-            self.ctx.with_state(|st| {
-                echo.processes = st.processes.clone();
-                echo.service_endpoints = st.service_endpoints.clone();
-            });
-            self.broadcast(&echo, Duration::from_millis(400)).await;
+            self.broadcast(&Message::Echo(echo), Duration::from_millis(400))
+                .await;
         }
     }
 }
