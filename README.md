@@ -571,7 +571,11 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 # N-peer encrypted gossip convergence, and live QUIC blob transfer
 ./dialtone mesh-test --expect-peers 3 --timeout 15s
 
-# Full local CI suite (zero-leak and domain-language gates, fmt, tests, release build, live node acceptance)
+# Three real nodes on this machine: mesh, probe 5/5 with blob pulls between them, deploy and
+# removal across the mesh, and a stopped node caught by the others' probes (about 30s)
+./e2e.sh
+
+# Full local CI suite (zero-leak and domain-language gates, fmt, tests, release build, live node acceptance, e2e.sh)
 ./ci.sh
 ```
 

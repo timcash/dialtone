@@ -241,4 +241,8 @@ echo "    9. Verified removed and renamed routes return 404"
 
 ci_cleanup
 trap - EXIT
+
+echo "==> [6/6] Three-node end-to-end test (./e2e.sh)"
+BIN="$BIN" ./e2e.sh
+
 echo "==> ALL LOCAL CI/CD CHECKS PASSED!"
