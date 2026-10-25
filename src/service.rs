@@ -20,7 +20,6 @@ pub struct Service {
 pub struct InstalledProgram {
     pub name: String,
     pub path: String,
-    #[serde(alias = "sha256")] // compat
     pub digest: String,
 }
 
@@ -28,7 +27,6 @@ pub struct InstalledProgram {
 pub struct ProcessSpec {
     pub name: String,
     pub path: String,
-    #[serde(alias = "sha256")] // compat
     pub digest: String,
     pub desired_state: String,
     #[serde(default)]

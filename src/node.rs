@@ -153,7 +153,6 @@ pub struct IrohTransportDiagnostics {
     pub relay_urls: Vec<String>,
     pub persistent_identity: bool,
     pub identity_key_path: Option<String>,
-    #[serde(alias = "endpoint_id")] // compat
     pub node_id: String,
     pub address_lookup_modes: Vec<String>,
     pub ticket_addr_modes: Vec<String>,

@@ -31,7 +31,6 @@ pub struct AlertRecord {
     pub severity: String,
     pub source: String,
     pub summary: String,
-    #[serde(alias = "telemetry_ref")] // compat
     pub stats_ref: String,
     pub last_seen_unix: u64,
     pub acknowledged_by: Option<String>,

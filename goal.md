@@ -60,17 +60,9 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 ### Commands and routes use the words
 
-| Old name (still accepted for one release) | Name |
-|-------|------------|
-| `dialtone gen-password` | `dialtone secret` |
-| `dialtone peers list / allow / revoke` | `dialtone allowlist list / add / remove` |
-| `dialtone blobs share / pull` | `dialtone blob share / pull` |
-| `dialtone test-tick` | `dialtone probe` |
-| `dialtone fleet-test` | `dialtone mesh-test` |
-| `dialtone index` | `dialtone hud` |
-| `--password`, `--bootstrap-ticket` | `--secret`, `--invite` |
-| `GET /api/gossip` | `GET /api/mesh` |
-| Beat fields `host_resources`, `managed_processes`, `e2e_test`, `blob_store`, `endpoint_id` | `stats`, `processes`, `probe`, `store`, `node_id` (old names accepted on read) |
+The old names (`gen-password`, `peers`, `blobs`, `test-tick`, `fleet-test`, `index`, `--password`,
+`--bootstrap-ticket`, `/api/gossip`, `/api/artifacts/blob`, `/api/blobs/*`, `/api/e2e/*`, and the pre-rename beat
+and config field names) were accepted for a while after the rename and were removed on 2026-10-25.
 
 ## Current Work
 

@@ -160,7 +160,6 @@ pub struct NodeState {
     #[serde(skip)]
     pub control_tx: Option<tokio::sync::mpsc::UnboundedSender<MeshControlCommand>>,
     #[serde(skip)]
-    #[serde(alias = "blob_bridge")] // compat
     pub store: Option<Store>,
     #[serde(skip)]
     pub supervisor: Arc<Mutex<Supervisor>>,
@@ -168,16 +167,13 @@ pub struct NodeState {
     pub nodes: Vec<Beat>,
     #[serde(default)]
     pub mesh_rtt_ms: std::collections::BTreeMap<String, f64>,
-    #[serde(alias = "installed_binaries")] // compat
     pub installed_programs: Vec<InstalledProgram>,
-    #[serde(alias = "managed_processes")] // compat
     pub processes: Vec<ProcessSpec>,
     pub deploy_slots: Vec<DeploySlot>,
     /// Devices connected to this node, refreshed by the Devices actor.
     pub devices: Vec<crate::devices::Device>,
     pub blob_fetches: Vec<BlobTransportReport>,
     pub service_endpoints: Vec<Service>,
-    #[serde(alias = "host_resources")] // compat
     pub stats: Stats,
     pub events: Vec<EventRecord>,
     pub logs: Vec<ServiceLogRecord>,
@@ -186,7 +182,6 @@ pub struct NodeState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kv_page: Option<KvPageMeta>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "e2e_test")] // compat
     pub probe: Option<ProbeReport>,
 }
 
@@ -332,11 +327,6 @@ impl NodeState {
     }
 
     pub fn reconcile_processes(&mut self) {
-        for spec in self.processes.iter_mut() {
-            if spec.name == crate::supervisor::OLD_PROBE_PROGRAM_NAME {
-                spec.desired_state = "stopped".to_string();
-            }
-        }
         let mut started_logs = Vec::new();
         let listen_kv = format!("APP_LISTEN={}", self.listen);
         let sup_arc = self.supervisor.clone();
@@ -1197,12 +1187,11 @@ fn route_request(
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
-                ("GET", "/api/devices") => {
+        ("GET", "/api/devices") => {
             let body = json!({ "node": st.node, "devices": st.devices });
             write_json(&mut stream, 200, &body)
         }
-        ("GET", "/api/mesh") | ("GET", "/api/gossip") => { // compat
-            // compat| ("GET", "/api/gossip") => {
+        ("GET", "/api/mesh") => {
             st.reconcile_processes();
             let summary = st.blobs.summary();
             let body = json!({
@@ -1228,13 +1217,8 @@ fn route_request(
             });
             write_json(&mut stream, 200, &body)
         }
-        ("HEAD", "/api/blob") | ("HEAD", "/api/artifacts/blob") => { // compat
-            // compat
-            let sha = query
-                .get("digest")
-                .or_else(|| query.get("sha256")) // compat
-                .cloned()
-                .unwrap_or_default();
+        ("HEAD", "/api/blob") => {
+            let sha = query.get("digest").cloned().unwrap_or_default();
             let blobs = st.blobs.clone();
             drop(st);
             if blobs.has_blocking(&sha) {
@@ -1243,13 +1227,8 @@ fn route_request(
                 write_response(&mut stream, 404, "application/octet-stream", b"", true)
             }
         }
-        ("GET", "/api/blob") | ("GET", "/api/artifacts/blob") => { // compat
-            // compat
-            let sha = query
-                .get("digest")
-                .or_else(|| query.get("sha256")) // compat
-                .cloned()
-                .unwrap_or_default();
+        ("GET", "/api/blob") => {
+            let sha = query.get("digest").cloned().unwrap_or_default();
             let blobs = st.blobs.clone();
             drop(st);
             match blobs.get_blocking(&sha) {
@@ -1259,11 +1238,7 @@ fn route_request(
                 Err(err) => write_json(&mut stream, 404, &json!({ "error": err })),
             }
         }
-        ("POST", "/api/blob")
-        | ("POST", "/api/blob/share")
-        | ("POST", "/api/artifacts/blob") // compat
-        | ("POST", "/api/blobs/share") => { // compat
-            // compat
+        ("POST", "/api/blob") | ("POST", "/api/blob/share") => {
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
             let b64 = parsed
                 .get("bytes_base64")
@@ -1271,7 +1246,6 @@ fn route_request(
                 .unwrap_or_default();
             let expected_sha = parsed
                 .get("digest")
-                .or_else(|| parsed.get("sha256")) // compat
                 .and_then(Value::as_str)
                 .map(String::from);
             match crate::base64_decode(b64) {
@@ -1311,7 +1285,7 @@ fn route_request(
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err.to_string() })),
             }
         }
-        ("POST", "/api/blob/pull") | ("POST", "/api/blobs/pull") => {
+        ("POST", "/api/blob/pull") => {
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
             let ticket_uri = parsed
                 .get("ticket_uri")
@@ -1373,7 +1347,7 @@ fn route_request(
             if name.is_empty() {
                 return write_json(&mut stream, 400, &json!({ "error": "name is required" }));
             }
-                        let desired_state = parsed
+            let desired_state = parsed
                 .get("desired_state")
                 .and_then(Value::as_str)
                 .unwrap_or("running")
@@ -1429,7 +1403,6 @@ fn route_request(
 
             let mut digest = parsed
                 .get("digest")
-                .or_else(|| parsed.get("sha256")) // compat
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .trim()
@@ -1499,7 +1472,8 @@ fn route_request(
             }
 
             if deploy_to_mesh && resolved_ticket_uri.is_none() {
-                if let (Some(ref bridge), Ok(cached_bytes)) = (&bridge, blobs.get_blocking(&digest)) {
+                if let (Some(ref bridge), Ok(cached_bytes)) = (&bridge, blobs.get_blocking(&digest))
+                {
                     if let Ok(rep) = bridge.share_blob(&cached_bytes, Some(&digest)) {
                         resolved_ticket_uri = Some(rep.ticket_uri);
                     }
@@ -1589,11 +1563,7 @@ fn route_request(
                 }),
             )
         }
-        ("POST", "/api/probe")
-        | ("GET", "/api/probe")
-        | ("POST", "/api/e2e/tick") // compat
-        | ("GET", "/api/e2e/status") => { // compat
-            // compat
+        ("POST", "/api/probe") | ("GET", "/api/probe") => {
             let report = if method == "POST" || st.probe.is_none() {
                 st.run_probe()
             } else {
@@ -2148,7 +2118,7 @@ mod tests {
         // Clients 2 and 3 must still be served immediately in < 500ms without head-of-line blocking
         let start = std::time::Instant::now();
         let resp_2 = raw_http_request(addr, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
-        let resp_3 = raw_http_request(addr, "GET /api/gossip HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        let resp_3 = raw_http_request(addr, "GET /api/mesh HTTP/1.1\r\nHost: localhost\r\n\r\n");
         let elapsed = start.elapsed();
 
         assert!(resp_2.contains("200 OK"));

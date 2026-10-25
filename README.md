@@ -527,7 +527,6 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | `POST /api/processes/blob` | Stage a program blob (or ticket) and run / stop it as a process |
 | `POST /api/probe` | Run one probe (BLB, KVS, PRC, MSH, A/B) |
 
-Old route names (`/api/gossip`, `/api/artifacts/blob`, `/api/blobs/*`, `/api/e2e/*`) are still accepted for one release.
 
 ---
 
@@ -540,7 +539,7 @@ Old route names (`/api/gossip`, `/api/artifacts/blob`, `/api/blobs/*`, `/api/e2e
 | `DIALTONE_API_TOKEN` | `~/.dialtone/api-token` | Bearer token required for all `POST` control API routes (and required when `--listen` is non-loopback) |
 | `DIALTONE_HUD_DIR` | *(unset)* | Serve the HUD from this directory (e.g. `src/hud`) instead of the copy in the binary, uncached: HUD edits show on a browser reload with no rebuild or restart |
 | `DIALTONE_CHANNEL` | `dialtone` | Default gossip channel name when `--channel` is not passed |
-| `DIALTONE_SECRET` (`DIALTONE_SECRET_KEY`; old: `DIALTONE_PASSWORD`) | *(unset)* | Channel secret used to derive Argon2id `v2` channel keys on boot |
+| `DIALTONE_SECRET` (`DIALTONE_SECRET_KEY`) | *(unset)* | Channel secret used to derive Argon2id `v2` channel keys on boot |
 | `~/.dialtone/config.json` | — | Host-local mesh config (`0600`): Argon2id `derived_keys` (no plaintext secret), `seeds`, `allowlist`, `used_invite_nonces`, and supervised process specs |
 | `~/.dialtone/api-token` | — | Auto-generated 256-bit local HTTP control API bearer token (`0600`) |
 | `~/.dialtone/blobs/` | — | Blob store (iroh-blobs `FsStore`; blobs named by `sha256/<hex>` tags) |

@@ -208,25 +208,27 @@ assert "nats://" not in logs_txt, "fake seeded NATS log found in live node state
 '
 echo "    7. Verified live /api/state reports real stats, 5s/30s summaries, and non-synthetic logs"
 
-# 8. Old names stay accepted for one release (see goal.md "Commands and routes use the words")
-"$BIN" gen-password | grep -q '^dt-'
-DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" peers list | grep -q "$FAKE_PEER_ID"
-curl -fsS -X POST http://127.0.0.1:18794/api/artifacts/blob \
-  -H "Authorization: Bearer $API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"bytes_base64\":\"$BLOB_B64\"}" | python3 -c 'import sys,json; assert json.load(sys.stdin)["digest"]=="'"$BLOB_DIGEST"'"'
-curl -fsS http://127.0.0.1:18794/api/gossip | python3 -c 'import sys,json; assert "nodes" in json.load(sys.stdin)'
-echo "    8. Verified old command and route names still work (gen-password, peers, /api/artifacts/blob, /api/gossip)"
+# 8. `dialtone hud` next to a running node serves the HUD but never rewrites its config
+CFG_BEFORE=$(shasum "$CI_BLOB_DIR/config.json" | awk '{print $1}')
+DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" hud --node ci-hud --listen 127.0.0.1:18795 --once > /tmp/dialtone-ci-hud.log 2>&1 &
+HUD_PID=$!
+for _ in $(seq 1 50); do curl -fsS -o /dev/null http://127.0.0.1:18795/ 2>/dev/null && break; sleep 0.1; done
+wait "$HUD_PID" || true
+if [ "$CFG_BEFORE" != "$(shasum "$CI_BLOB_DIR/config.json" | awk '{print $1}')" ]; then
+  echo "ERROR: dialtone hud rewrote the running node's config.json" >&2
+  exit 1
+fi
+echo "    8. Verified dialtone hud leaves the running node's config.json untouched"
 
 # 9. Removed preview / fixture routes stay removed
-for route in /api/deploy-plan /api/catalogs /api/process-intent /install/v1/install.sh /ws; do
+for route in /api/deploy-plan /api/catalogs /api/process-intent /install/v1/install.sh /ws /api/gossip /api/artifacts/blob /api/e2e/status; do
   CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:18794$route")
   if [ "$CODE" != "404" ]; then
     echo "ERROR: expected 404 for removed route $route, got $CODE" >&2
     exit 1
   fi
 done
-echo "    9. Verified removed preview routes return 404"
+echo "    9. Verified removed and renamed routes return 404"
 
 ci_cleanup
 trap - EXIT

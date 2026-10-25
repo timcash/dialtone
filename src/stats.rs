@@ -313,7 +313,7 @@ pub struct Stats {
     pub disk_percent: Option<f64>,
     #[serde(default)]
     pub interfaces: Vec<NetStats>,
-    #[serde(default, alias = "telemetry_summary")] // compat
+    #[serde(default)]
     pub stats_line: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_stats: Option<StatsSummary>,

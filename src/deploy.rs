@@ -10,10 +10,8 @@ pub struct DeploySlot {
     pub name: String,
     pub active: bool,
     pub path: String,
-    #[serde(alias = "sha256")] // compat
     pub digest: String,
     pub previous_path: Option<String>,
-    #[serde(alias = "previous_sha256")] // compat
     pub previous_digest: Option<String>,
     pub status: String,
 }
@@ -23,10 +21,8 @@ pub struct RollbackPlan {
     pub target_node: String,
     pub slot: String,
     pub current_path: String,
-    #[serde(alias = "current_sha256")] // compat
     pub current_digest: String,
     pub previous_path: String,
-    #[serde(alias = "previous_sha256")] // compat
     pub previous_digest: String,
     pub eligible: bool,
     pub side_effect_free_preview: bool,
@@ -115,7 +111,6 @@ pub struct DaemonInstallReport {
     pub os: String,
     pub node: String,
     pub listen: String,
-    #[serde(alias = "installed_binary_path")] // compat
     pub program_path: String,
     pub service_unit_path: String,
     pub survives_restarts: bool,

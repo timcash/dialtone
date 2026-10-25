@@ -131,8 +131,6 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| normalize_channel_name(Some(&saved.channel)));
     let env_secret = env::var("DIALTONE_SECRET")
-        .or_else(|_| env::var("DIALTONE_PASSWORD")) // compat
-        .or_else(|_| env::var("DIALTONE_CHANNEL_PASSWORD")) // compat
         .or_else(|_| env::var("DIALTONE_SECRET_KEY"))
         .ok()
         .filter(|s| !s.trim().is_empty());
@@ -180,15 +178,15 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.action = "help".to_string();
                 return Ok(opts);
             }
-            "mesh-test" | "fleet-test" /* compat */ if !action_set => { // compat
+            "mesh-test" if !action_set => {
                 opts.action = "mesh-test".to_string();
                 action_set = true;
             }
-            "secret" | "generate-secret" | "gen-password" /* compat */ if !action_set => { // compat
+            "secret" if !action_set => {
                 opts.action = "secret".to_string();
                 action_set = true;
             }
-            "blob" | "blobs" if !action_set => {
+            "blob" if !action_set => {
                 opts.action = "blob".to_string();
                 action_set = true;
                 if let Some(sub) = args.get(idx + 1) {
@@ -204,17 +202,14 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     }
                 }
             }
-            "allowlist" | "peers" | "peer" if !action_set => {
+            "allowlist" if !action_set => {
                 opts.action = "allowlist".to_string();
                 action_set = true;
                 if let Some(sub) = args.get(idx + 1) {
                     if !sub.starts_with('-') {
                         idx += 1;
                         opts.allowlist_subcmd = sub.clone();
-                        if matches!(
-                            opts.allowlist_subcmd.as_str(),
-                            "allow" | "add" | "revoke" | "remove" | "rm"
-                        ) {
+                        if matches!(opts.allowlist_subcmd.as_str(), "add" | "remove") {
                             if let Some(target) = args.get(idx + 1) {
                                 if !target.starts_with('-') {
                                     idx += 1;
@@ -225,7 +220,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     }
                 }
             }
-                        "invite" if !action_set => {
+            "invite" if !action_set => {
                 opts.action = "invite".to_string();
                 action_set = true;
             }
@@ -233,15 +228,8 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.action = "devices".to_string();
                 action_set = true;
             }
-            "index" if !action_set => {
-                opts.action = "hud".to_string();
-                action_set = true;
-            }
-            "test-tick" if !action_set => { // compat
-                opts.action = "probe".to_string();
-                action_set = true;
-            }
-            "up" | "start" | "hub" if !action_set => {
+
+            "up" if !action_set => {
                 opts.action = "up".to_string();
                 action_set = true;
             }
@@ -279,13 +267,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     }
                 }
             }
-            cmd @ ("status"
-            | "node"
-            | "hud"
-            | "probe"
-            | "service")
-                if !action_set =>
-            {
+            cmd @ ("status" | "node" | "hud" | "probe" | "service") if !action_set => {
                 opts.action = cmd.to_string();
                 action_set = true;
             }
@@ -308,8 +290,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 let ch = args.get(idx).ok_or("missing --channel value")?;
                 opts.channel = normalize_channel_name(Some(ch));
             }
-            "--secret" | "--channel-secret" | "--secret-key" | "--mesh-key" | "--key" | "--pass"
-            | "--password" /* compat */ => { // compat
+            "--secret" => {
                 idx += 1;
                 opts.secret_key = Some(args.get(idx).ok_or("missing --secret value")?.clone());
             }
@@ -332,7 +313,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                         .map_err(|e| format!("invalid --expect-peers value: {e}"))?,
                 );
             }
-                        "--force" => {
+            "--force" => {
                 opts.force = true;
             }
             "--json" => {
@@ -350,7 +331,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "--install-daemon" | "--daemon" => {
                 opts.install_daemon = true;
             }
-            "--invite" | "--join-ticket" | "--bootstrap-ticket" /* compat */ => { // compat
+            "--invite" => {
                 idx += 1;
                 let t = args.get(idx).ok_or("missing --invite value")?.clone();
                 if !opts.invites.contains(&t) {
@@ -599,7 +580,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let blob_dir = default_store_dir();
     // `index` previews and one-shot runs may share the state dir with a running daemon,
     // which owns the store; they get a private one instead.
-    let blobs = if opts.action == "index" || opts.once {
+    let blobs = if opts.action == "hud" || opts.once {
         Blobs::open_or_private(&blob_dir).await?
     } else {
         Blobs::open(&blob_dir).await?
@@ -741,7 +722,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         saved_cfg.invites = opts.invites.clone();
         saved_cfg.updated_at_unix = now_unix();
         // `index` is a read-only hud preview: never overwrite the daemon's saved config.
-        if opts.action != "index" {
+        if opts.action != "hud" {
             let _ = save_mesh_config(&config_path, &saved_cfg);
         }
         runtime_state.mesh_config = saved_cfg.clone();
@@ -1251,7 +1232,7 @@ async fn main() {
                     );
                     Ok(())
                 }
-                "allow" | "add" => {
+                                "add" => {
                     let target = opts
                         .peer_target
                         .as_deref()
@@ -1276,7 +1257,7 @@ async fn main() {
                     );
                     Ok(())
                 }
-                "revoke" | "remove" | "rm" => {
+                                "remove" => {
                     let target = opts
                         .peer_target
                         .as_deref()
@@ -1577,7 +1558,7 @@ async fn main() {
             let ticket_uri = share_resp
                 .get("ticket_uri")
                 .and_then(|v| v.as_str())
-                .ok_or("missing ticket_uri from POST /api/blobs/share")?;
+                .ok_or("missing ticket_uri from POST /api/blob/share")?;
             let pull_resp = local_daemon_http_json(
                 &opts.listen,
                 "POST",
@@ -1660,7 +1641,7 @@ async fn main() {
                     "ttl_secs": opts.invite_ttl_secs,
                     "expires_at_unix": invite.expires_at_unix,
                     "invite": invite_token,
-                    "invite_ticket": invite_token, // compat
+
                 }))
                 .unwrap()
             );
@@ -1823,7 +1804,7 @@ async fn main() {
             Ok(())
         }
         "node" => run_node(opts, false).await,
-        "up" | "start" | "hud" => run_node(opts, true).await,
+        "up" | "hud" => run_node(opts, true).await,
         other => Err(format!("unsupported action {other:?}")),
     };
 

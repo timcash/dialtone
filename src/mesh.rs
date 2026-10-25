@@ -306,7 +306,6 @@ pub fn derive_topic_id_from_secret(secret: &str) -> TopicId {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Seed {
-    #[serde(alias = "endpoint_id")] // compat
     pub node_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
@@ -450,7 +449,6 @@ pub fn revoke_peer_in_config(config_path: &Path, node_id: &str) -> Result<MeshCo
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Invite {
     pub schema: String,
-    #[serde(alias = "issuer_endpoint_id")] // compat
     pub issuer_node_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
@@ -459,7 +457,6 @@ pub struct Invite {
     pub nonce: String,
     pub expires_at_unix: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "bound_endpoint_id")] // compat
     pub bound_node_id: Option<String>,
     pub signature: String,
 }
@@ -638,16 +635,12 @@ pub struct MeshConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derived_keys: Option<ChannelKeysHex>,
     pub channel_fingerprint: String,
-    #[serde(alias = "seed_peers")] // compat
     pub seeds: Vec<Seed>,
-    #[serde(alias = "allowed_endpoint_ids")] // compat
     pub allowlist: Vec<String>,
     pub used_invite_nonces: Vec<String>,
-    #[serde(alias = "bootstrap_tickets")] // compat
     pub invites: Vec<String>,
     pub daemon_installed: bool,
     pub daemon_service_path: Option<String>,
-    #[serde(alias = "managed_processes")] // compat
     pub processes: Vec<crate::service::ProcessSpec>,
     pub updated_at_unix: u64,
 }
@@ -713,48 +706,9 @@ pub fn default_store_dir() -> PathBuf {
     default_state_dir().join("blobs")
 }
 
-/// Locate a sibling legacy `.dialtone2/config.json` path relative to `config_path` (Issue #2).
-pub fn legacy_config_path_for(config_path: &Path) -> Option<PathBuf> {
-    let state_dir = config_path.parent()?;
-    let dir_name = state_dir.file_name()?.to_str()?;
-    if dir_name == ".dialtone" {
-        Some(state_dir.parent()?.join(".dialtone2").join("config.json"))
-    } else {
-        None
-    }
-}
-
-/// Detect and migrate/scrub legacy `~/.dialtone2/config.json` and any plaintext `secret_key` (Issue #2).
-pub fn migrate_and_scrub_legacy_config(config_path: &Path, legacy_path: &Path) -> bool {
-    if !legacy_path.exists() {
-        return false;
-    }
-    eprintln!(
-        "[config-migration-warn] detected legacy config file at {}; migrating derived keys and scrubbing plaintext secret",
-        legacy_path.display()
-    );
-    if !config_path.exists() {
-        if let Ok(raw) = fs::read_to_string(legacy_path) {
-            if let Ok(mut legacy_cfg) = serde_json::from_str::<MeshConfig>(&raw) {
-                if let Some(raw_pass) = legacy_cfg.secret_key.take() {
-                    if !raw_pass.trim().is_empty() {
-                        let _ = legacy_cfg.apply_secret(&legacy_cfg.channel.clone(), &raw_pass);
-                    }
-                }
-                let _ = save_mesh_config(config_path, &legacy_cfg);
-            }
-        }
-    }
-    let _ = fs::remove_file(legacy_path);
-    true
-}
-
 /// Load `config.json`. A missing file is an empty config; a file that is not valid config
 /// JSON is an error, never an empty config (saving that would wipe the keys and allowlist).
 pub fn try_load_mesh_config(path: &Path) -> Result<MeshConfig, String> {
-    if let Some(legacy_path) = legacy_config_path_for(path) {
-        let _ = migrate_and_scrub_legacy_config(path, &legacy_path);
-    }
     let mut cfg: MeshConfig = match fs::read_to_string(path) {
         Ok(raw) => serde_json::from_str(&raw)
             .map_err(|e| format!("{} is not valid dialtone config JSON: {e}", path.display()))?,
@@ -1438,34 +1392,25 @@ fn default_summary_interval_secs() -> u64 {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeReport {
-    #[serde(alias = "worker_name")] // compat
     pub program_name: String,
-    #[serde(alias = "worker_sha256")] // compat
     pub program_digest: String,
-    #[serde(alias = "worker_pid")] // compat
     pub pid: Option<u32>,
     #[serde(default)]
-    #[serde(alias = "worker_blob_cas_path")] // compat
     pub store_path: String,
     #[serde(default)]
-    #[serde(alias = "worker_staged_path")] // compat
     pub staged_path: String,
     #[serde(default)]
-    #[serde(alias = "worker_blob_ticket")] // compat
     pub ticket: String,
     pub cycle: u64,
     pub updated_at_unix: u64,
     pub passed_count: u8,
     pub total_count: u8,
-    #[serde(alias = "sha_blobs_ok")] // compat
     pub blobs_ok: bool,
     pub key_value_ok: bool,
-    #[serde(alias = "sub_processes_ok")] // compat
     pub processes_ok: bool,
     pub mesh_connectivity_ok: bool,
     pub ab_rollback_ok: bool,
     pub active_slot: String,
-    #[serde(alias = "verified_blob_sha256")] // compat
     pub verified_digest: String,
     pub kv_key: String,
     pub mesh_peers_seen: usize,
@@ -1474,12 +1419,9 @@ pub struct ProbeReport {
 /// Per-node store counters, gossiped so every HUD can see blobs land on peers.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoreStats {
-    #[serde(alias = "sha_blob_keys")] // compat
     pub blob_keys: u64,
-    #[serde(alias = "sha_blob_bytes")] // compat
     pub blob_bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "latest_sha256")] // compat
     pub latest_digest: Option<String>,
 }
 
@@ -1487,16 +1429,13 @@ pub struct StoreStats {
 pub struct Beat {
     pub schema: String,
     pub node: String,
-    #[serde(alias = "endpoint_id")] // compat
     pub node_id: String,
     pub ticket: String,
     pub counter: u64,
     pub updated_at_unix: u64,
     #[serde(default = "default_beat_kind")]
-    #[serde(alias = "heartbeat_kind")] // compat
     pub kind: String,
     #[serde(default = "default_beat_interval_secs")]
-    #[serde(alias = "heartbeat_interval_secs")] // compat
     pub beat_interval_secs: u64,
     #[serde(default = "default_summary_interval_secs")]
     pub summary_interval_secs: u64,
@@ -1513,10 +1452,8 @@ pub struct Beat {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geo_location: Option<NodeGeoLocation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "e2e_test")] // compat
     pub probe: Option<ProbeReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "blob_store")] // compat
     pub store: Option<StoreStats>,
     /// Sender wall-clock send time in ms, strictly increasing per sender (replay check).
     #[serde(default)]
@@ -1530,11 +1467,9 @@ pub struct Beat {
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default)]
-    #[serde(alias = "host_resources")] // compat
     pub stats: Stats,
     pub service_endpoints: Vec<Service>,
     #[serde(default)]
-    #[serde(alias = "managed_processes")] // compat
     pub processes: Vec<crate::service::ProcessSpec>,
     pub iroh_transport: IrohTransportDiagnostics,
     #[serde(default)]
@@ -2204,18 +2139,16 @@ mod tests {
     }
 
     #[test]
-    fn issue_2_config_never_stores_plaintext_secret_and_migrates_legacy_file() {
+    fn config_never_stores_a_plaintext_secret() {
         let root = env::temp_dir().join(format!("dialtone-cfg-mig-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let legacy_dir = root.join(".dialtone2");
         let new_dir = root.join(".dialtone");
-        fs::create_dir_all(&legacy_dir).unwrap();
-        let legacy_path = legacy_dir.join("config.json");
+        fs::create_dir_all(&new_dir).unwrap();
         let new_path = new_dir.join("config.json");
 
         let raw_pass = "dt-LegacySecret_ToMigrate_998877!";
         fs::write(
-            &legacy_path,
+            &new_path,
             format!(
                 r#"{{"node_name":"node-alpha","channel":"dialtone","configured":true,"secret_key":"{raw_pass}","channel_fingerprint":"old","updated_at_unix":100}}"#
             ),
@@ -2223,14 +2156,6 @@ mod tests {
         .unwrap();
 
         let loaded = load_mesh_config(&new_path);
-        assert!(
-            !legacy_path.exists(),
-            "legacy ~/.dialtone2/config.json must be cleaned up"
-        );
-        assert!(
-            new_path.exists(),
-            "migrated ~/.dialtone/config.json must be created"
-        );
         assert!(
             loaded.secret_key.is_none(),
             "in-memory secret_key must be cleared after deriving keys"
@@ -2691,117 +2616,6 @@ mod tests {
         merge_beat(&mut nodes, a.clone());
         let entry = nodes.iter().find(|n| n.node_id == a.node_id).unwrap();
         assert!(entry.peer_rtt_ms.contains_key("node-gamma"));
-    }
-
-    /// Beats from peers and config files written before the domain-language rename use the
-    /// old field names; they must still parse to the same values.
-    #[test]
-    fn old_field_names_still_parse() {
-        fn rename_keys(v: &mut serde_json::Value, map: &[(&str, &str)]) {
-            match v {
-                serde_json::Value::Object(obj) => {
-                    for (new, old) in map {
-                        if let Some(val) = obj.remove(*new) {
-                            obj.insert(old.to_string(), val);
-                        }
-                    }
-                    obj.values_mut().for_each(|child| rename_keys(child, map));
-                }
-                serde_json::Value::Array(items) => {
-                    items.iter_mut().for_each(|child| rename_keys(child, map))
-                }
-                _ => {}
-            }
-        }
-        let old_names = [
-            ("node_id", "endpoint_id"),                        // compat
-            ("kind", "heartbeat_kind"),                        // compat
-            ("beat_interval_secs", "heartbeat_interval_secs"), // compat
-            ("stats", "host_resources"),                       // compat
-            ("processes", "managed_processes"),                // compat
-            ("store", "blob_store"),                           // compat
-            ("digest", "sha256"),                              // compat
-            ("blob_keys", "sha_blob_keys"),                    // compat
-            ("blob_bytes", "sha_blob_bytes"),                  // compat
-            ("latest_digest", "latest_sha256"),                // compat
-            ("allowlist", "allowed_endpoint_ids"),             // compat
-            ("seeds", "seed_peers"),                           // compat
-            ("invites", "bootstrap_tickets"),                  // compat
-        ];
-
-        let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
-        let diag = build_diagnostics(&IrohTransportConfig::local_offline(), &addr, None, "n1");
-        let beat = Beat {
-            schema: BEAT_SCHEMA.to_string(),
-            node: "node-alpha".to_string(),
-            node_id: "n1".to_string(),
-            ticket: String::new(),
-            counter: 7,
-            updated_at_unix: 1_700_000_000,
-            kind: "summary".to_string(),
-            beat_interval_secs: BEAT_INTERVAL_SECS,
-            summary_interval_secs: SUMMARY_INTERVAL_SECS,
-            sent_mono_ms: 1,
-            rtt_probe_requested: false,
-            peer_echoes: HashMap::new(),
-            peer_rtt_ms: std::collections::BTreeMap::new(),
-            summary_stats: None,
-            sent_unix_ms: 0,
-            os: default_os(),
-            arch: default_arch(),
-            role: String::new(),
-            capabilities: Vec::new(),
-            stats: sample_stats("node-alpha", None, 7),
-            service_endpoints: Vec::new(),
-            processes: vec![crate::service::ProcessSpec {
-                name: "probe".to_string(),
-                path: "/tmp/probe".to_string(),
-                digest: format!("sha256:{}", "a".repeat(64)),
-                desired_state: "running".to_string(),
-                args: Vec::new(),
-                env: Vec::new(),
-                cwd: None,
-                startup_grace_secs: None,
-                status: Some("running".to_string()),
-                pid: Some(42),
-                restart_count: 0,
-                service_unit: None,
-                deploy_ticket: None,
-            }],
-            iroh_transport: diag,
-            observed_remote_addrs: Vec::new(),
-            tailnet_used: false,
-            devices: Vec::new(),
-            geo_location: None,
-            probe: None,
-            store: Some(StoreStats {
-                blob_keys: 3,
-                blob_bytes: 99,
-                latest_digest: Some(format!("sha256:{}", "b".repeat(64))),
-            }),
-        };
-        let mut old_beat = serde_json::to_value(&beat).unwrap();
-        rename_keys(&mut old_beat, &old_names);
-        assert!(old_beat.get("host_resources").is_some()); // compat
-        let parsed: Beat = serde_json::from_value(old_beat).unwrap();
-        assert_eq!(parsed, beat);
-
-        let cfg = MeshConfig {
-            allowlist: vec!["n2".to_string()],
-            seeds: vec![Seed {
-                node_id: "n2".to_string(),
-                relay_url: None,
-                ip_addrs: Vec::new(),
-            }],
-            invites: vec!["dialtone-invite-v1:x".to_string()],
-            ..Default::default()
-        };
-        let mut old_cfg = serde_json::to_value(&cfg).unwrap();
-        rename_keys(&mut old_cfg, &old_names);
-        let parsed_cfg: MeshConfig = serde_json::from_value(old_cfg).unwrap();
-        assert_eq!(parsed_cfg.allowlist, cfg.allowlist);
-        assert_eq!(parsed_cfg.seeds, cfg.seeds);
-        assert_eq!(parsed_cfg.invites, cfg.invites);
     }
 
     #[test]

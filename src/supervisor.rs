@@ -74,12 +74,9 @@ pub fn stage_program(blobs: &Blobs, name: &str, digest: &str) -> Result<(String,
 }
 
 pub const PROBE_PROGRAM_NAME: &str = "probe";
-/// Name the probe program had before the domain-language rename; such specs are stopped.
-pub const OLD_PROBE_PROGRAM_NAME: &str = "mesh-blob-worker"; // compat
-
 /// Every node runs its own probe program, so a peer's probe is never deployed here.
 pub fn is_probe_program(name: &str) -> bool {
-    name == PROBE_PROGRAM_NAME || name == OLD_PROBE_PROGRAM_NAME
+    name == PROBE_PROGRAM_NAME
 }
 
 /// Canonical cross-platform polyglot probe test process blob (`sh` on macOS/Linux, `cmd.exe` on Windows)
@@ -96,7 +93,6 @@ pub fn ensure_probe_program(
     specs: &mut Vec<ProcessSpec>,
     ticket_uri: Option<&str>,
 ) -> Result<ProcessSpec, String> {
-    specs.retain(|p| p.name != OLD_PROBE_PROGRAM_NAME);
     let payload = probe_program_bytes();
     let digest = blobs.put_blocking(payload, None)?;
     let (verified_sha, staged_path) = stage_program(blobs, PROBE_PROGRAM_NAME, &digest)?;

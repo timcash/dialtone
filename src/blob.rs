@@ -19,10 +19,8 @@ use crate::node::IrohTransportConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlobTransportReport {
-    #[serde(alias = "sha256")] // compat
     pub digest: String,
     pub blake3_hash: String,
-    #[serde(alias = "provider_endpoint_id")] // compat
     pub provider_node_id: String,
     pub ticket_uri: String,
     pub bytes: u64,
@@ -80,6 +78,9 @@ pub struct Blobs {
     summary: Arc<Mutex<StoreSummary>>,
     /// A throwaway store (see [`Blobs::open_or_private`]), deleted on close.
     private: bool,
+    /// Exclusive OS lock on `<dir>/store.lock`, held until `close`. The database itself
+    /// waits forever for another process's lock; this one fails at once instead.
+    lock: Arc<Mutex<Option<fs::File>>>,
 }
 
 impl std::fmt::Debug for Blobs {
@@ -93,6 +94,14 @@ impl Blobs {
     /// one-file-per-SHA-256 layout.
     pub async fn open(dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|e| format!("create store {}: {e}", dir.display()))?;
+        let lock_file = fs::File::create(dir.join("store.lock"))
+            .map_err(|e| format!("open store lock in {}: {e}", dir.display()))?;
+        lock_file.try_lock().map_err(|e| match e {
+            fs::TryLockError::WouldBlock => {
+                format!("store {} is in use by another process", dir.display())
+            }
+            fs::TryLockError::Error(e) => format!("lock store {}: {e}", dir.display()),
+        })?;
         let mut options = FsOptions::new(dir);
         options.gc = Some(GcConfig {
             interval: GC_INTERVAL,
@@ -106,6 +115,7 @@ impl Blobs {
             dir: dir.to_path_buf(),
             summary: Arc::default(),
             private: false,
+            lock: Arc::new(Mutex::new(Some(lock_file))),
         };
         blobs.import_old_layout().await?;
         blobs.refresh_summary().await?;
@@ -146,6 +156,9 @@ impl Blobs {
     pub async fn close(&self) {
         let _ = self.store.sync_db().await;
         let _ = self.store.shutdown().await;
+        if let Ok(mut lock) = self.lock.lock() {
+            lock.take();
+        }
         if self.private {
             let _ = fs::remove_dir_all(&self.dir);
         }
@@ -421,11 +434,9 @@ async fn observe_remote_info(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedBlobTicketReport {
     pub status: String,
-    #[serde(alias = "sha256")] // compat
     pub digest: String,
     pub blake3_hash: String,
     pub bytes: u64,
-    #[serde(alias = "provider_endpoint_id")] // compat
     pub provider_node_id: String,
     pub ticket_uri: String,
 }
@@ -602,6 +613,19 @@ mod tests {
         assert_eq!(summary.latest_digest, Some(digest_of(b"other")));
         assert!(!blobs.has_blocking(&digest_of(b"never stored")));
         drop(blobs);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_store_in_use_is_refused_at_once_instead_of_waiting() {
+        let (dir, blobs) = temp_store("blob-locked");
+        let start = std::time::Instant::now();
+        let err = Blobs::open_blocking(&dir).expect_err("second open must fail");
+        assert!(err.contains("in use by another process"), "{err}");
+        assert!(start.elapsed() < Duration::from_secs(2));
+        blobs.close_blocking();
+        let reopened = Blobs::open_blocking(&dir).unwrap();
+        reopened.close_blocking();
         let _ = fs::remove_dir_all(&dir);
     }
 
