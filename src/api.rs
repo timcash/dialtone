@@ -370,6 +370,56 @@ impl NodeState {
         self.mesh_rtt_ms = build_mesh_rtt_matrix(&self.nodes);
     }
 
+    /// Stop a process and forget it: drop its spec from the node state and `config.json`,
+    /// and delete its staged program file when no other spec runs it. False if unknown.
+    pub fn remove_process(&mut self, name: &str) -> bool {
+        let in_config = self.mesh_config.processes.iter().any(|p| p.name == name);
+        let Some(mut spec) = self
+            .processes
+            .iter()
+            .position(|p| p.name == name)
+            .map(|i| self.processes.remove(i))
+            .or_else(|| {
+                self.mesh_config
+                    .processes
+                    .iter()
+                    .find(|p| p.name == name)
+                    .cloned()
+            })
+        else {
+            return false;
+        };
+        spec.desired_state = "removed".to_string();
+        if let Ok(mut sup) = self.supervisor.lock() {
+            let _ = sup.reconcile(std::slice::from_mut(&mut spec));
+        }
+        if in_config {
+            self.mesh_config.processes.retain(|p| p.name != name);
+            self.mesh_config.updated_at_unix = now_unix();
+            let _ = save_mesh_config(&default_config_path(), &self.mesh_config);
+        }
+        let run_dir = self
+            .store_dir
+            .parent()
+            .unwrap_or(&self.store_dir)
+            .join("run");
+        let staged = std::path::Path::new(&spec.path);
+        if staged.starts_with(&run_dir) && !self.processes.iter().any(|p| p.path == spec.path) {
+            let _ = fs::remove_file(staged);
+        }
+        let procs_snapshot = self.processes.clone();
+        if let Some(me) = self.self_entry_mut() {
+            me.processes = procs_snapshot;
+        }
+        self.record_log(
+            "supervisor",
+            "INFO",
+            "stdout",
+            format!("removed process '{name}'"),
+        );
+        true
+    }
+
     /// Gather what a probe run needs (see `probe.rs`), keeping the probe program running.
     pub fn probe_inputs(&mut self) -> crate::probe::ProbeInputs {
         let _ = ensure_probe_program(&self.blobs, &mut self.processes, None);
@@ -1330,6 +1380,7 @@ fn route_request(
                 restart_count: prev_restart_count,
                 service_unit: None,
                 deploy_ticket: None,
+                deployed_from: None,
             };
 
             let sup_res = {
@@ -1406,53 +1457,15 @@ fn route_request(
     }
 }
 
-/// Stop a process and forget it: drop its spec from the node state and `config.json`, and
-/// delete its staged program file when no other spec runs it.
+/// Answer `POST /api/processes` with `desired_state: "removed"`.
 fn remove_process<W: Write>(stream: &mut W, st: &mut NodeState, name: &str) -> Result<(), String> {
-    let in_config = st.mesh_config.processes.iter().any(|p| p.name == name);
-    let Some(mut spec) = st
-        .processes
-        .iter()
-        .position(|p| p.name == name)
-        .map(|i| st.processes.remove(i))
-        .or_else(|| {
-            st.mesh_config
-                .processes
-                .iter()
-                .find(|p| p.name == name)
-                .cloned()
-        })
-    else {
+    if !st.remove_process(name) {
         return write_json(
             stream,
             404,
             &json!({ "error": format!("no process named {name:?}") }),
         );
-    };
-    spec.desired_state = "removed".to_string();
-    if let Ok(mut sup) = st.supervisor.lock() {
-        let _ = sup.reconcile(std::slice::from_mut(&mut spec));
     }
-    if in_config {
-        st.mesh_config.processes.retain(|p| p.name != name);
-        st.mesh_config.updated_at_unix = now_unix();
-        let _ = save_mesh_config(&default_config_path(), &st.mesh_config);
-    }
-    let run_dir = st.store_dir.parent().unwrap_or(&st.store_dir).join("run");
-    let staged = std::path::Path::new(&spec.path);
-    if staged.starts_with(&run_dir) && !st.processes.iter().any(|p| p.path == spec.path) {
-        let _ = fs::remove_file(staged);
-    }
-    let procs_snapshot = st.processes.clone();
-    if let Some(me) = st.self_entry_mut() {
-        me.processes = procs_snapshot;
-    }
-    st.record_log(
-        "supervisor",
-        "INFO",
-        "stdout",
-        format!("removed process '{name}'"),
-    );
     write_json(
         stream,
         200,

@@ -345,6 +345,7 @@ mod tests {
             restart_count: 0,
             service_unit: None,
             deploy_ticket: None,
+            deployed_from: None,
         }
     }
 

@@ -48,4 +48,8 @@ pub struct ProcessSpec {
     /// Ticket for this process's program when it is offered for mesh deploy (set in beats).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deploy_ticket: Option<String>,
+    /// NodeId of the peer this process was deployed from. Such a copy is never offered to
+    /// the mesh again, and it is removed when that peer stops offering the program.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployed_from: Option<String>,
 }

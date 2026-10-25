@@ -135,6 +135,7 @@ pub fn ensure_probe_program(
         restart_count: 0,
         service_unit: None,
         deploy_ticket: None,
+        deployed_from: None,
     };
     specs.push(spec.clone());
     Ok(spec)
@@ -548,6 +549,7 @@ mod tests {
             restart_count: 0,
             service_unit: None,
             deploy_ticket: None,
+            deployed_from: None,
         }
     }
 
@@ -637,6 +639,7 @@ mod tests {
             restart_count: 0,
             service_unit: None,
             deploy_ticket: None,
+            deployed_from: None,
         }];
         let mut sup = Supervisor::new();
         sup.reconcile(&mut specs).unwrap();
@@ -688,6 +691,7 @@ mod tests {
             restart_count: 0,
             service_unit: None,
             deploy_ticket: None,
+            deployed_from: None,
         }];
 
         let mut sup = Supervisor::new();

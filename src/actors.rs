@@ -384,8 +384,9 @@ async fn probe_actor(ctx: Ctx) {
 // Deploy
 // ---------------------------------------------------------------------------------------
 
-/// Run the programs allowlisted peers run: pull each from its ticket (only from an
-/// allowlisted provider), verify its SHA-256, stage it and start it.
+/// Run the programs allowlisted peers offer: pull each from its ticket (only from an
+/// allowlisted provider), verify its SHA-256, stage it and start it. A copy follows its
+/// origin: when the origin's inventory stops offering a program, the copy is removed.
 async fn deploy_actor(ctx: Ctx, mut offers: mpsc::UnboundedReceiver<PeerPrograms>) {
     let mut attempted: HashSet<(String, String)> = HashSet::new();
     loop {
@@ -396,6 +397,35 @@ async fn deploy_actor(ctx: Ctx, mut offers: mpsc::UnboundedReceiver<PeerPrograms
                 None => break,
             },
         };
+        let offered: HashSet<(String, String)> = offer
+            .processes
+            .iter()
+            .filter(|p| p.desired_state == "running" && p.deploy_ticket.is_some())
+            .map(|p| (p.name.clone(), p.digest.clone()))
+            .collect();
+        let origin = offer.node.clone();
+        ctx.with_state(|st| {
+            let stale: Vec<String> = st
+                .processes
+                .iter()
+                .filter(|p| p.deployed_from.as_deref() == Some(offer.node_id.as_str()))
+                .filter(|p| !offered.contains(&(p.name.clone(), p.digest.clone())))
+                .map(|p| p.name.clone())
+                .collect();
+            for name in stale {
+                if st.remove_process(&name) {
+                    st.record_log(
+                        "blob-supervisor",
+                        "INFO",
+                        "stdout",
+                        format!("removed '{name}': peer '{origin}' no longer offers it"),
+                    );
+                }
+            }
+        });
+        attempted.retain(|(node_id, digest)| {
+            *node_id != offer.node_id || offered.iter().any(|(_, d)| d == digest)
+        });
         for program in offer.processes {
             if program.desired_state != "running"
                 || dialtone::supervisor::is_probe_program(&program.name)
@@ -427,6 +457,7 @@ async fn deploy_actor(ctx: Ctx, mut offers: mpsc::UnboundedReceiver<PeerPrograms
             }
             let state = ctx.state.clone();
             let provider = offer.node.clone();
+            let origin_id = offer.node_id.clone();
             tokio::task::spawn_blocking(move || {
                 let Ok(report) = store.pull_blob(&ticket, false) else {
                     return;
@@ -461,6 +492,8 @@ async fn deploy_actor(ctx: Ctx, mut offers: mpsc::UnboundedReceiver<PeerPrograms
                 spec.path = staged.to_string_lossy().to_string();
                 spec.pid = None;
                 spec.status = None;
+                spec.deploy_ticket = None;
+                spec.deployed_from = Some(origin_id);
                 match st.processes.iter_mut().find(|p| p.name == spec.name) {
                     Some(existing) => *existing = spec,
                     None => st.processes.push(spec),

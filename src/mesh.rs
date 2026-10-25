@@ -1353,6 +1353,10 @@ pub fn process_advert(spec: &crate::service::ProcessSpec) -> crate::service::Pro
             })
             .flatten()
     });
+    if spec.deployed_from.is_some() {
+        // Only the node that deployed a program offers it; copies never spread it further.
+        advert.deploy_ticket = None;
+    }
     advert.env.clear();
     advert.args.clear();
     advert
@@ -2138,6 +2142,7 @@ mod tests {
             restart_count: 0,
             service_unit: None,
             deploy_ticket: None,
+            deployed_from: None,
         };
         let processes = vec![
             spec(
@@ -2189,6 +2194,19 @@ mod tests {
             Some("iroh-blobs://ticket/x")
         );
         assert_eq!(opened.processes[1].deploy_ticket, None);
+
+        // A copy deployed from a peer is never offered again, whatever its env says, so a
+        // program removed at its origin cannot spread back through the copies.
+        let mut copy = spec(
+            "copy",
+            vec![
+                "DIALTONE_MESH_DEPLOY=1",
+                "DIALTONE_BLOB_TICKET=iroh-blobs://ticket/z",
+            ],
+        );
+        copy.deploy_ticket = Some("iroh-blobs://ticket/z".to_string());
+        copy.deployed_from = Some("origin-node-id".to_string());
+        assert_eq!(process_advert(&copy).deploy_ticket, None);
     }
 
     #[test]
@@ -2221,6 +2239,7 @@ mod tests {
             restart_count: 0,
             service_unit: None,
             deploy_ticket: None,
+            deployed_from: None,
         };
         let inventory = Inventory {
             node: beat.node.clone(),
