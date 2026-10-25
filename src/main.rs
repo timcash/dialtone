@@ -50,6 +50,7 @@ fn print_usage() {
          \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use invite\n\
          \x20 daemon [install|status]  Install or inspect the daemon that starts the node at login\n\
          \x20 probe                    Run one probe on the local node (BLB, KVS, PRC, MSH, A/B)\n\
+         \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
          \x20 mesh-test                Check the running node's security, mesh convergence and blob transfer\n\
          \x20 hud                      Serve the HUD and API only (no mesh)\n\
          \x20 node                     Run the node without the HUD or API\n\
@@ -104,6 +105,7 @@ struct CliOptions {
     blob_subcmd: String,
     blob_target: Option<String>,
     force: bool,
+    json: bool,
     expect_peers: Option<usize>,
     timeout_secs: u64,
     invite_ttl_secs: u64,
@@ -155,6 +157,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         blob_subcmd: "share".to_string(),
         blob_target: None,
         force: false,
+        json: false,
         expect_peers: None,
         timeout_secs: 15,
         invite_ttl_secs: 900,
@@ -227,8 +230,12 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     }
                 }
             }
-            "invite" if !action_set => {
+                        "invite" if !action_set => {
                 opts.action = "invite".to_string();
+                action_set = true;
+            }
+            "devices" | "device" if !action_set => {
+                opts.action = "devices".to_string();
                 action_set = true;
             }
             "index" if !action_set => {
@@ -330,8 +337,11 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                         .map_err(|e| format!("invalid --expect-peers value: {e}"))?,
                 );
             }
-            "--force" => {
+                        "--force" => {
                 opts.force = true;
+            }
+            "--json" => {
+                opts.json = true;
             }
             "--peer" | "--endpoint-id" => {
                 idx += 1;
@@ -447,6 +457,7 @@ fn self_beat(
         iroh_transport: diag,
         observed_remote_addrs: vec!["local:self".to_string()],
         tailnet_used: false,
+        devices: Vec::new(),
         geo_location: cached_local_public_ip_geo(),
         probe: None,
         store: Some(StoreStats {
@@ -1347,6 +1358,20 @@ async fn main() {
                 )),
             }
         })(),
+        "devices" => dialtone::devices::list_devices().map(|devices| {
+            if opts.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&devices).unwrap_or_default()
+                );
+                return;
+            }
+            println!("{:<11} {:<12} {:<44} DETAIL", "KIND", "BUS", "NAME");
+            for d in &devices {
+                println!("{:<11} {:<12} {:<44} {}", d.kind, d.bus, d.name, d.detail);
+            }
+            println!("{} device(s)", devices.len());
+        }),
         "probe" => (|| -> Result<(), String> {
             let api_token = opts
                 .api_token

@@ -173,6 +173,8 @@ pub struct NodeState {
     #[serde(alias = "managed_processes")] // compat
     pub processes: Vec<ProcessSpec>,
     pub deploy_slots: Vec<DeploySlot>,
+    /// Devices connected to this node, refreshed by the Devices actor.
+    pub devices: Vec<crate::devices::Device>,
     pub blob_fetches: Vec<BlobTransportReport>,
     pub service_endpoints: Vec<Service>,
     #[serde(alias = "host_resources")] // compat
@@ -640,6 +642,7 @@ impl NodeState {
             iroh_transport: iroh_runtime.clone(),
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
+            devices: Vec::new(),
             geo_location: cached_local_public_ip_geo(),
             probe: None,
             store: None,
@@ -695,6 +698,7 @@ impl NodeState {
             installed_programs,
             processes: Vec::new(),
             deploy_slots: Vec::new(),
+            devices: Vec::new(),
             blob_fetches: Vec::new(),
             service_endpoints,
             stats: stats.clone(),
@@ -1192,6 +1196,10 @@ fn route_request(
                 }
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
+        }
+                ("GET", "/api/devices") => {
+            let body = json!({ "node": st.node, "devices": st.devices });
+            write_json(&mut stream, 200, &body)
         }
         ("GET", "/api/mesh") | ("GET", "/api/gossip") => { // compat
             // compat| ("GET", "/api/gossip") => {

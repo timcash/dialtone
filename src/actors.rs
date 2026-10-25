@@ -5,6 +5,8 @@
 //!   (see `Message`), peer discovery and channel joins.
 //! - **Stats** samples the host every second and keeps the rolling summary.
 //! - **Supervisor** reconciles processes every second and tells Mesh when they change.
+//! - **Devices** lists the cameras, microphones, keyboards and other devices connected to
+//!   the node every minute and tells Mesh when they change.
 //! - **Links** observes how each peer is reached (direct, relay, tailnet).
 //! - **Allowlist** reloads the allowlist when `config.json` changes.
 //! - **Deploy** pulls, verifies and starts programs that allowlisted peers run.
@@ -66,8 +68,8 @@ impl Ctx {
     }
 }
 
-/// The processes and services this node runs, sent by Supervisor when they change.
-pub(crate) type ProcessesChanged = (Vec<ProcessSpec>, Vec<dialtone::service::Service>);
+/// Sent to Mesh when this node's inventory (processes, services, devices) changed.
+pub(crate) struct InventoryChanged;
 
 /// The programs a peer says it runs, sent by Mesh to Deploy for every admitted inventory.
 pub(crate) struct PeerPrograms {
@@ -97,13 +99,21 @@ pub(crate) struct MeshStart {
 pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
     let (rtt_tx, rtt_rx) = watch::channel(BTreeMap::new());
     let (summary_tx, summary_rx) = watch::channel(None);
-    let (procs_tx, procs_rx) = mpsc::unbounded_channel();
+    let (inventory_tx, inventory_rx) = mpsc::unbounded_channel();
     let (deploy_tx, deploy_rx) = mpsc::unbounded_channel();
-    let mesh = Mesh::new(ctx.clone(), start, rtt_tx, summary_rx, procs_rx, deploy_tx);
+    let mesh = Mesh::new(
+        ctx.clone(),
+        start,
+        rtt_tx,
+        summary_rx,
+        inventory_rx,
+        deploy_tx,
+    );
     vec![
         tokio::spawn(mesh.run()),
         tokio::spawn(stats_actor(ctx.clone(), rtt_rx, summary_tx)),
-        tokio::spawn(supervisor_actor(ctx.clone(), procs_tx)),
+        tokio::spawn(supervisor_actor(ctx.clone(), inventory_tx.clone())),
+        tokio::spawn(devices_actor(ctx.clone(), inventory_tx)),
         tokio::spawn(links_actor(ctx.clone())),
         tokio::spawn(allowlist_actor(ctx.clone())),
         tokio::spawn(deploy_actor(ctx, deploy_rx)),
@@ -177,7 +187,7 @@ async fn stats_actor(
 
 /// Reconcile processes every second; report spawns, stops and restarts to Mesh so peers
 /// see them within about a second.
-async fn supervisor_actor(ctx: Ctx, procs_tx: mpsc::UnboundedSender<ProcessesChanged>) {
+async fn supervisor_actor(ctx: Ctx, inventory_tx: mpsc::UnboundedSender<InventoryChanged>) {
     let mut tick = every(Duration::from_secs(1));
     let mut last: Option<Vec<ProcessSpec>> = None;
     loop {
@@ -191,15 +201,55 @@ async fn supervisor_actor(ctx: Ctx, procs_tx: mpsc::UnboundedSender<ProcessesCha
                 return None;
             }
             last = Some(st.processes.clone());
-            let change = (st.processes.clone(), st.service_endpoints.clone());
+            let (processes, services) = (st.processes.clone(), st.service_endpoints.clone());
             if let Some(me) = st.self_entry_mut() {
-                me.processes = change.0.clone();
-                me.service_endpoints = change.1.clone();
+                me.processes = processes;
+                me.service_endpoints = services;
             }
-            Some(change)
+            Some(())
         });
-        if let Some(Some(change)) = changed {
-            let _ = procs_tx.send(change);
+        if let Some(Some(())) = changed {
+            let _ = inventory_tx.send(InventoryChanged);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Devices
+// ---------------------------------------------------------------------------------------
+
+/// How often the devices connected to the node are listed again.
+const DEVICES_INTERVAL: Duration = Duration::from_secs(60);
+
+/// List this node's devices now and every minute; tell Mesh when the list changes.
+async fn devices_actor(ctx: Ctx, inventory_tx: mpsc::UnboundedSender<InventoryChanged>) {
+    let mut tick = every(DEVICES_INTERVAL);
+    loop {
+        tokio::select! {
+            _ = ctx.cancel.cancelled() => break,
+            _ = tick.tick() => {}
+        }
+        let listed = tokio::task::spawn_blocking(dialtone::devices::list_devices).await;
+        let devices = match listed {
+            Ok(Ok(devices)) => devices,
+            Ok(Err(err)) => {
+                eprintln!("[devices] could not list devices: {err}");
+                continue;
+            }
+            Err(_) => continue,
+        };
+        let changed = ctx.with_state(|st| {
+            if st.devices == devices {
+                return false;
+            }
+            st.devices = devices.clone();
+            if let Some(me) = st.self_entry_mut() {
+                me.devices = devices;
+            }
+            true
+        });
+        if changed == Some(true) {
+            let _ = inventory_tx.send(InventoryChanged);
         }
     }
 }
@@ -419,7 +469,7 @@ struct Mesh {
     control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
     rtt_tx: watch::Sender<BTreeMap<String, f64>>,
     summary_rx: watch::Receiver<Option<StatsSummary>>,
-    procs_rx: mpsc::UnboundedReceiver<ProcessesChanged>,
+    inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
     deploy_tx: mpsc::UnboundedSender<PeerPrograms>,
 }
 
@@ -429,7 +479,7 @@ impl Mesh {
         start: MeshStart,
         rtt_tx: watch::Sender<BTreeMap<String, f64>>,
         summary_rx: watch::Receiver<Option<StatsSummary>>,
-        procs_rx: mpsc::UnboundedReceiver<ProcessesChanged>,
+        inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
         deploy_tx: mpsc::UnboundedSender<PeerPrograms>,
     ) -> Self {
         Mesh {
@@ -457,7 +507,8 @@ impl Mesh {
             control_rx: start.control_rx,
             rtt_tx,
             summary_rx,
-            procs_rx,
+            inventory_rx,
+
             deploy_tx,
         }
     }
@@ -476,7 +527,7 @@ impl Mesh {
                     }
                 }
                 Some(cmd) = self.control_rx.recv() => self.on_control(cmd).await,
-                Some(change) = self.procs_rx.recv() => self.on_processes_changed(change).await,
+                Some(InventoryChanged) = self.inventory_rx.recv() => self.on_inventory_changed().await,
                 _ = beat_tick.tick() => self.on_beat_tick().await,
                 event = self.receiver.next(), if self.subscribed => {
                     let ended = match event {
@@ -637,15 +688,22 @@ impl Mesh {
 
     /// This node's inventory as the node state has it now.
     fn own_inventory(&self) -> Inventory {
-        let (processes, service_endpoints) = self
+        let (processes, service_endpoints, devices) = self
             .ctx
-            .with_state(|st| (st.processes.clone(), st.service_endpoints.clone()))
+            .with_state(|st| {
+                (
+                    st.processes.clone(),
+                    st.service_endpoints.clone(),
+                    st.devices.clone(),
+                )
+            })
             .unwrap_or_default();
         Inventory {
             node: self.node.clone(),
             node_id: self.ctx.node_id.clone(),
             processes,
             service_endpoints,
+            devices,
             sent_unix_ms: 0,
         }
     }
@@ -657,16 +715,9 @@ impl Mesh {
         }
     }
 
-    async fn on_processes_changed(&mut self, (processes, service_endpoints): ProcessesChanged) {
-        let inventory = Inventory {
-            node: self.node.clone(),
-            node_id: self.ctx.node_id.clone(),
-            processes,
-            service_endpoints,
-            sent_unix_ms: 0,
-        };
-        self.broadcast(&Message::Inventory(inventory), Duration::from_millis(500))
-            .await;
+    async fn on_inventory_changed(&mut self) {
+        let inventory = Message::Inventory(self.own_inventory());
+        self.broadcast(&inventory, Duration::from_millis(500)).await;
     }
 
     async fn on_beat_tick(&mut self) {
@@ -925,10 +976,11 @@ impl Mesh {
 
     fn on_inventory(&mut self, inventory: Inventory) {
         println!(
-            "[gossip-rx] node={} inventory processes={} services={}",
+            "[gossip-rx] node={} inventory processes={} services={} devices={}",
             inventory.node,
             inventory.processes.len(),
-            inventory.service_endpoints.len()
+            inventory.service_endpoints.len(),
+            inventory.devices.len()
         );
         let _ = self.deploy_tx.send(PeerPrograms {
             node: inventory.node.clone(),

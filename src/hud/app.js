@@ -1800,15 +1800,48 @@ const TOUR_STEPS = [
   { idx: 2, code: "PRC", ring: 3, rowKey: "PRB", title: "PROCESS LOAD & EXEC FROM BLOB" },
   { idx: 3, code: "NET", ring: 1, rowKey: "NET", title: "QUIC TRANSPORT & RTT MATRIX" },
   { idx: 4, code: "KVS", ring: 2, rowKey: "MEM", title: "KEY-VALUE STORE & PAGINATION" },
-  { idx: 5, code: "A/B", ring: 4, rowKey: "DSK", title: "A-TO-B DEPLOYMENT SLOT ROLLBACK" }
+    { idx: 5, code: "A/B", ring: 4, rowKey: "DSK", title: "A-TO-B DEPLOYMENT SLOT ROLLBACK" },
+  { idx: 6, code: "DEV", ring: 3, rowKey: "DEV", title: "CONNECTED DEVICES" }
 ];
+
+// Devices a node reports in its inventory, as short codes for the top overlay.
+const DEVICE_CODES = {
+  camera: "CAM", microphone: "MIC", speaker: "SPK", keyboard: "KBD", pointer: "PTR", display: "DSP",
+  printer: "PRN", storage: "STO", bluetooth: "BT", gamepad: "PAD", other: "DEV"
+};
+const DEVICE_LIST_ROWS = 8;
+const DEVICE_LIST_COLS = 2;
+
+// The focused node's devices: a header line, then two devices per line.
+function renderDeviceLines(target, isFocusStep) {
+  const devices = Array.isArray(target.devices) ? target.devices : [];
+  const codeCls = isFocusStep ? "focus" : "dim";
+  const lines = [
+    `${isFocusStep ? `<span class="focus">▸</span> ` : "  "}<span class="${codeCls}">DEVICES</span> <span class="hi">${target.node}</span> <span class="dim">(${devices.length} connected)</span>`
+  ];
+  if (devices.length === 0) {
+    lines.push(`<span class="dim">  no devices reported yet</span>`);
+    return lines;
+  }
+  const cell = (d) =>
+    `<span class="${codeCls}">${padR(DEVICE_CODES[d.kind] || "DEV", 4)}</span><span class="hi">${padR(d.name, 40)}</span> <span class="dim">${padR(d.bus || "", 10)}</span>`;
+  const shown = devices.slice(0, DEVICE_LIST_ROWS * DEVICE_LIST_COLS);
+  for (let i = 0; i < shown.length; i += DEVICE_LIST_COLS) {
+    lines.push("  " + shown.slice(i, i + DEVICE_LIST_COLS).map(cell).join("  "));
+  }
+  if (devices.length > shown.length) {
+    lines.push(`<span class="dim">  +${devices.length - shown.length} more</span>`);
+  }
+  return lines;
+}
 let activeTourStep = 0;
 let tourStepChangedNode = true;
 
 function buildTourSequence() {
   const nodes = meshState.nodes || [];
   if (nodes.length === 0) return [];
-  // Whole-globe system tour: visits each node and steps through all 6 probe capabilities
+  // Whole-globe system tour: visits each node and steps through the 5 probe checks, the
+  // network and the devices connected to it
   // while keeping the camera zoomed out on the full globe.
   const seq = [];
   for (const n of nodes) {
@@ -2158,7 +2191,8 @@ function renderTopShellStats() {
   });
 
   const hudEl = document.getElementById("node-top-hud");
-  hudEl.innerHTML = [...overallRows, "", headerLine, ...nodeRows].join("\n");
+    const deviceLines = renderDeviceLines(target, stepMeta.code === "DEV");
+  hudEl.innerHTML = [...overallRows, "", headerLine, ...nodeRows, "", ...deviceLines].join("\n");
 
   renderTourClosedCaptions({
     nodes,
@@ -2251,28 +2285,45 @@ function renderTourClosedCaptions(ctx) {
   let line2 = "";
   switch (stepMeta.idx) {
     case 0: // MSH: Encrypted Gossip Mesh
-      line1 = `<span class="focus">[1/6 MESH &amp; GOSSIP]</span> Node <span class="hi">${target.node}</span> joined private channel <span class="focus">${channelName}</span> <span class="dim">[${channelFp || "live"}]</span> using Argon2id KDF + XChaCha20-Poly1305 encrypted gossip frames.`;
+      line1 = `<span class="focus">[1/${TOUR_STEPS.length} MESH &amp; GOSSIP]</span> Node <span class="hi">${target.node}</span> joined private channel <span class="focus">${channelName}</span> <span class="dim">[${channelFp || "live"}]</span> using Argon2id KDF + XChaCha20-Poly1305 encrypted gossip frames.`;
       line2 = `Authenticated peer allowlist: <span class="hi">${nodes.length}/${expectedPeers} nodes online</span> across <span class="hi">${activeLinks}/${expectedLinks} encrypted links</span> (beat <span class="hi">#${target.counter || 0}</span> via ${pathMode} <span class="hi">${cleanIp}</span>).`;
       break;
     case 1: // BLB: SHA-256 Content-Addressed Blob Store
-      line1 = `<span class="focus">[2/6 BLOB STORE]</span> Stored the cross-platform probe program in the store on <span class="hi">${target.node}</span> (<span class="hi">${blobKeys} blobs</span>, <span class="hi">${fmtBytesShort(blobBytes)}</span> in the store).`;
+      line1 = `<span class="focus">[2/${TOUR_STEPS.length} BLOB STORE]</span> Stored the cross-platform probe program in the store on <span class="hi">${target.node}</span> (<span class="hi">${blobKeys} blobs</span>, <span class="hi">${fmtBytesShort(blobBytes)}</span> in the store).`;
       line2 = `Verified SHA-256 digest <span class="focus">sha256:${shortSha}</span> at <span class="dim">${casPath}</span> and published <span class="hi">${shortTicket}</span> for peer replication.`;
       break;
     case 2: // PRC: Process Load & Exec from Blob Store
-      line1 = `<span class="focus">[3/6 PROCESS LOAD &amp; EXEC]</span> Loaded verified executable from SHA-256 blob store (<span class="hi">sha256:${shortSha}</span>) &rarr; staged to <span class="hi">${stagedPath}</span>.`;
+      line1 = `<span class="focus">[3/${TOUR_STEPS.length} PROCESS LOAD &amp; EXEC]</span> Loaded verified executable from SHA-256 blob store (<span class="hi">sha256:${shortSha}</span>) &rarr; staged to <span class="hi">${stagedPath}</span>.`;
       line2 = `Supervisor spawned <span class="focus">${programName}</span> (<span class="hi">PID ${processPid}</span>, status=<span class="hi">RUNNING</span>) from its blob — running <span class="hi">dialtone probe</span> every 5s.`;
       break;
     case 3: // NET: QUIC Transport & RTT Matrix
-      line1 = `<span class="focus">[4/6 QUIC TRANSPORT &amp; RTT]</span> Probing pairwise QUIC connection paths and monotonic RTT echoes from <span class="hi">${target.node}</span> (stripping non-routable tailnet IPs).`;
+      line1 = `<span class="focus">[4/${TOUR_STEPS.length} QUIC TRANSPORT &amp; RTT]</span> Probing pairwise QUIC connection paths and monotonic RTT echoes from <span class="hi">${target.node}</span> (stripping non-routable tailnet IPs).`;
       line2 = `Live peer latencies from <span class="hi">${target.node}</span>: <span class="focus">${peerRttEntries}</span> (mesh avg <span class="hi">${avgRtt.toFixed(1)}ms ±${avgJitter.toFixed(1)}ms</span>).`;
       break;
     case 4: // KVS: Distributed Key-Value Store
-      line1 = `<span class="focus">[5/6 KEY-VALUE STORE]</span> Probe process writing a live probe record to key <span class="focus">${kvKey}</span> (<span class="hi">${kvKeys} total KV records</span>).`;
+      line1 = `<span class="focus">[5/${TOUR_STEPS.length} KEY-VALUE STORE]</span> Probe process writing a live probe record to key <span class="focus">${kvKey}</span> (<span class="hi">${kvKeys} total KV records</span>).`;
       line2 = `Verified bounded cursor pagination (<span class="hi">paginate_kv_records</span>) on cycle <span class="hi">#${cycleNum}</span>: <span class="dim">{ sha_blobs: true, processes: true, mesh: true, ab_rollback: true, pid: ${processPid} }</span>.`;
       break;
+        case 6: { // DEV: devices connected to the node, from its inventory
+      const devs = Array.isArray(target.devices) ? target.devices : [];
+      const counts = {};
+      for (const d of devs) counts[d.kind] = (counts[d.kind] || 0) + 1;
+      const summary = Object.entries(counts)
+        .map(([kind, n]) => `<span class="hi">${n}</span> ${kind}${n > 1 ? "s" : ""}`)
+        .join(", ");
+      const source = target.os === "macos" ? "system_profiler" : (target.os === "windows" ? "Get-PnpDevice" : "sysfs");
+      const featured = devs
+        .filter(d => ["camera", "microphone", "speaker", "keyboard", "pointer", "printer", "gamepad"].includes(d.kind))
+        .slice(0, 4)
+        .map(d => `<span class="hi">${d.name}</span>`)
+        .join(" • ");
+      line1 = `<span class="focus">[7/${TOUR_STEPS.length} CONNECTED DEVICES]</span> Node <span class="hi">${target.node}</span> lists <span class="hi">${devs.length} devices</span> via ${source}${summary ? ": " + summary : " (none reported yet)"}.`;
+      line2 = `${featured ? featured + ". " : ""}Devices travel in the node's signed inventory: listed every 60s and gossiped when they change.`;
+      break;
+    }
     case 5: // A/B: Verified A-to-B Deployment Slot Rollback
     default:
-      line1 = `<span class="focus">[6/6 A-TO-B SLOT ROLLBACK]</span> Executed side-effect-free <span class="hi">plan_rollback</span> preview between staged deployment <span class="hi">Slot ${prevSlot}</span> and <span class="hi">Slot ${activeSlot}</span> on <span class="hi">${target.node}</span>.`;
+      line1 = `<span class="focus">[6/${TOUR_STEPS.length} A-TO-B SLOT ROLLBACK]</span> Executed side-effect-free <span class="hi">plan_rollback</span> preview between staged deployment <span class="hi">Slot ${prevSlot}</span> and <span class="hi">Slot ${activeSlot}</span> on <span class="hi">${target.node}</span>.`;
       line2 = `Re-verified SHA-256 digests of both slot binaries on disk and atomically flipped active slot <span class="focus">Slot ${prevSlot} &rarr; Slot ${activeSlot}#${cycleNum}</span> (<span class="hi">probe ${passCnt}/${totCnt} OK</span>).`;
       break;
   }
@@ -2614,7 +2665,7 @@ function renderFrame(nowMs) {
   prevTimeMs = nowMs;
   const elapsed = nowMs / 1000;
 
-  // Advance endless 6-step system tour loop when playing (steady overhead geospatial stop per node, no camera zoom pumping)
+  // Advance endless system tour loop when playing (steady overhead geospatial stop per node, no camera zoom pumping)
   const stepDwellMs = Math.max(2600, Math.round(cfgTourDwellMs * 0.48));
   const cycleMs = (tourStepChangedNode ? cfgTourFlightMs : 0) + stepDwellMs;
   if (tourPlaying && !dragging && (nowMs - lastTourSwitchMs) >= cycleMs) {

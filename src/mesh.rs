@@ -1575,9 +1575,13 @@ pub struct Beat {
     pub observed_remote_addrs: Vec<String>,
     #[serde(default)]
     pub tailnet_used: bool,
+    /// The node's devices, from its latest inventory (never sent in a beat).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<crate::devices::Device>,
 }
 
-/// A node's inventory: the programs it runs and the services it offers. Sent when it
+/// A node's inventory: the programs it runs, the services it offers and the devices
+/// connected to it. Sent when it
 /// changes, when a neighbor joins and with every summary, never in plain beats.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
@@ -1587,6 +1591,9 @@ pub struct Inventory {
     pub processes: Vec<crate::service::ProcessSpec>,
     #[serde(default)]
     pub service_endpoints: Vec<Service>,
+    /// Cameras, microphones, keyboards and other devices connected to the node.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<crate::devices::Device>,
     #[serde(default)]
     pub sent_unix_ms: u64,
 }
@@ -1657,6 +1664,7 @@ impl Message {
                 b.sent_unix_ms = sent_unix_ms;
                 b.processes.clear();
                 b.service_endpoints.clear();
+                b.devices.clear();
             }
             Message::Inventory(i) => {
                 i.sent_unix_ms = sent_unix_ms;
@@ -1972,6 +1980,7 @@ pub fn merge_beat(nodes: &mut Vec<Beat>, mut beat: Beat) {
         // Inventory arrives in its own message; a beat never changes it.
         beat.processes = std::mem::take(&mut existing.processes);
         beat.service_endpoints = std::mem::take(&mut existing.service_endpoints);
+        beat.devices = std::mem::take(&mut existing.devices);
         *existing = beat;
     } else {
         if beat.kind == "rtt_echo" {
@@ -1987,6 +1996,7 @@ pub fn merge_inventory(nodes: &mut [Beat], inventory: &Inventory) -> bool {
         Some(node) => {
             node.processes = inventory.processes.clone();
             node.service_endpoints = inventory.service_endpoints.clone();
+            node.devices = inventory.devices.clone();
             true
         }
         None => false,
@@ -2123,6 +2133,7 @@ pub async fn verify_live_gossip_exchange(
         iroh_transport: build_diagnostics(&config, &addr_a, None, &id_a.to_string()),
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
+        devices: Vec::new(),
         geo_location: None,
         probe: None,
         store: None,
@@ -2178,6 +2189,7 @@ pub async fn verify_live_gossip_exchange(
         iroh_transport: build_diagnostics(&config, &addr_b, None, &id_b.to_string()),
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
+        devices: Vec::new(),
         geo_location: None,
         probe: None,
         store: None,
@@ -2353,6 +2365,7 @@ mod tests {
             iroh_transport: diag,
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
+            devices: Vec::new(),
             geo_location: None,
             probe: None,
             store: None,
@@ -2413,6 +2426,7 @@ mod tests {
             ),
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
+            devices: Vec::new(),
             geo_location: None,
             probe: None,
             store: None,
@@ -2532,6 +2546,7 @@ mod tests {
             node_id: beat.node_id.clone(),
             processes,
             service_endpoints: Vec::new(),
+            devices: Vec::new(),
             sent_unix_ms: 0,
         });
         let Message::Inventory(opened) =
@@ -2590,6 +2605,12 @@ mod tests {
             node_id: beat.node_id.clone(),
             processes: vec![spec],
             service_endpoints: Vec::new(),
+            devices: vec![crate::devices::Device {
+                kind: "camera".to_string(),
+                name: "Desk Cam".to_string(),
+                bus: "usb".to_string(),
+                detail: String::new(),
+            }],
             sent_unix_ms: 0,
         };
         assert!(Message::Inventory(inventory.clone())
@@ -2606,13 +2627,24 @@ mod tests {
         merge_beat(&mut nodes, next);
         assert_eq!(nodes[0].counter, 2);
         assert_eq!(nodes[0].processes.len(), 1);
+        assert_eq!(nodes[0].devices[0].name, "Desk Cam");
+        // A beat never carries devices on the wire.
+        let mut stuffed = beat.clone();
+        stuffed.devices = nodes[0].devices.clone();
+        let opened = open_message(
+            &seal_message(&Message::Beat(stuffed), &keys, &alice).unwrap(),
+            &keys,
+        )
+        .unwrap();
+        assert!(opened.into_beat().unwrap().devices.is_empty());
         // An empty inventory clears it.
         let cleared = Inventory {
             processes: Vec::new(),
+            devices: Vec::new(),
             ..inventory
         };
         merge_inventory(&mut nodes, &cleared);
-        assert!(nodes[0].processes.is_empty());
+        assert!(nodes[0].processes.is_empty() && nodes[0].devices.is_empty());
     }
 
     #[test]
@@ -2760,6 +2792,7 @@ mod tests {
             iroh_transport: diag,
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
+            devices: Vec::new(),
             geo_location: None,
             probe: None,
             store: Some(StoreStats {
@@ -2914,6 +2947,7 @@ mod tests {
             iroh_transport: diag,
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
+            devices: Vec::new(),
             geo_location: None,
             probe: None,
             store: None,

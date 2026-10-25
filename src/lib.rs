@@ -1,6 +1,7 @@
 pub mod api;
 pub mod blob;
 pub mod deploy;
+pub mod devices;
 pub mod h3_land;
 pub mod hud;
 pub mod mesh;
