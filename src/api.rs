@@ -801,88 +801,137 @@ pub fn serve_http_blocking(
     Ok(())
 }
 
-fn read_http_request(stream: &mut TcpStream) -> Result<Option<(String, String)>, (u16, String)> {
+/// Largest request head (request line + headers) the API accepts.
+pub const MAX_HTTP_HEAD_BYTES: usize = 64 * 1024;
+/// Most headers a request may carry.
+pub const MAX_HTTP_HEADERS: usize = 64;
+
+/// One parsed API request. Header names are lower-case; the query is percent-decoded.
+struct Request {
+    method: String,
+    path: String,
+    query: HashMap<String, String>,
+    headers: HashMap<String, String>,
+    body: String,
+}
+
+type HttpError = (u16, String);
+
+fn bad_request(msg: impl Into<String>) -> HttpError {
+    (400, msg.into())
+}
+
+/// Read and parse one request with httparse. Rejects what the API never needs instead of
+/// guessing: chunked or any other `Transfer-Encoding`, duplicate or conflicting
+/// `Content-Length`, bodies cut short, non-UTF-8 bodies and oversize heads or bodies.
+fn read_request<R: Read>(stream: &mut R) -> Result<Option<Request>, HttpError> {
     let mut buf = Vec::with_capacity(8192);
     let mut chunk = [0u8; 8192];
-    let header_end = loop {
-        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            break pos;
+    loop {
+        let mut header_slots = [httparse::EMPTY_HEADER; MAX_HTTP_HEADERS];
+        let mut parsed = httparse::Request::new(&mut header_slots);
+        let status = match parsed.parse(&buf) {
+            Ok(status) => status,
+            Err(httparse::Error::TooManyHeaders) => {
+                return Err((431, format!("more than {MAX_HTTP_HEADERS} headers")))
+            }
+            Err(e) => return Err(bad_request(format!("malformed request: {e}"))),
+        };
+        if let httparse::Status::Complete(head_len) = status {
+            if head_len > MAX_HTTP_HEAD_BYTES {
+                return Err((431, "HTTP header exceeds 64 KiB limit".to_string()));
+            }
+            let method = parsed.method.unwrap_or("GET").to_string();
+            let target = parsed.path.unwrap_or("/");
+            let (path, query_str) = target.split_once('?').unwrap_or((target, ""));
+            let path = path.to_string();
+            let query = parse_query(query_str);
+
+            let mut headers = HashMap::new();
+            let mut content_length: Option<usize> = None;
+            for h in parsed.headers.iter() {
+                let name = h.name.to_ascii_lowercase();
+                let value = std::str::from_utf8(h.value)
+                    .map_err(|_| bad_request(format!("header {name} is not UTF-8")))?
+                    .trim()
+                    .to_string();
+                match name.as_str() {
+                    "transfer-encoding" => {
+                        return Err((501, "Transfer-Encoding is not supported".to_string()))
+                    }
+                    "content-length" => {
+                        let n = value
+                            .parse::<usize>()
+                            .map_err(|_| bad_request("invalid Content-Length"))?;
+                        if content_length.is_some_and(|prev| prev != n) {
+                            return Err(bad_request("conflicting Content-Length headers"));
+                        }
+                        content_length = Some(n);
+                    }
+                    _ => {}
+                }
+                headers.insert(name, value);
+            }
+
+            let content_length = content_length.unwrap_or(0);
+            if content_length > MAX_HTTP_BODY_BYTES {
+                return Err((
+                    413,
+                    format!(
+                        "HTTP request body exceeds maximum size of {MAX_HTTP_BODY_BYTES} bytes"
+                    ),
+                ));
+            }
+            let mut body = buf.split_off(head_len);
+            while body.len() < content_length {
+                let to_read = (content_length - body.len()).min(chunk.len());
+                let n = stream
+                    .read(&mut chunk[..to_read])
+                    .map_err(|e| bad_request(e.to_string()))?;
+                if n == 0 {
+                    return Err(bad_request("request body shorter than Content-Length"));
+                }
+                body.extend_from_slice(&chunk[..n]);
+            }
+            body.truncate(content_length);
+            let body = String::from_utf8(body).map_err(|_| bad_request("body is not UTF-8"))?;
+            return Ok(Some(Request {
+                method,
+                path,
+                query,
+                headers,
+                body,
+            }));
         }
-        if buf.len() >= 65536 {
-            return Err((400, "HTTP header exceeds 64 KiB limit".to_string()));
+
+        if buf.len() >= MAX_HTTP_HEAD_BYTES {
+            return Err((431, "HTTP header exceeds 64 KiB limit".to_string()));
         }
-        let n = stream.read(&mut chunk).map_err(|e| (400, e.to_string()))?;
+        let n = stream
+            .read(&mut chunk)
+            .map_err(|e| bad_request(e.to_string()))?;
         if n == 0 {
             if buf.is_empty() {
                 return Ok(None);
             }
-            break buf.len();
+            return Err(bad_request("connection closed mid-request"));
         }
         buf.extend_from_slice(&chunk[..n]);
-    };
-
-    let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
-    let body_start = (header_end + 4).min(buf.len());
-    let mut body_bytes = buf[body_start..].to_vec();
-
-    let mut content_length = 0usize;
-    for line in head.lines().skip(1) {
-        if let Some((k, v)) = line.split_once(':') {
-            if k.trim().eq_ignore_ascii_case("content-length") {
-                content_length = v.trim().parse::<usize>().unwrap_or(0);
-            }
-        }
     }
-
-    if content_length > MAX_HTTP_BODY_BYTES {
-        return Err((
-            413,
-            format!("HTTP request body exceeds maximum size of {MAX_HTTP_BODY_BYTES} bytes"),
-        ));
-    }
-
-    while body_bytes.len() < content_length {
-        let remaining = content_length - body_bytes.len();
-        let to_read = remaining.min(chunk.len());
-        let n = stream
-            .read(&mut chunk[..to_read])
-            .map_err(|e| (400, e.to_string()))?;
-        if n == 0 {
-            break;
-        }
-        body_bytes.extend_from_slice(&chunk[..n]);
-    }
-
-    let body = String::from_utf8_lossy(&body_bytes).to_string();
-    Ok(Some((head, body)))
 }
 
 fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Result<(), String> {
     let _ = stream.set_read_timeout(Some(HTTP_IO_TIMEOUT));
     let _ = stream.set_write_timeout(Some(HTTP_IO_TIMEOUT));
 
-    let (head, body_owned) = match read_http_request(&mut stream) {
-        Ok(Some(v)) => v,
+    let req = match read_request(&mut stream) {
+        Ok(Some(req)) => req,
         Ok(None) => return Ok(()),
         Err((status, msg)) => return write_json(&mut stream, status, &json!({ "error": msg })),
     };
-    let body_part = body_owned.as_str();
-    let mut lines = head.lines();
-    let request_line = lines.next().unwrap_or_default();
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("GET");
-    let full_target = parts.next().unwrap_or("/");
-    let (path, query_str) = full_target.split_once('?').unwrap_or((full_target, ""));
-    let query = parse_query(query_str);
+    let (method, path) = (req.method.as_str(), req.path.as_str());
 
-    let mut headers = HashMap::new();
-    for line in lines {
-        if let Some((k, v)) = line.split_once(':') {
-            headers.insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
-        }
-    }
-
-    if let Err(err) = validate_local_http_request(method, &headers) {
+    if let Err(err) = validate_local_http_request(method, &req.headers) {
         return write_json(&mut stream, 403, &json!({ "error": err }));
     }
 
@@ -904,7 +953,15 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
     // Routes write their response into a buffer while they hold the node-state lock; the
     // socket write happens after the lock is released, so a slow client never stalls the mesh.
     let mut out = Vec::new();
-    let routed = route_request(&mut out, method, path, &query, &headers, body_part, state);
+    let routed = route_request(
+        &mut out,
+        method,
+        path,
+        &req.query,
+        &req.headers,
+        &req.body,
+        state,
+    );
     stream.write_all(&out).map_err(|e| e.to_string())?;
     routed
 }
@@ -1700,16 +1757,11 @@ fn validate_local_http_request(
     Ok(())
 }
 
+/// Percent-decode a query string (`+` is a space). A repeated key keeps its last value.
 fn parse_query(query: &str) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for pair in query.split('&') {
-        if pair.is_empty() {
-            continue;
-        }
-        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-        map.insert(k.to_string(), v.to_string());
-    }
-    map
+    form_urlencoded::parse(query.as_bytes())
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect()
 }
 
 fn write_json<W: Write, T: Serialize>(
@@ -1873,6 +1925,65 @@ mod tests {
         assert!(!body.contains("__API_TOKEN__") && !body.contains("__CSP_NONCE__"));
         assert!(head.contains("X-Content-Type-Options: nosniff"));
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    fn parse(raw: &str) -> Result<Option<Request>, HttpError> {
+        read_request(&mut std::io::Cursor::new(raw.as_bytes().to_vec()))
+    }
+
+    #[test]
+    fn request_parser_decodes_queries_and_reads_exact_bodies() {
+        let req = parse(
+            "POST /api/x?peer-id=%3Cnode%20a%3E&q=a+b HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nbodyEXTRA",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!((req.method.as_str(), req.path.as_str()), ("POST", "/api/x"));
+        assert_eq!(req.query["peer-id"], "<node a>");
+        assert_eq!(req.query["q"], "a b");
+        assert_eq!(req.headers["host"], "h");
+        assert_eq!(req.body, "body");
+        assert!(
+            parse("").unwrap().is_none(),
+            "an idle connection is not an error"
+        );
+    }
+
+    #[test]
+    fn request_parser_rejects_ambiguous_or_oversize_requests() {
+        let status = |raw: &str| parse(raw).err().map(|(code, _)| code);
+        let chunked = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
+        assert_eq!(status(chunked), Some(501));
+        let conflicting = "POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nab";
+        assert_eq!(status(conflicting), Some(400));
+        assert_eq!(
+            status("POST / HTTP/1.1\r\nContent-Length: x\r\n\r\n"),
+            Some(400)
+        );
+        assert_eq!(
+            status("POST / HTTP/1.1\r\nContent-Length: 9\r\n\r\nshort"),
+            Some(400)
+        );
+        assert_eq!(
+            status("GET / HTTP/1.1\r\nHost: h\r\n"),
+            Some(400),
+            "head cut short"
+        );
+        assert_eq!(status("GET /\x01 HTTP/1.1\r\n\r\n"), Some(400));
+        let huge = format!(
+            "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_HTTP_BODY_BYTES + 1
+        );
+        assert_eq!(status(&huge), Some(413));
+        let many: String = (0..=MAX_HTTP_HEADERS)
+            .map(|i| format!("X-{i}: v\r\n"))
+            .collect();
+        assert_eq!(status(&format!("GET / HTTP/1.1\r\n{many}\r\n")), Some(431));
+        let long = format!(
+            "GET / HTTP/1.1\r\nX: {}\r\n\r\n",
+            "a".repeat(MAX_HTTP_HEAD_BYTES)
+        );
+        assert_eq!(status(&long), Some(431));
     }
 
     #[test]
