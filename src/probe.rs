@@ -149,10 +149,20 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
 
     // PUL: download every peer's latest probe blob over QUIC; the pull checks its SHA-256.
     let mut pulls = Vec::new();
+    let mut already_pulled = 0;
     for peer in &inputs.peers {
         let (Some(ticket), Some(store)) = (&peer.blob_ticket, &inputs.store) else {
             continue;
         };
+        // A ticket already pulled in an earlier run would be served from local data, so it
+        // proves nothing about the network; wait for the peer's next blob instead.
+        let already_here = crate::blob::parse_blob_ticket_uri(ticket)
+            .map(|(t, _)| inputs.blobs.has_data_blocking(t.hash()))
+            .unwrap_or(false);
+        if already_here {
+            already_pulled += 1;
+            continue;
+        }
         let started = Instant::now();
         let result = store.pull_blob(ticket, true);
         let ms = ms_since(started);
@@ -180,7 +190,9 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
     checks.push(ProbeCheck {
         code: "PUL".to_string(),
         ok: pulled == pulls.len(),
-        detail: if pulls.is_empty() {
+        detail: if pulls.is_empty() && already_pulled > 0 {
+            format!("no new blob from {already_pulled} peer(s) since the last run")
+        } else if pulls.is_empty() {
             "no peer blobs to pull yet".to_string()
         } else {
             let failed: Vec<&str> = pulls

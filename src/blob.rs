@@ -50,6 +50,8 @@ pub fn normalize_digest(raw: &str) -> Result<String, String> {
 const SHA256_TAG_PREFIX: &str = "sha256/";
 /// Tag pointing at the blob most recently added to the store.
 const LATEST_TAG: &str = "latest";
+/// How long the node's downloader waits to connect to a provider.
+const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How often unreferenced data (untagged partial downloads) is removed.
 const GC_INTERVAL: Duration = Duration::from_secs(600);
 
@@ -311,6 +313,15 @@ impl Blobs {
         block_on(self.get(digest))
     }
 
+    /// Whether the data for `hash` is complete in the store, named or not (a forgotten blob
+    /// stays until GC). A pull of such a blob would not touch the network.
+    pub fn has_data_blocking(&self, hash: Hash) -> bool {
+        matches!(
+            block_on(self.store.blobs().status(hash)),
+            Ok(BlobStatus::Complete { .. })
+        )
+    }
+
     pub fn has_blocking(&self, digest: &str) -> bool {
         block_on(self.has(digest))
     }
@@ -494,7 +505,14 @@ impl Store {
         memory_lookup: MemoryLookup,
         transport_config: IrohTransportConfig,
     ) -> Self {
-        let downloader = blobs.api().downloader(&endpoint);
+        // iroh-blobs gives a connection 1s by default; a relayed path or a high-Rtt link
+        // needs longer to handshake, and a pooled connection is reused across pulls.
+        let pool = iroh_blobs::util::connection_pool::Options {
+            connect_timeout: DOWNLOAD_CONNECT_TIMEOUT,
+            idle_timeout: Duration::from_secs(30),
+            ..Default::default()
+        };
+        let downloader = Downloader::new_with_opts(blobs.api(), &endpoint, pool);
         Store {
             endpoint,
             blobs,
