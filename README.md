@@ -2,7 +2,7 @@
 
 `dialtone` is a single-binary Rust + **Iroh 1.3** peer-to-peer mesh control plane, 3D tactical HUD & terminal `top` monitor, content-addressed blob store (`iroh-blobs`), and process supervisor. It runs without SSH, Git, or Tailscale/VPN runtime dependencies.
 
-This guide uses the project's [domain language](goal.md#domain-language): one word per concept (Node, NodeId, Peer, Mesh, Channel, Secret, Allowlist, Invite, Seed, Beat, Stats, Blob, Digest, Store, Ticket, Program, Process, Probe, HUD, API).
+This guide uses the project's [domain language](goal.md#domain-language): one word per concept (Node, NodeId, Peer, Mesh, Channel, Secret, Allowlist, Invite, Seed, Message, Beat, Inventory, Stats, Blob, Digest, Store, Ticket, Program, Process, Probe, HUD, API).
 
 ```text
 $ dialtone --help
@@ -267,7 +267,7 @@ If you are provisioning 2, 3, or more hosts via a setup script or SSH, you can p
 
 ### Step 4 — Verify Mesh Convergence
 
-Within a few seconds of starting, verify that all nodes are exchanging encrypted beats (`dialtone.iroh.envelope.v2`) and incrementing their `counter`:
+Within a few seconds of starting, verify that all nodes are exchanging encrypted messages (`dialtone.iroh.envelope.v4`) and incrementing their beat `counter`. All nodes must run the same envelope version, so upgrade a mesh together:
 
 ```bash
 # Check discovered peers and beat counters via the local HTTP API
@@ -286,10 +286,10 @@ Or open **`http://127.0.0.1:8788`** in your browser to view the live 3D topology
 **How the mesh is protected**
 
 - **Allowlist at the handshake.** Every QUIC connection (gossip and blobs, in and out) is closed right after the TLS handshake unless the remote NodeId is on the allowlist. `dialtone allowlist add/remove` edits `~/.dialtone/config.json`; a running node picks the change up within 5 seconds, no restart.
-- **Signed beats.** Each beat is signed with the sender's Key and encrypted with the channel keys. A node drops beats whose signature does not match the NodeId they claim, beats from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
-- **No process secrets on the wire.** Beats list each process without its `env` or `args`.
+- **Signed messages.** Nodes gossip four typed messages: a **Beat** every 5 seconds (liveness, stats, Rtt echoes), a **Summary** every 30 seconds, an **Echo** in reply to an Rtt probe, and an **Inventory** (the node's processes and services) when it changes, when a neighbor joins and with every summary. Each message is signed with the sender's Key and encrypted with the channel keys. A node drops messages whose signature does not match the NodeId they claim, messages from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
+- **No process secrets on the wire.** An inventory lists each process without its `env` or `args`.
 - **Deploys only from the allowlist.** A process offered for mesh deploy is pulled only from an allowlisted signer and an allowlisted blob provider, never a peer's probe program, and only once per (peer, digest). Blob pulls use the node's own endpoint, so the provider's allowlist decides.
-- **HUD.** The page carries no API token; a per-response Content-Security-Policy nonce lets only its own scripts run.
+- **HUD.** The page carries no API token; a per-response Content-Security-Policy nonce lets only its own scripts run. three.js and h3-js are compiled into the binary and served from `/hud/vendor/`, so the HUD loads nothing from the Internet.
 
 ### Unlock & Join the `"dialtone"` Channel (`join` & `secret`)
 
@@ -299,7 +299,7 @@ The `"dialtone"` channel (and any custom `--channel <name>`) is **secret-protect
 - **Argon2id Key Derivation (`v2`) & XChaCha20-Poly1305 Gossip Encryption**:
   1. `dialtone` derives three domain-separated 32-byte subkeys (`topic_id`, `auth_key`, `enc_key`) from `(channel, secret)` using **Argon2id** (`m=19456 KiB, t=2, p=1`).
   2. Only the derived subkey bundle (`derived_keys`) is persisted in `~/.dialtone/config.json` (`0600` permissions) — the plaintext secret is **never** written to disk. Any legacy `~/.dialtone2/config.json` is automatically migrated and scrubbed on startup.
-  3. Every `DialtoneBeat` broadcast over `iroh-gossip` is signed with `auth_key` (`channel_mac`) and encrypted with **XChaCha20-Poly1305** (`dialtone.iroh.envelope.v2`, random 24-byte nonce). Unencrypted or unauthenticated frames are dropped.
+  3. Every message broadcast over `iroh-gossip` is signed with the sender's Key and encrypted with `enc_key` using **XChaCha20-Poly1305** (`dialtone.iroh.envelope.v4`, random 24-byte nonce). Unencrypted or unsigned frames are dropped.
 - **Deny-by-Default Peer Allowlist (`allowlist`)**:
   - On the main `"dialtone"` channel, inbound peers are **denied by default** unless their `NodeId` is listed in the host's local `~/.dialtone/config.json` (`allowlist`), even if `--invite` is passed.
   - Manage the allowlist via CLI:
@@ -415,7 +415,7 @@ To preview or pipe service definitions for system-wide deployment:
 
 ## 6. Blob Store
 
-All blobs and executable payloads are stored by SHA-256 digest under `~/.dialtone/blobs/<2-hex-prefix>/<64-hex-digest>`. Uploads are staged to a temporary file, verified against SHA-256, and atomically renamed into the store.
+The store is an iroh-blobs `FsStore` in `~/.dialtone/blobs/` (`blobs.db`, `data/`). Every blob is named by its digest through the tag `sha256/<hex>`, which points at its BLAKE3 hash; tagged blobs are kept and garbage collection removes anything untagged (such as an interrupted download). Uploads are checked against their SHA-256 before they are added, and a pulled blob is checked against the ticket's digest before it is tagged. Blobs left in the old one-file-per-digest layout are imported the first time the node starts. A store belongs to one process: `dialtone hud` and one-shot runs next to a running node use a private temporary store.
 
 ### Store, Fetch & Verify Blobs via HTTP
 
@@ -492,9 +492,12 @@ curl -X POST http://127.0.0.1:8788/api/processes/blob \
 
 All `POST` routes require `Authorization: Bearer <token>` (or `X-Dialtone-Token: <token>`) matching `~/.dialtone/api-token`.
 
+Requests are parsed with `httparse`. The API refuses what it never needs: `Transfer-Encoding` (501), missing, duplicate or conflicting `Content-Length` values and bodies shorter than declared (400), bodies over 2 MiB (413), and request heads over 64 KiB or with more than 64 headers (431). Query values are percent-decoded.
+
 | Method & Path | Description |
 | :--- | :--- |
 | `GET /` | The HUD (served with a per-response Content-Security-Policy nonce) |
+| `GET /hud/...` | The HUD's static files (`app.js`, `style.css`, vendored three.js and h3-js) |
 | `GET /health` | `{"ok": true, "node": "..."}` |
 | `GET /api/config` (`/api/boot-status`) | Boot stages, mesh config (`derived_keys` redacted), store path |
 | `POST /api/mesh/join` | Join or switch the channel of the running node |
@@ -524,7 +527,7 @@ Old route names (`/api/gossip`, `/api/artifacts/blob`, `/api/blobs/*`, `/api/e2e
 | `DIALTONE_SECRET` (`DIALTONE_SECRET_KEY`; old: `DIALTONE_PASSWORD`) | *(unset)* | Channel secret used to derive Argon2id `v2` channel keys on boot |
 | `~/.dialtone/config.json` | — | Host-local mesh config (`0600`): Argon2id `derived_keys` (no plaintext secret), `seeds`, `allowlist`, `used_invite_nonces`, and supervised process specs |
 | `~/.dialtone/api-token` | — | Auto-generated 256-bit local HTTP control API bearer token (`0600`) |
-| `~/.dialtone/blobs/` | — | SHA-256 Content-Addressed Blob Store (`<2-hex>/<64-hex>`) |
+| `~/.dialtone/blobs/` | — | Blob store (iroh-blobs `FsStore`; blobs named by `sha256/<hex>` tags) |
 | `~/.dialtone/run/` | — | Staged `0755` executables spawned by the blob process supervisor |
 
 ---

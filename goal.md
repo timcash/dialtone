@@ -18,12 +18,14 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Allowlist** | NodeIds permitted in the mesh | `allowlist` | allowed endpoint ids, ACL |
 | **Invite** | Signed, expiring, single-use join token | `Invite`, `invite` | bootstrap ticket, gossip ticket |
 | **Seed** | A peer address used to dial into the mesh | `Seed`, `seeds` | bootstrap peer |
-| **Beat** | The signed, encrypted status message a node gossips; `kind` is `beat` (5s), `summary` (30s) or `echo` (RTT reply) | `Beat`, `beat` | heartbeat, hb, ping, pulse |
+| **Message** | What nodes gossip on a channel, signed and encrypted: a Beat, Summary, Echo or Inventory | `Message` | frame, packet |
+| **Beat** | A node's status (stats, Rtt echoes), gossiped every 5s; a *Summary* adds the 30s rolling summary, an *Echo* answers an Rtt probe | `Beat`, `beat` | heartbeat, hb, ping, pulse |
+| **Inventory** | A node's processes and services, gossiped when they change | `Inventory` | manifest, catalog |
 | **Stats** | Measured machine numbers: cpu, mem, disk, net | `Stats`, `stats` | telemetry, host resources, metrics |
 | **Rtt** | Round-trip time between two nodes, in ms | `rtt_ms` | latency |
 | **Blob** | Immutable bytes named by a digest | `Blob`, `blob` | artifact, payload, sha blob |
 | **Digest** | A blob's name: `sha256:<hex>` | `digest` | sha, checksum; *hash* only for iroh's BLAKE3 `Hash` |
-| **Store** | A node's local blob storage (`~/.dialtone/blobs`) | `Store`, `store_dir` | cache, CAS, blob cache |
+| **Store** | A node's local blob storage (`~/.dialtone/blobs`, an iroh-blobs `FsStore`; each blob tagged `sha256/<hex>`) | `Blobs`, `Store`, `store_dir` | cache, CAS, blob cache |
 | **Ticket** | An iroh-blobs link to fetch a blob from a node | `ticket` | blob uri |
 | **Program** | A blob that can be executed | `Program`, `program` | binary, executable |
 | **Process** | A running program owned by the supervisor | `Process`, `ProcessSpec` | job, worker, subprocess, child, managed process |
@@ -36,6 +38,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Daemon** | The OS login service (launchd / systemd / Scheduled Task) that starts the node | `daemon` | — |
 | **HUD** | The node's local web UI | `hud` | dashboard, index page |
 | **API** | The node's local HTTP control surface on `127.0.0.1:8788` | `api` | control plane routes |
+| **Actor** | One task of the running node: Mesh, Stats, Supervisor, Links, Allowlist, Deploy | `actors.rs` | worker, loop |
 
 ### Code layout follows the words
 
@@ -50,6 +53,8 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | `deploy.rs` | Deploy, Slot, Daemon install |
 | `service.rs` | Service and service references (was `metadata.rs`) |
 | `api.rs` / `hud.rs` | API routes and node state / HUD page (was `http.rs`) |
+| `actors.rs` | The running node's actors and the channels between them |
+| `hud/` | The HUD's static files and vendored three.js / h3-js |
 
 ### Commands and routes use the words
 
@@ -67,18 +72,26 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 ## Current Work
 
-1. **Next — Phase 4 architecture** (see roadmap): split `run_node` into actors (Transport, Mesh, Stats, Supervisor,
-   Blob service, API), one persistent `FsStore` with SHA-256 tags and the node's downloader, a typed message enum
-   with inventory-on-change, an `httparse`/hyper API server, and the HUD as static files with vendored three.js /
-   h3-js.
-2. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
+1. **Next — candidates from the target architecture:** an explicit signed `Deploy` message instead of
+   inventory-driven auto-deploy; let iroh's address lookup find peers instead of gossiping all-peer seed lists and
+   re-joining every 5s; Rtt from iroh connection paths instead of broadcast echoes; the API reading `watch`
+   snapshots instead of locking node state.
+2. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
+   vendored three.js 0.179.1 and h3-js 4.4.0 (no CDN). The API parses requests with `httparse` and rejects
+   `Transfer-Encoding`, ambiguous `Content-Length` and oversize heads. One persistent iroh-blobs `FsStore` replaces
+   the SHA-256 file tree and the in-memory store: blobs are named by `sha256/<hex>` tags, GC removes untagged data,
+   the node's one downloader pulls and SHA-256-checks peers' blobs, and old-layout blobs are imported at start.
+   `run_node` boots the node and starts six actors (`actors.rs`: Mesh, Stats, Supervisor, Links, Allowlist,
+   Deploy) stopped by one `CancellationToken`. Gossip carries a typed `Message` (envelope v4: Beat, Summary, Echo,
+   Inventory); processes and services travel only in inventories, sent on change.
+3. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
    seeded node state (`dialtone hud` now serves live state); the deploy-plan, build-cache, build-decision, manifest,
    proof-validation, alert-ack, tiered-fetch, process-intent, install.sh, catalog, command-journal / rtcore UDP,
    cursor-job, key-lease, service-ref, systemd drop-in and peer-cache code; 22 API routes no caller used, including
    the one-frame `/ws` stub; the hand-written SHA-1 (now unneeded) and hex / base64 codecs (now the `hex` and
    `base64` crates, same accepted inputs). The self-test exercises only real behaviour. The HUD's non-working
    Init / Invite / Join actions became a panel of the CLI commands (the page carries no API token by design).
-3. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
+4. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
    **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
@@ -86,13 +99,13 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | # | Feature | What it does | Where it lives |
 |---|---------|--------------|----------------|
 | F1 | **Node & transport** | Persistent Key → NodeId, iroh endpoint presets (N0 / minimal / private mesh), relay / Pkarr DNS / DHT / mDNS policy, tailnet-address filtering, transport diagnostics | `node.rs` |
-| F2 | **Mesh membership** | Secret → Argon2id channel keys (topic, auth, enc), XChaCha20-Poly1305 beat envelopes, deny-by-default Allowlist, signed single-use Invites, Seeds, `~/.dialtone/config.json` | `mesh.rs`, run loop in `main.rs` |
+| F2 | **Mesh membership** | Secret → Argon2id channel keys (topic, auth, enc), signed typed messages in XChaCha20-Poly1305 envelopes, deny-by-default Allowlist, signed single-use Invites, Seeds, `~/.dialtone/config.json` | `mesh.rs`, Mesh actor in `actors.rs` |
 | F3 | **Beats, stats & Rtt** | 5s beats / 30s summaries, real cpu / mem / disk / net stats on macOS, Linux and Windows, spread + thrashing detection, echo Rtt → mesh Rtt matrix, public-IP / Rtt-cluster geo placement | `stats.rs`, `mesh.rs` |
-| F4 | **Blob store & tickets** | Store under `~/.dialtone/blobs` named by Digest, `blob share` / `blob pull` tickets over QUIC with digest re-check, per-node `store` stats in beats | `blob.rs` |
+| F4 | **Blob store & tickets** | iroh-blobs `FsStore` under `~/.dialtone/blobs` with `sha256/<hex>` tags and GC, `blob share` / `blob pull` tickets through the node's downloader with digest re-check, per-node `store` stats in beats | `blob.rs` |
 | F5 | **Supervisor & probe** | Stage programs from blobs, start / restart / stop processes, default `probe` program, the five-check Probe (`BLB` `KVS` `PRC` `MSH` `A/B`) | `supervisor.rs`, node state in `api.rs` |
 | F6 | **Deploy, slots & daemon install** | Deploy contract, A/B slot rollback, launchd / systemd `--user` / Scheduled Task daemon install | `deploy.rs` |
-| F7 | **Node runtime & API** | 5-stage boot, shared node state, API + WebSocket on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `api.rs` |
-| F8 | **HUD** | Embedded Three.js + H3 globe, `top`-style overlay, 6-step tour with captions, blob / process FX | `hud.rs`, `h3_land.rs` |
+| F7 | **Node runtime & API** | 5-stage boot, six actors with one shutdown token, shared node state, `httparse` API on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `actors.rs`, `api.rs` |
+| F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, 6-step tour with captions, blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
 | F9 | **Verification** | `self-test`, `mesh-test`, `probe`, unit + live iroh tests, `ci.sh` (zero-leak gate, domain-language gate, fmt, tests, live acceptance), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
 | F10 | **Services & records** | Service refs, Services, key leases, policies, Event / Alert / Log / Kv records with cursor pagination, proof validation | `service.rs`, `record.rs` |
 | F11 | **CLI & fixtures** | Argument parsing, `help`, and the `*-fixture` preview commands | `main.rs` |
@@ -156,7 +169,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 1. **Phase 1 — Security (critical 1-5) — done 2026-10-23:** handshake allowlist hook + live allowlist, Ed25519-signed payloads with counter check, remove env-flag auto-deploy (gate behind signed `Deploy`), stop gossiping `env`, HUD escaping / `textContent` / no templated token.
 2. **Phase 2 — Reliability — done 2026-10-23:** release the state lock before IO, ctrl-c shutdown + child process groups, re-subscribe backoff, no `?` in the loop, config parse errors fail loudly, stats unknowns as `None`, peers keyed by `NodeId` with TTL pruning.
 3. **Phase 3 — Cleanup — done 2026-10-25:** tiers A → B → C, fix or remove the HUD `/api/channel/*` buttons.
-4. **Phase 4 — Architecture:** actor split of `run_node`, FsStore + downloader, typed message enum + inventory-on-change, hyper/httparse server, HUD as static files with vendored JS.
+4. **Phase 4 — Architecture — done 2026-10-25:** actor split of `run_node`, FsStore + downloader, typed message enum + inventory-on-change, httparse server, HUD as static files with vendored JS.
 
 ## 0. Current Priority Goal: Authentic Stats, Inter-Host RTT, & 5s / 30s Summary Variability Beats
 
