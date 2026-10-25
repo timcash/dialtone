@@ -322,6 +322,35 @@ pub fn reap_stale_processes(_run_dir: &Path) -> usize {
     0
 }
 
+/// Delete staged programs in `run_dir` that no process named in `keep` uses. Copies deployed
+/// from peers live only in memory, so a restart leaves their files behind; ones still offered
+/// are staged again under the same name. Call at boot, after reaping, before staging.
+/// Returns how many files were deleted.
+pub fn sweep_run_dir(run_dir: &Path, keep: &[String]) -> usize {
+    // A staged file is `<name>-<12 hex>`, plus `.cmd` or `.exe` on Windows.
+    let staged_for = |file: &str, name: &str| {
+        let Some(rest) = file.strip_prefix(name).and_then(|r| r.strip_prefix('-')) else {
+            return false;
+        };
+        let hex = rest.trim_end_matches(".cmd").trim_end_matches(".exe");
+        hex.len() == 12 && hex.bytes().all(|b| b.is_ascii_hexdigit())
+    };
+    let mut deleted = 0;
+    for entry in fs::read_dir(run_dir).into_iter().flatten().flatten() {
+        let file = entry.file_name().to_string_lossy().to_string();
+        if file == CHILDREN_FILE || !entry.path().is_file() {
+            continue;
+        }
+        if keep.iter().any(|name| staged_for(&file, name)) {
+            continue;
+        }
+        if fs::remove_file(entry.path()).is_ok() {
+            deleted += 1;
+        }
+    }
+    deleted
+}
+
 #[derive(Debug)]
 pub struct Supervisor {
     children: HashMap<String, SupervisedChild>,
@@ -612,6 +641,42 @@ mod tests {
             libc::waitpid(child, std::ptr::null_mut(), 0);
         }
         assert!(!alive(child) && !alive(grandchild));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn boot_sweep_keeps_configured_programs_and_deletes_the_rest() {
+        let dir = env::temp_dir().join(format!("dialtone-sweep-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for f in [
+            "probe-b4b0317fed65",
+            "probe-b4b0317fed65.cmd",
+            "web-0123456789ab.exe",
+            "probe-slot-a-6d4605c87fb6",
+            "deploy-check-3eb500702822.cmd",
+            ".web-0123456789ab.tmp.42",
+            CHILDREN_FILE,
+        ] {
+            fs::write(dir.join(f), b"x").unwrap();
+        }
+        let keep = vec![PROBE_PROGRAM_NAME.to_string(), "web".to_string()];
+        assert_eq!(sweep_run_dir(&dir, &keep), 3);
+        let mut left: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            vec![
+                CHILDREN_FILE,
+                "probe-b4b0317fed65",
+                "probe-b4b0317fed65.cmd",
+                "web-0123456789ab.exe"
+            ]
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

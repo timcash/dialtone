@@ -585,8 +585,11 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     } else {
         Blobs::open(&blob_dir).await?
     };
-    if serve_http {
-        let run_dir = blob_dir.parent().unwrap_or(&blob_dir).join("run");
+    // Only the node that owns the state dir cleans its run dir: `hud` and one-shot runs may
+    // share it with a running node whose processes and programs must not be touched.
+    let owns_run_dir = serve_http && opts.action != "hud" && !opts.once;
+    let run_dir = blob_dir.parent().unwrap_or(&blob_dir).join("run");
+    if owns_run_dir {
         let reaped = dialtone::supervisor::reap_stale_processes(&run_dir);
         if reaped > 0 {
             println!("[supervisor] stopped {reaped} process tree(s) left by a previous run");
@@ -605,6 +608,14 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     // [BOOT 1/5] Local Runtime, Config & Stdout Logger
     // =========================================================================
     let mut saved_cfg = load_mesh_config(&config_path);
+    if owns_run_dir {
+        let mut keep: Vec<String> = saved_cfg.processes.iter().map(|p| p.name.clone()).collect();
+        keep.push(dialtone::supervisor::PROBE_PROGRAM_NAME.to_string());
+        let swept = dialtone::supervisor::sweep_run_dir(&run_dir, &keep);
+        if swept > 0 {
+            println!("[supervisor] deleted {swept} staged program(s) no process uses");
+        }
+    }
     if opts.channel == DEFAULT_CHANNEL_NAME && !saved_cfg.channel.trim().is_empty() {
         opts.channel = normalize_channel_name(Some(&saved_cfg.channel));
     }
