@@ -5,19 +5,15 @@ use std::process::{Child, Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 
-use crate::blob::{normalize_digest, read_blob};
+use crate::blob::{normalize_digest, Blobs};
 use crate::service::ProcessSpec;
 
-/// Materialize a verified blob (`sha256:<hex>`) from `store_dir` into an executable
-/// binary/script under `<store_dir>/../run/<name>-<short_hex>`, setting `0o755` permissions
+/// Materialize a verified blob (`sha256:<hex>`) from the store into an executable
+/// binary/script under `<store dir>/../run/<name>-<short_hex>`, setting `0o755` permissions
 /// on Unix and using atomic temp-file rename so running processes are never corrupted.
-pub fn stage_program(
-    store_dir: &Path,
-    name: &str,
-    digest: &str,
-) -> Result<(String, PathBuf), String> {
+pub fn stage_program(blobs: &Blobs, name: &str, digest: &str) -> Result<(String, PathBuf), String> {
     let normalized_sha = normalize_digest(digest)?;
-    let bytes = read_blob(store_dir, &normalized_sha)?;
+    let bytes = blobs.get_blocking(&normalized_sha)?;
     let short_hex = &normalized_sha
         .strip_prefix("sha256:")
         .unwrap_or(&normalized_sha)[..12];
@@ -29,6 +25,7 @@ pub fn stage_program(
         return Err(format!("invalid process name {name:?}"));
     }
 
+    let store_dir = blobs.dir();
     let run_dir = store_dir.parent().unwrap_or(store_dir).join("run");
     fs::create_dir_all(&run_dir)
         .map_err(|e| format!("create executable blob run dir {}: {e}", run_dir.display()))?;
@@ -87,17 +84,17 @@ pub fn probe_program_bytes() -> &'static [u8] {
     b":; while true; do if [ -n \"$APP_LISTEN\" ]; then \"$APP_BIN\" probe --listen \"$APP_LISTEN\"; fi; sleep 5; done; exit 0;\r\n@echo off\r\n:dialtone_probe_loop\r\nif defined APP_LISTEN \"%APP_BIN%\" probe --listen \"%APP_LISTEN%\"\r\nping -n 6 127.0.0.1 >NUL\r\ngoto dialtone_probe_loop\r\n"
 }
 
-/// Automatically store, verify, and stage the default cross-platform process blob in `store_dir`
+/// Automatically store, verify, and stage the default cross-platform process blob
 /// and ensure its `ProcessSpec` is registered in `specs`.
 pub fn ensure_probe_program(
-    store_dir: &Path,
+    blobs: &Blobs,
     specs: &mut Vec<ProcessSpec>,
     ticket_uri: Option<&str>,
 ) -> Result<ProcessSpec, String> {
     specs.retain(|p| p.name != OLD_PROBE_PROGRAM_NAME);
     let payload = probe_program_bytes();
-    let (digest, _) = crate::blob::put_blob(store_dir, payload, None)?;
-    let (verified_sha, staged_path) = stage_program(store_dir, PROBE_PROGRAM_NAME, &digest)?;
+    let digest = blobs.put_blocking(payload, None)?;
+    let (verified_sha, staged_path) = stage_program(blobs, PROBE_PROGRAM_NAME, &digest)?;
 
     let mut env_vars = vec![
         "DIALTONE_MESH_DEPLOY=1".to_string(),
@@ -519,7 +516,6 @@ impl Drop for Supervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blob::put_blob;
     use std::env;
     use std::time::Duration;
 
@@ -655,17 +651,16 @@ mod tests {
     fn supervisor_stages_verified_blob_and_respawns_on_crash() {
         let dir = env::temp_dir().join(format!("dialtone-blob-proc-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let blob_dir = dir.join("blobs");
-        fs::create_dir_all(&blob_dir).unwrap();
+        let blobs = Blobs::open_blocking(&dir.join("blobs")).unwrap();
 
         let script_bytes: &[u8] = if cfg!(windows) {
             b"@echo off\r\nping -n 30 127.0.0.1 >NUL\r\n"
         } else {
             b"#!/bin/sh\nsleep 30\n"
         };
-        let (digest, _) = put_blob(&blob_dir, script_bytes, None).unwrap();
+        let digest = blobs.put_blocking(script_bytes, None).unwrap();
         let (verified_sha, staged_path) =
-            stage_program(&blob_dir, "stats-blob-process", &digest).unwrap();
+            stage_program(&blobs, "stats-blob-process", &digest).unwrap();
         assert_eq!(verified_sha, digest);
         assert!(staged_path.exists());
 

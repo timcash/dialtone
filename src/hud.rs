@@ -14,7 +14,7 @@ pub(crate) fn render_hud(
     csp_nonce: &str,
 ) -> String {
     let peer_focus = selected_peer.unwrap_or(&state.node);
-    let (blob_keys, blob_bytes) = count_store(&state.store_dir);
+    let summary = state.blobs.summary();
     let initial_gossip = json!({
         "schema": "dialtone.gossip.v1",
         "mesh": "dialtone-iroh-gossip",
@@ -27,8 +27,8 @@ pub(crate) fn render_hud(
         "boot_stages": state.boot_stages,
         "mesh_config": masked_mesh_config(&state.mesh_config),
         "blob_stats": {
-            "blob_keys": blob_keys,
-            "blob_bytes": blob_bytes,
+            "blob_keys": summary.blob_keys,
+            "blob_bytes": summary.blob_bytes,
             "blob_fetches": state.blob_fetches.len(),
             "kv_keys": state.kv.len(),
             "installed_programs": state.installed_programs.len()

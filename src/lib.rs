@@ -223,7 +223,7 @@ pub async fn run_self_test() -> Result<SelfTestReport, String> {
         "node-alpha",
         "up",
         &addr.to_string(),
-        tmp_root.join("api-blobs"),
+        crate::blob::Blobs::open_blocking(&tmp_root.join("api-blobs"))?,
         received_beat.iroh_transport.clone(),
     )));
     let state_bg = state.clone();

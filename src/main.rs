@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dialtone::api::{
-    count_store, default_boot_stages, latest_digest, load_or_create_api_token, serve_http_blocking,
+    default_boot_stages, load_or_create_api_token, serve_http_blocking,
     validate_listen_addr_security, NodeState,
 };
-use dialtone::blob::{put_blob, Store};
+use dialtone::blob::{Blobs, Store};
 use dialtone::deploy::{install_persistent_os_daemon, render_os_service_unit};
 use dialtone::mesh::{
     allow_peer_in_config_with_addrs, build_mesh_rtt_matrix, cached_local_public_ip_geo,
@@ -418,6 +418,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
 }
 
 fn self_beat(
+    blobs: &Blobs,
     node: &str,
     node_id: &str,
     ticket: String,
@@ -425,8 +426,7 @@ fn self_beat(
     diag: IrohTransportDiagnostics,
 ) -> Beat {
     let resources = sample_stats(node, diag.bound_non_tailnet_ipv4.as_deref(), counter);
-    let blob_dir = default_store_dir();
-    let (blob_keys, blob_bytes) = count_store(&blob_dir);
+    let summary = blobs.summary();
     Beat {
         schema: BEAT_SCHEMA.to_string(),
         node: node.to_string(),
@@ -455,9 +455,9 @@ fn self_beat(
         geo_location: cached_local_public_ip_geo(),
         probe: None,
         store: Some(StoreStats {
-            blob_keys: blob_keys as u64,
-            blob_bytes,
-            latest_digest: latest_digest(&blob_dir),
+            blob_keys: summary.blob_keys as u64,
+            blob_bytes: summary.blob_bytes,
+            latest_digest: summary.latest_digest,
         }),
         sent_unix_ms: 0,
     }
@@ -596,6 +596,13 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let verbose_boot = serve_http || !opts.once;
     let config_path = default_config_path();
     let blob_dir = default_store_dir();
+    // `index` previews and one-shot runs may share the state dir with a running daemon,
+    // which owns the store; they get a private one instead.
+    let blobs = if opts.action == "index" || opts.once {
+        Blobs::open_or_private(&blob_dir).await?
+    } else {
+        Blobs::open(&blob_dir).await?
+    };
     if serve_http {
         let run_dir = blob_dir.parent().unwrap_or(&blob_dir).join("run");
         let reaped = dialtone::supervisor::reap_stale_processes(&run_dir);
@@ -704,7 +711,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             &opts.node,
             &opts.action,
             &opts.listen,
-            blob_dir.clone(),
+            blobs.clone(),
             placeholder_diag.clone(),
         );
         if let Some(ref explicit_tok) = opts.api_token {
@@ -740,7 +747,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
 
         for mut saved_proc in saved_cfg.processes.clone() {
             if let Ok((verified_sha, staged_path)) =
-                dialtone::supervisor::stage_program(&blob_dir, &saved_proc.name, &saved_proc.digest)
+                dialtone::supervisor::stage_program(&blobs, &saved_proc.name, &saved_proc.digest)
             {
                 saved_proc.digest = verified_sha;
                 saved_proc.path = staged_path.to_string_lossy().to_string();
@@ -757,7 +764,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         }
         if !opts.once {
             let _ = dialtone::supervisor::ensure_probe_program(
-                &blob_dir,
+                &blobs,
                 &mut runtime_state.processes,
                 None,
             );
@@ -766,6 +773,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
 
         if !opts.once {
             let mut boot_beat = self_beat(
+                &blobs,
                 &opts.node,
                 "initializing-endpoint",
                 "iroh-gossip-v1:booting".to_string(),
@@ -808,24 +816,22 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     // =========================================================================
     // [BOOT 3/5] Content-Addressed Blob Store (iroh-blobs)
     // =========================================================================
-    std::fs::create_dir_all(&blob_dir)
-        .map_err(|e| format!("create blob store {}: {e}", blob_dir.display()))?;
     let probe_bytes = format!("dialtone-store-ready-{}", opts.node);
-    let (probe_sha, _) = put_blob(&blob_dir, probe_bytes.as_bytes(), None)?;
+    let (probe_sha, _) = blobs.put(probe_bytes.as_bytes(), None).await?;
     update_boot_stage(
         &shared_state,
         3,
         "ready",
         format!(
             "Store active at {} (self-check {})",
-            blob_dir.display(),
+            blobs.dir().display(),
             &probe_sha[..18]
         ),
     );
     if verbose_boot {
         println!(
             "[BOOT 3/5] Content-Addressed Blob Store (iroh-blobs) ..... [READY] {} (stage blobs via Web UI or POST /api/blob)",
-            blob_dir.display()
+            blobs.dir().display()
         );
     }
 
@@ -858,24 +864,22 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let gossip = Gossip::builder()
         .max_message_size(65_536)
         .spawn(endpoint.clone());
-    let blobs_mem_store = iroh_blobs::store::mem::MemStore::new();
-    let blobs_proto = iroh_blobs::BlobsProtocol::new(&blobs_mem_store, None);
+    let blobs_proto = iroh_blobs::BlobsProtocol::new(blobs.api(), None);
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
         .accept(iroh_blobs::ALPN, blobs_proto)
         .spawn();
 
     if let Some(st_arc) = &shared_state {
-        let bridge = Store {
-            endpoint: endpoint.clone(),
-            store: blobs_mem_store.clone(),
-            memory_lookup: memory_lookup.clone(),
-            transport_config: opts.transport.clone(),
-            runtime_handle: tokio::runtime::Handle::current(),
-        };
+        let bridge = Store::new(
+            endpoint.clone(),
+            blobs.clone(),
+            memory_lookup.clone(),
+            opts.transport.clone(),
+        );
         let default_ticket = if !opts.once {
             bridge
-                .share_blob(&blob_dir, dialtone::supervisor::probe_program_bytes(), None)
+                .share_blob(dialtone::supervisor::probe_program_bytes(), None)
                 .ok()
                 .map(|r| r.ticket_uri)
         } else {
@@ -885,7 +889,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             st.store = Some(bridge);
             if !opts.once {
                 let _ = dialtone::supervisor::ensure_probe_program(
-                    &blob_dir,
+                    &blobs,
                     &mut st.processes,
                     default_ticket.as_deref(),
                 );
@@ -1021,8 +1025,14 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let mut last_echo_reply_mono_ms: std::collections::HashMap<String, u64> =
         std::collections::HashMap::new();
 
-    let mut initial_self_beat =
-        self_beat(&opts.node, &node_id, initial_ticket, 1, diagnostics.clone());
+    let mut initial_self_beat = self_beat(
+        &blobs,
+        &opts.node,
+        &node_id,
+        initial_ticket,
+        1,
+        diagnostics.clone(),
+    );
     initial_self_beat.kind = "summary".to_string();
     initial_self_beat.rtt_probe_requested = true;
 
@@ -1121,6 +1131,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             }
         }
         let _ = router.shutdown().await;
+        blobs.close().await;
         return Ok(());
     }
 
@@ -1294,6 +1305,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                     .to_text()
                     {
                         let mut proc_beat = self_beat(
+                            &blobs,
                             &opts.node,
                             &node_id,
                             current_ticket,
@@ -1410,7 +1422,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                     eprintln!("[beat] could not encode seed list: {e}");
                     String::new()
                 });
-                let mut self_beat = self_beat(&opts.node, &node_id, current_ticket, counter, diag.clone());
+                let mut self_beat = self_beat(&blobs, &opts.node, &node_id, current_ticket, counter, diag.clone());
                 self_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
 
                 let is_summary = counter <= 2 || counter.is_multiple_of(SUMMARY_EVERY_N_BEATS);
@@ -1531,7 +1543,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                             eprintln!("[beat] could not encode seed list: {e}");
                             String::new()
                         });
-                        let mut self_beat = self_beat(&opts.node, &node_id, current_ticket, counter, diag);
+                        let mut self_beat = self_beat(&blobs, &opts.node, &node_id, current_ticket, counter, diag);
                         let now_mono = monotonic_now_ms();
                         self_beat.kind = "summary".to_string();
                         self_beat.sent_mono_ms = now_mono;
@@ -1752,7 +1764,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                                     if let Some(ref bridge) = st.store {
                                                         pending_blob_pulls.push((
                                                             bridge.clone(),
-                                                            st.store_dir.clone(),
                                                             peer_proc.clone(),
                                                             t_uri.to_string(),
                                                             rx_beat.node.clone(),
@@ -1794,19 +1805,18 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                     }
                                 }
 
-                                for (bridge, store_dir, peer_proc, t_uri, provider_node) in
+                                for (bridge, peer_proc, t_uri, provider_node) in
                                     pending_blob_pulls
                                 {
                                     let st_clone = Arc::clone(st_arc);
                                     std::thread::spawn(move || {
                                         if let Ok(rep) = bridge.pull_blob(
-                                            &store_dir,
                                             &t_uri,
                                             false,
                                         ) {
                                             if let Ok((verified_sha, staged_path)) =
                                                 dialtone::supervisor::stage_program(
-                                                    &store_dir,
+                                                    &bridge.blobs,
                                                     &peer_proc.name,
                                                     &rep.digest,
                                                 )
@@ -1886,6 +1896,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                                 .to_text()
                                 {
                                     let mut echo_beat = self_beat(
+                                        &blobs,
                                         &opts.node,
                                         &node_id,
                                         current_ticket,
@@ -1950,6 +1961,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         }
     }
     let _ = router.shutdown().await;
+    blobs.close().await;
     Ok(())
 }
 

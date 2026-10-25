@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::blob::{has_blob, put_blob, read_blob, BlobTransportReport, Store};
+use crate::blob::{BlobTransportReport, Blobs, Store};
 use crate::deploy::{
     execute_verified_rollback, install_persistent_os_daemon, plan_rollback, DeploySlot,
 };
@@ -143,13 +143,14 @@ pub fn default_boot_stages(listen: &str, blob_dir: &std::path::Path) -> Vec<Boot
     ]
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct NodeState {
     pub node: String,
     pub mode: String,
     pub listen: String,
-    #[serde(alias = "blob_cache_dir")] // compat
     pub store_dir: PathBuf,
+    #[serde(skip)]
+    pub blobs: Blobs,
     #[serde(skip)]
     pub api_token: String,
     #[serde(default)]
@@ -400,21 +401,25 @@ impl NodeState {
         // 1. BLB: put and verify the probe program blob and this cycle's probe record blob in the store
         let exec_payload = probe_program_bytes();
         let (program_digest, store_path, exec_blob_ok) =
-            match put_blob(&self.store_dir, exec_payload, None) {
-                Ok((sha, store_path)) => {
-                    let read_ok = read_blob(&self.store_dir, &sha)
+            match self.blobs.put_blocking(exec_payload, None) {
+                Ok(sha) => {
+                    let read_ok = self
+                        .blobs
+                        .get_blocking(&sha)
                         .map(|b| b == exec_payload)
                         .unwrap_or(false);
-                    (sha, store_path.to_string_lossy().to_string(), read_ok)
+                    (sha, self.store_dir.to_string_lossy().to_string(), read_ok)
                 }
                 Err(_) => (String::new(), String::new(), false),
             };
 
         let blob_payload = format!("dialtone-probe-sha-blob-node={}", self.node);
         let (verified_digest, cycle_blob_ok) =
-            match put_blob(&self.store_dir, blob_payload.as_bytes(), None) {
-                Ok((sha, _)) => {
-                    let read_ok = read_blob(&self.store_dir, &sha)
+            match self.blobs.put_blocking(blob_payload.as_bytes(), None) {
+                Ok(sha) => {
+                    let read_ok = self
+                        .blobs
+                        .get_blocking(&sha)
                         .map(|b| b == blob_payload.as_bytes())
                         .unwrap_or(false);
                     (sha, read_ok)
@@ -425,11 +430,11 @@ impl NodeState {
 
         // 2. Sub-Processes: load executable from SHA-256 blob store -> stage to run dir -> supervise & verify PID
         let staged_from_store_ok = if !program_digest.is_empty() {
-            stage_program(&self.store_dir, PROBE_PROGRAM_NAME, &program_digest).is_ok()
+            stage_program(&self.blobs, PROBE_PROGRAM_NAME, &program_digest).is_ok()
         } else {
             false
         };
-        let _ = ensure_probe_program(&self.store_dir, &mut self.processes, None);
+        let _ = ensure_probe_program(&self.blobs, &mut self.processes, None);
         self.reconcile_processes();
         let probe_proc = self
             .processes
@@ -478,9 +483,13 @@ impl NodeState {
         let slot_b_bytes = format!("dialtone-slot-B-binary-{}", self.node);
         let mut ab_rollback_ok = false;
         let mut active_slot = "A".to_string();
+        let stage_slot = |bytes: &[u8], slot: &str| {
+            let sha = self.blobs.put_blocking(bytes, None)?;
+            stage_program(&self.blobs, slot, &sha)
+        };
         if let (Ok((sha_a, path_a)), Ok((sha_b, path_b))) = (
-            put_blob(&self.store_dir, slot_a_bytes.as_bytes(), None),
-            put_blob(&self.store_dir, slot_b_bytes.as_bytes(), None),
+            stage_slot(slot_a_bytes.as_bytes(), "probe-slot-a"),
+            stage_slot(slot_b_bytes.as_bytes(), "probe-slot-b"),
         ) {
             let path_a_str = path_a.to_string_lossy().to_string();
             let path_b_str = path_b.to_string_lossy().to_string();
@@ -586,9 +595,10 @@ impl NodeState {
         node: &str,
         mode: &str,
         listen: &str,
-        store_dir: PathBuf,
+        blobs: Blobs,
         iroh_runtime: IrohTransportDiagnostics,
     ) -> Self {
+        let store_dir = blobs.dir().to_path_buf();
         let now = now_unix();
         let stats = sample_stats(node, iroh_runtime.bound_non_tailnet_ipv4.as_deref(), 1);
         let service_endpoints = vec![Service {
@@ -673,6 +683,7 @@ impl NodeState {
             listen: listen.to_string(),
             api_token,
             store_dir,
+            blobs,
             boot_stages,
             mesh_config,
             control_tx: None,
@@ -1185,7 +1196,7 @@ fn route_request(
         ("GET", "/api/mesh") | ("GET", "/api/gossip") => { // compat
             // compat| ("GET", "/api/gossip") => {
             st.reconcile_processes();
-            let (blob_keys, blob_bytes) = count_store(&st.store_dir);
+            let summary = st.blobs.summary();
             let body = json!({
                 "schema": "dialtone.gossip.v1",
                 "mesh": "dialtone-iroh-gossip",
@@ -1196,8 +1207,8 @@ fn route_request(
                 "boot_stages": st.boot_stages,
                 "mesh_config": masked_mesh_config(&st.mesh_config),
                 "blob_stats": {
-                    "blob_keys": blob_keys,
-                    "blob_bytes": blob_bytes,
+                    "blob_keys": summary.blob_keys,
+                    "blob_bytes": summary.blob_bytes,
                     "blob_fetches": st.blob_fetches.len(),
                     "kv_keys": st.kv.len(),
                     "installed_programs": st.installed_programs.len()
@@ -1216,7 +1227,9 @@ fn route_request(
                 .or_else(|| query.get("sha256")) // compat
                 .cloned()
                 .unwrap_or_default();
-            if has_blob(&st.store_dir, &sha) {
+            let blobs = st.blobs.clone();
+            drop(st);
+            if blobs.has_blocking(&sha) {
                 write_response(&mut stream, 200, "application/octet-stream", b"", true)
             } else {
                 write_response(&mut stream, 404, "application/octet-stream", b"", true)
@@ -1229,7 +1242,9 @@ fn route_request(
                 .or_else(|| query.get("sha256")) // compat
                 .cloned()
                 .unwrap_or_default();
-            match read_blob(&st.store_dir, &sha) {
+            let blobs = st.blobs.clone();
+            drop(st);
+            match blobs.get_blocking(&sha) {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes, false)
                 }
@@ -1254,11 +1269,11 @@ fn route_request(
             match crate::base64_decode(b64) {
                 Ok(raw_bytes) => {
                     let maybe_bridge = st.store.clone();
-                    let store_dir = st.store_dir.clone();
+                    let blobs = st.blobs.clone();
                     let node_name = st.node.clone();
                     drop(st);
                     if let Some(bridge) = maybe_bridge {
-                        match bridge.share_blob(&store_dir, &raw_bytes, expected_sha.as_deref()) {
+                        match bridge.share_blob(&raw_bytes, expected_sha.as_deref()) {
                             Ok(rep) => write_json(
                                 &mut stream,
                                 200,
@@ -1267,7 +1282,6 @@ fn route_request(
                                     "node": node_name,
                                     "digest": rep.digest,
                                     "blake3_hash": rep.blake3_hash,
-                                    "path": rep.path,
                                     "bytes": rep.bytes,
                                     "provider_node_id": rep.provider_node_id,
                                     "ticket_uri": rep.ticket_uri
@@ -1276,11 +1290,11 @@ fn route_request(
                             Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
                         }
                     } else {
-                        match put_blob(&store_dir, &raw_bytes, expected_sha.as_deref()) {
-                            Ok((sha, path)) => write_json(
+                        match blobs.put_blocking(&raw_bytes, expected_sha.as_deref()) {
+                            Ok(sha) => write_json(
                                 &mut stream,
                                 200,
-                                &json!({ "digest": sha, "path": path, "bytes": raw_bytes.len() }),
+                                &json!({ "digest": sha, "bytes": raw_bytes.len() }),
                             ),
                             Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
                         }
@@ -1317,9 +1331,8 @@ fn route_request(
                     &json!({ "error": "live iroh-blobs bridge is not initialized on this node" }),
                 );
             };
-            let store_dir = st.store_dir.clone();
             drop(st);
-            match bridge.pull_blob(&store_dir, &ticket_uri, force) {
+            match bridge.pull_blob(&ticket_uri, force) {
                 Ok(report) => {
                     if let Ok(mut st_after) = state.lock() {
                         st_after.blob_fetches.push(report.clone());
@@ -1394,7 +1407,7 @@ fn route_request(
 
             // Blob work (disk and network) runs without the node-state lock held.
             let bridge = st.store.clone();
-            let store_dir = st.store_dir.clone();
+            let blobs = st.blobs.clone();
             let known_digest = st
                 .processes
                 .iter()
@@ -1432,7 +1445,7 @@ fn route_request(
                     Some(digest.as_str())
                 };
                 if let Some(ref bridge) = bridge {
-                    match bridge.share_blob(&store_dir, &raw, exp) {
+                    match bridge.share_blob(&raw, exp) {
                         Ok(rep) => {
                             digest = rep.digest;
                             resolved_ticket_uri = Some(rep.ticket_uri);
@@ -1440,17 +1453,17 @@ fn route_request(
                         Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
                     }
                 } else {
-                    match put_blob(&store_dir, &raw, exp) {
-                        Ok((verified_sha, _)) => digest = verified_sha,
+                    match blobs.put_blocking(&raw, exp) {
+                        Ok(verified_sha) => digest = verified_sha,
                         Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
                     }
                 }
             }
 
             if let Some(ref t_uri) = resolved_ticket_uri {
-                if digest.is_empty() || !has_blob(&store_dir, &digest) {
+                if digest.is_empty() || !blobs.has_blocking(&digest) {
                     if let Some(ref bridge) = bridge {
-                        match bridge.pull_blob(&store_dir, t_uri, false) {
+                        match bridge.pull_blob(t_uri, false) {
                             Ok(rep) => {
                                 digest = rep.digest.clone();
                                 pulled = Some(rep);
@@ -1475,10 +1488,8 @@ fn route_request(
             }
 
             if deploy_to_mesh && resolved_ticket_uri.is_none() {
-                if let (Some(ref bridge), Ok(cached_bytes)) = (&bridge, read_blob(&store_dir, &digest))
-                {
-                    if let Ok(rep) = bridge.share_blob(&store_dir, &cached_bytes, Some(&digest))
-                    {
+                if let (Some(ref bridge), Ok(cached_bytes)) = (&bridge, blobs.get_blocking(&digest)) {
+                    if let Ok(rep) = bridge.share_blob(&cached_bytes, Some(&digest)) {
                         resolved_ticket_uri = Some(rep.ticket_uri);
                     }
                 }
@@ -1495,7 +1506,7 @@ fn route_request(
             if let Some(rep) = pulled {
                 st.blob_fetches.push(rep);
             }
-            let (verified_sha, staged_path) = match stage_program(&store_dir, &name, &digest) {
+            let (verified_sha, staged_path) = match stage_program(&blobs, &name, &digest) {
                 Ok(v) => v,
                 Err(e) => return write_json(&mut stream, 400, &json!({ "error": e })),
             };
@@ -1594,66 +1605,6 @@ fn route_request(
             &json!({ "error": "not found", "path": path }),
         ),
     }
-}
-
-pub fn count_store(blob_dir: &std::path::Path) -> (usize, u64) {
-    let mut keys = 0usize;
-    let mut bytes = 0u64;
-    if let Ok(top_entries) = fs::read_dir(blob_dir) {
-        for entry in top_entries.flatten() {
-            if let Ok(ft) = entry.file_type() {
-                if ft.is_dir() {
-                    if let Ok(sub_entries) = fs::read_dir(entry.path()) {
-                        for sub in sub_entries.flatten() {
-                            if let Ok(meta) = sub.metadata() {
-                                if meta.is_file() {
-                                    keys += 1;
-                                    bytes += meta.len();
-                                }
-                            }
-                        }
-                    }
-                } else if ft.is_file() {
-                    if let Ok(meta) = entry.metadata() {
-                        keys += 1;
-                        bytes += meta.len();
-                    }
-                }
-            }
-        }
-    }
-    (keys, bytes)
-}
-
-/// Digest (the store file name) of the most recently written blob in `blob_dir`, if any.
-pub fn latest_digest(blob_dir: &std::path::Path) -> Option<String> {
-    let is_digest = |name: &str| name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit());
-    let mut newest: Option<(std::time::SystemTime, String)> = None;
-    let mut consider = |entry: &fs::DirEntry| {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if !is_digest(&name) {
-            return;
-        }
-        if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
-            if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
-                newest = Some((modified, name));
-            }
-        }
-    };
-    if let Ok(top_entries) = fs::read_dir(blob_dir) {
-        for entry in top_entries.flatten() {
-            match entry.file_type() {
-                Ok(ft) if ft.is_dir() => {
-                    if let Ok(sub_entries) = fs::read_dir(entry.path()) {
-                        sub_entries.flatten().for_each(|sub| consider(&sub));
-                    }
-                }
-                Ok(ft) if ft.is_file() => consider(&entry),
-                _ => {}
-            }
-        }
-    }
-    newest.map(|(_, name)| format!("sha256:{name}"))
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -1838,37 +1789,6 @@ mod tests {
     use std::thread;
 
     #[test]
-    fn latest_blob_sha256_picks_newest_digest_and_ignores_non_digest_files() {
-        let dir = env::temp_dir().join(format!("dialtone-latest-blob-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        assert_eq!(latest_digest(&dir), None);
-
-        let older = "a".repeat(64);
-        let newer = "b".repeat(64);
-        fs::create_dir_all(dir.join("aa")).unwrap();
-        fs::create_dir_all(dir.join("bb")).unwrap();
-        fs::write(dir.join("aa").join(&older), b"old").unwrap();
-        fs::write(dir.join("bb").join(&newer), b"new").unwrap();
-        fs::write(dir.join("notes.txt"), b"not a blob").unwrap();
-
-        let base = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let set_mtime = |path: std::path::PathBuf, t: std::time::SystemTime| {
-            fs::File::options()
-                .write(true)
-                .open(path)
-                .unwrap()
-                .set_modified(t)
-                .unwrap();
-        };
-        set_mtime(dir.join("aa").join(&older), base);
-        set_mtime(dir.join("bb").join(&newer), base + Duration::from_secs(60));
-        set_mtime(dir.join("notes.txt"), base + Duration::from_secs(120));
-
-        assert_eq!(latest_digest(&dir), Some(format!("sha256:{newer}")));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn hud_page_runs_only_nonce_scripts_and_never_embeds_the_api_token() {
         let tmp_dir = env::temp_dir().join(format!("dialtone-hud-csp-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -1880,7 +1800,7 @@ mod tests {
             "node-alpha",
             "hub",
             &addr.to_string(),
-            tmp_dir.clone(),
+            Blobs::open_blocking(&tmp_dir).unwrap(),
             diag,
         );
         node.api_token = "dtk-must-never-appear-in-html-0123456789".to_string();
@@ -1998,7 +1918,7 @@ mod tests {
             "node-alpha",
             "hub",
             &addr.to_string(),
-            tmp_dir.clone(),
+            Blobs::open_blocking(&tmp_dir).unwrap(),
             diag,
         );
         let state = Arc::new(Mutex::new(node));
@@ -2038,7 +1958,7 @@ mod tests {
             "node-alpha",
             "hub",
             &addr.to_string(),
-            tmp_dir.clone(),
+            Blobs::open_blocking(&tmp_dir).unwrap(),
             diag,
         )));
 
@@ -2092,7 +2012,7 @@ mod tests {
             "node-alpha",
             "hub",
             &addr.to_string(),
-            tmp_dir.clone(),
+            Blobs::open_blocking(&tmp_dir).unwrap(),
             diag,
         );
         seeded.api_token = "dtk-test-token-1234567890abcdef".to_string();
@@ -2147,7 +2067,7 @@ mod tests {
             "node-alpha",
             "hub",
             &addr.to_string(),
-            tmp_dir.clone(),
+            Blobs::open_blocking(&tmp_dir).unwrap(),
             diag,
         )));
 
@@ -2187,7 +2107,13 @@ mod tests {
         let ep_addr = EndpointAddr::new(SecretKey::generate().public());
         let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-probe");
 
-        let mut st = NodeState::new_live("node-alpha", "hub", "127.0.0.1:0", tmp_dir.clone(), diag);
+        let mut st = NodeState::new_live(
+            "node-alpha",
+            "hub",
+            "127.0.0.1:0",
+            Blobs::open_blocking(&tmp_dir).unwrap(),
+            diag,
+        );
 
         let report1 = st.run_probe();
         assert_eq!(report1.cycle, 1);
