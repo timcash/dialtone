@@ -33,8 +33,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Supervisor** | Keeps every process at its desired state | `Supervisor` | — |
 | **Service** | A network endpoint a process exposes to the mesh | `Service` | service advertisement |
 | **Deploy** | An order to run a program digest on nodes | `Deploy`, `deploy` | rollout, manifest apply |
-| **Slot** | The A or B install location of a program; *rollback* flips the slot | `Slot` | — |
-| **Probe** | One run of the five checks: `BLB` `KVS` `PRC` `MSH` `A/B` | `Probe`, `probe` | e2e tick, test tick, capability tick |
+| **Probe** | The node testing itself every 30s: `MSH` peers in the mesh, `STO` store round trip, `PUL` blob pulls from every peer, `BEAT` beats both ways, `PRC` probe program running | `Probe`, `probe` | e2e tick, test tick, capability tick |
 | **Record** | A stored event, alert, log line or KV entry | `Event`, `Alert`, `Log`, `Kv` | evidence |
 | **Daemon** | The OS login service (launchd / systemd / Scheduled Task) that starts the node | `daemon` | — |
 | **HUD** | The node's local web UI | `hud` | dashboard, index page |
@@ -70,16 +69,23 @@ and config field names) were accepted for a while after the rename and were remo
    inventory-driven auto-deploy; let iroh's address lookup find peers instead of gossiping all-peer seed lists and
    re-joining every 5s; Rtt from iroh connection paths instead of broadcast echoes; the API reading `watch`
    snapshots instead of locking node state.
-2. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
+2. **Done — 2026-10-25: Self-testing mesh and removals.** Every node runs a Probe every 30s against the live mesh:
+   it writes a fresh blob, pulls every peer's latest probe blob over QUIC (SHA-256 verified), checks beats both ways,
+   mesh membership and the probe program; results travel in beats and show in the HUD. It immediately found that
+   the downloader's 1s connect timeout broke pulls over relayed / high-Rtt paths (now 10s) and that mesh-deployed
+   programs could not be removed (copies now follow their origin). Removed: the old-name compatibility layer,
+   the fake A/B slot and KV checks, the Rust node placement the HUD duplicated. Also fixed: `dialtone hud` next to
+   a running node rewrote its config, hung on the store lock and could reap its processes.
+3. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
    (`dist` profile keeps it for tagged releases): a one-file change rebuilds in ~1.5s instead of ~52s, `ci.sh` and
    fleet deploys reuse that build. Removed the in-process `self-test` command (`run_self_test`, the MemStore blob
    transfer and the gossip fixture in production code), which duplicated `cargo test`; GitHub CI no longer builds a
    second LTO binary just to run it, and `cargo test` builds one test binary instead of three.
-3. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
+4. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
    speakers, keyboards, pointers, displays, printers, storage and Bluetooth devices (no serials or IDs); they
    travel in the Inventory, appear in `GET /api/devices` and `/api/mesh`, and the HUD lists the focused node's
    devices with a 7th tour step, `DEV`.
-4. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
+5. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
    vendored three.js 0.179.1 and h3-js 4.4.0 (no CDN). The API parses requests with `httparse` and rejects
    `Transfer-Encoding`, ambiguous `Content-Length` and oversize heads. One persistent iroh-blobs `FsStore` replaces
    the SHA-256 file tree and the in-memory store: blobs are named by `sha256/<hex>` tags, GC removes untagged data,
@@ -87,14 +93,14 @@ and config field names) were accepted for a while after the rename and were remo
    `run_node` boots the node and starts six actors (`actors.rs`: Mesh, Stats, Supervisor, Links, Allowlist,
    Deploy) stopped by one `CancellationToken`. Gossip carries a typed `Message` (envelope v4: Beat, Summary, Echo,
    Inventory); processes and services travel only in inventories, sent on change.
-5. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
+6. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
    seeded node state (`dialtone hud` now serves live state); the deploy-plan, build-cache, build-decision, manifest,
    proof-validation, alert-ack, tiered-fetch, process-intent, install.sh, catalog, command-journal / rtcore UDP,
    cursor-job, key-lease, service-ref, systemd drop-in and peer-cache code; 22 API routes no caller used, including
    the one-frame `/ws` stub; the hand-written SHA-1 (now unneeded) and hex / base64 codecs (now the `hex` and
    `base64` crates, same accepted inputs). The self-test exercises only real behaviour. The HUD's non-working
    Init / Invite / Join actions became a panel of the CLI commands (the page carries no API token by design).
-6. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
+7. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
    **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
@@ -103,12 +109,12 @@ and config field names) were accepted for a while after the rename and were remo
 |---|---------|--------------|----------------|
 | F1 | **Node & transport** | Persistent Key → NodeId, iroh endpoint presets (N0 / minimal / private mesh), relay / Pkarr DNS / DHT / mDNS policy, tailnet-address filtering, transport diagnostics | `node.rs` |
 | F2 | **Mesh membership** | Secret → Argon2id channel keys (topic, auth, enc), signed typed messages in XChaCha20-Poly1305 envelopes, deny-by-default Allowlist, signed single-use Invites, Seeds, `~/.dialtone/config.json` | `mesh.rs`, Mesh actor in `actors.rs` |
-| F3 | **Beats, stats & Rtt** | 5s beats / 30s summaries, real cpu / mem / disk / net stats on macOS, Linux and Windows, spread + thrashing detection, echo Rtt → mesh Rtt matrix, public-IP / Rtt-cluster geo placement | `stats.rs`, `mesh.rs` |
+| F3 | **Beats, stats & Rtt** | 5s beats / 30s summaries, real cpu / mem / disk / net stats on macOS, Linux and Windows, spread + thrashing detection, echo Rtt → mesh Rtt matrix, public-IP location (ipinfo); the HUD places the rest | `stats.rs`, `mesh.rs` |
 | F4 | **Blob store & tickets** | iroh-blobs `FsStore` under `~/.dialtone/blobs` with `sha256/<hex>` tags and GC, `blob share` / `blob pull` tickets through the node's downloader with digest re-check, per-node `store` stats in beats | `blob.rs` |
-| F5 | **Supervisor & probe** | Stage programs from blobs, start / restart / stop processes, default `probe` program, the five-check Probe (`BLB` `KVS` `PRC` `MSH` `A/B`) | `supervisor.rs`, node state in `api.rs` |
-| F6 | **Deploy, slots & daemon install** | Deploy contract, A/B slot rollback, launchd / systemd `--user` / Scheduled Task daemon install | `deploy.rs` |
+| F5 | **Supervisor & probe** | Stage programs from blobs, start / restart / stop / remove processes, boot-time sweep of unused staged programs, the `probe` program, and the Probe actor testing the live mesh every 30s (`MSH` `STO` `PUL` `BEAT` `PRC`) | `supervisor.rs`, `probe.rs` |
+| F6 | **Deploy & daemon install** | Mesh deploy (copies follow their origin and are removed with it), launchd / systemd `--user` / Scheduled Task daemon install | `deploy.rs`, Deploy actor |
 | F7 | **Node runtime & API** | 5-stage boot, six actors with one shutdown token, shared node state, `httparse` API on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `actors.rs`, `api.rs` |
-| F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, focused node's device list, 7-step tour with captions, blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
+| F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, focused node's device list, 5-step tour with captions (mesh, blobs and pulls, process, beats, devices), blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
 | F12 | **Devices** | Per-OS listing of connected cameras, microphones, speakers, keyboards, pointers, displays, printers, storage, Bluetooth devices; gossiped in the Inventory | `devices.rs`, Devices actor |
 | F9 | **Verification** | `mesh-test`, `probe`, unit + live iroh tests, `ci.sh` (zero-leak gate, domain-language gate, fmt, tests, live acceptance), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
 | F10 | **Services & records** | Service refs, Services, key leases, policies, Event / Alert / Log / Kv records with cursor pagination, proof validation | `service.rs`, `record.rs` |

@@ -609,8 +609,15 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     // =========================================================================
     let mut saved_cfg = load_mesh_config(&config_path);
     if owns_run_dir {
-        let mut keep: Vec<String> = saved_cfg.processes.iter().map(|p| p.name.clone()).collect();
-        keep.push(dialtone::supervisor::PROBE_PROGRAM_NAME.to_string());
+        let mut keep: Vec<(String, String)> = saved_cfg
+            .processes
+            .iter()
+            .map(|p| (p.name.clone(), p.digest.clone()))
+            .collect();
+        keep.push((
+            dialtone::supervisor::PROBE_PROGRAM_NAME.to_string(),
+            dialtone::blob::digest_of(dialtone::supervisor::probe_program_bytes()),
+        ));
         let swept = dialtone::supervisor::sweep_run_dir(&run_dir, &keep);
         if swept > 0 {
             println!("[supervisor] deleted {swept} staged program(s) no process uses");

@@ -322,18 +322,20 @@ pub fn reap_stale_processes(_run_dir: &Path) -> usize {
     0
 }
 
-/// Delete staged programs in `run_dir` that no process named in `keep` uses. Copies deployed
-/// from peers live only in memory, so a restart leaves their files behind; ones still offered
-/// are staged again under the same name. Call at boot, after reaping, before staging.
-/// Returns how many files were deleted.
-pub fn sweep_run_dir(run_dir: &Path, keep: &[String]) -> usize {
-    // A staged file is `<name>-<12 hex>`, plus `.cmd` or `.exe` on Windows.
-    let staged_for = |file: &str, name: &str| {
-        let Some(rest) = file.strip_prefix(name).and_then(|r| r.strip_prefix('-')) else {
-            return false;
-        };
-        let hex = rest.trim_end_matches(".cmd").trim_end_matches(".exe");
-        hex.len() == 12 && hex.bytes().all(|b| b.is_ascii_hexdigit())
+/// Delete staged programs in `run_dir` other than the `(name, digest)` pairs in `keep`.
+/// Copies deployed from peers live only in memory, so a restart leaves their files behind
+/// (ones still offered are staged again), and older versions of a program stay after an
+/// upgrade. Call at boot, after reaping, before staging. Returns how many were deleted.
+pub fn sweep_run_dir(run_dir: &Path, keep: &[(String, String)]) -> usize {
+    // A staged file is `<name>-<first 12 hex of its digest>`, plus `.cmd` / `.exe` on Windows.
+    let staged_for = |file: &str, (name, digest): &(String, String)| {
+        let short: String = digest
+            .trim_start_matches("sha256:")
+            .chars()
+            .take(12)
+            .collect();
+        let stem = file.trim_end_matches(".cmd").trim_end_matches(".exe");
+        short.len() == 12 && stem == format!("{name}-{short}")
     };
     let mut deleted = 0;
     for entry in fs::read_dir(run_dir).into_iter().flatten().flatten() {
@@ -341,7 +343,7 @@ pub fn sweep_run_dir(run_dir: &Path, keep: &[String]) -> usize {
         if file == CHILDREN_FILE || !entry.path().is_file() {
             continue;
         }
-        if keep.iter().any(|name| staged_for(&file, name)) {
+        if keep.iter().any(|k| staged_for(&file, k)) {
             continue;
         }
         if fs::remove_file(entry.path()).is_ok() {
@@ -652,6 +654,7 @@ mod tests {
         for f in [
             "probe-b4b0317fed65",
             "probe-b4b0317fed65.cmd",
+            "probe-8353a792825c",
             "web-0123456789ab.exe",
             "probe-slot-a-6d4605c87fb6",
             "deploy-check-3eb500702822.cmd",
@@ -660,8 +663,21 @@ mod tests {
         ] {
             fs::write(dir.join(f), b"x").unwrap();
         }
-        let keep = vec![PROBE_PROGRAM_NAME.to_string(), "web".to_string()];
-        assert_eq!(sweep_run_dir(&dir, &keep), 3);
+        let keep = vec![
+            (
+                PROBE_PROGRAM_NAME.to_string(),
+                format!("sha256:b4b0317fed65{}", "0".repeat(52)),
+            ),
+            (
+                "web".to_string(),
+                format!("sha256:0123456789ab{}", "0".repeat(52)),
+            ),
+        ];
+        assert_eq!(
+            sweep_run_dir(&dir, &keep),
+            4,
+            "older probe version is swept too"
+        );
         let mut left: Vec<String> = fs::read_dir(&dir)
             .unwrap()
             .flatten()

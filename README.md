@@ -288,6 +288,7 @@ Or open **`http://127.0.0.1:8788`** in your browser to view the live 3D topology
 - **Allowlist at the handshake.** Every QUIC connection (gossip and blobs, in and out) is closed right after the TLS handshake unless the remote NodeId is on the allowlist. `dialtone allowlist add/remove` edits `~/.dialtone/config.json`; a running node picks the change up within 5 seconds, no restart.
 - **Signed messages.** Nodes gossip four typed messages: a **Beat** every 5 seconds (liveness, stats, Rtt echoes), a **Summary** every 30 seconds, an **Echo** in reply to an Rtt probe, and an **Inventory** (the node's processes, services and devices) when it changes, when a neighbor joins and with every summary. Each message is signed with the sender's Key and encrypted with the channel keys. A node drops messages whose signature does not match the NodeId they claim, messages from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
 - **No process secrets on the wire.** An inventory lists each process without its `env` or `args`.
+- **Deploys follow their origin.** A node that runs a copy of a peer's program never offers it further, and removes it as soon as that peer stops offering it, so removing a program on the node that deployed it removes it everywhere.
 - **Deploys only from the allowlist.** A process offered for mesh deploy is pulled only from an allowlisted signer and an allowlisted blob provider, never a peer's probe program, and only once per (peer, digest). Blob pulls use the node's own endpoint, so the provider's allowlist decides.
 - **HUD.** The page carries no API token; a per-response Content-Security-Policy nonce lets only its own scripts run. three.js and h3-js are compiled into the binary and served from `/hud/vendor/`, so the HUD loads nothing from the Internet.
 
@@ -449,6 +450,20 @@ Every running `dialtone` daemon attaches `iroh_blobs::BlobsProtocol` to its live
 
 ---
 
+### Self-test loop (Probe)
+
+Every running node tests itself every 30 seconds against the live mesh and reports five checks:
+
+| Check | What it proves |
+| :--- | :--- |
+| `MSH` | Every allowlisted peer is in the mesh |
+| `STO` | A fresh blob is written to the store and read back intact |
+| `PUL` | Every peer's latest probe blob downloads over QUIC through the node's downloader, SHA-256 verified |
+| `BEAT` | Every peer's beats are fresh (≤15s) and every peer hears this node's beats |
+| `PRC` | The probe program, staged from the store, is running under the supervisor |
+
+The report travels in the node's beats, so each HUD shows every node's results (PRB row, tour steps) and each node knows which blob to pull from each peer next. Failed checks are logged. Probe blobs are forgotten after use, so the store does not grow. `dialtone probe` (or `POST /api/probe`) runs one immediately; `GET /api/probe` returns the latest.
+
 ### Devices
 
 Every node lists the devices connected to it — cameras, microphones, speakers, keyboards, pointers (mice, trackpads), displays, printers, storage, Bluetooth devices and gamepads — using the OS's own view: `system_profiler` on macOS, `Get-PnpDevice` on Windows, `/sys` and `/proc` on Linux. Only each device's kind, name, bus (`built-in`, `usb`, `bluetooth`, `hid`, `display`, ...) and a short detail are kept; serial numbers and device IDs are dropped.
@@ -549,7 +564,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 ## 10. Live Mesh Verification & Local CI
 
-`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, A/B slots, the supervisor, KV paging and the API). Check a running node or run the whole local pipeline at any time:
+`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API). Check a running node or run the whole local pipeline at any time:
 
 ```bash
 # Verify the running local daemon's security posture, zero public directory exposure,
