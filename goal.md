@@ -67,18 +67,19 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 ## Current Work
 
-1. **Now — Phase 3 cleanup** (see roadmap): cleanup tiers B (fixtures, seeded state, preview planners, uncalled
-   routes) and C (hand-rolled hex / base64 / SHA-1), and build or remove the HUD's `/api/channel/*` actions.
-2. **Done — 2026-10-23: Phase 2 reliability.** API never holds the node-state lock while writing to a socket;
-   SIGTERM / SIGINT / SIGHUP (ctrl-c on Windows) stop every process tree and close the endpoint; processes run as
-   their own process group (Unix) or kill-on-close Job Object (Windows), so stopping one stops what it started;
-   trees left by a killed node are reaped at the next boot (`run/children.json`); a failed spawn is reported in
-   the process status; gossip re-subscribes with 1s→30s backoff and logs `Lagged`; no `?` can end the run loop;
-   a corrupt `config.json` is fatal at load (exit 78) and never overwritten, and a running node keeps its last good
-   allowlist; unknown stats are `null` (no 16 GiB / 8-core / 1 Gbit / `tailnet=off` guesses, and a peer without
-   stats no longer shows this machine's numbers); nodes are keyed by NodeId and silent peers are pruned every 5s.
-3. **Done — 2026-10-23:** Phase 1 security, domain language, cleanup tier A. **2026-10-22:** authentic stats,
-   Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
+1. **Next — Phase 4 architecture** (see roadmap): split `run_node` into actors (Transport, Mesh, Stats, Supervisor,
+   Blob service, API), one persistent `FsStore` with SHA-256 tags and the node's downloader, a typed message enum
+   with inventory-on-change, an `httparse`/hyper API server, and the HUD as static files with vendored three.js /
+   h3-js.
+2. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
+   seeded node state (`dialtone hud` now serves live state); the deploy-plan, build-cache, build-decision, manifest,
+   proof-validation, alert-ack, tiered-fetch, process-intent, install.sh, catalog, command-journal / rtcore UDP,
+   cursor-job, key-lease, service-ref, systemd drop-in and peer-cache code; 22 API routes no caller used, including
+   the one-frame `/ws` stub; the hand-written SHA-1 (now unneeded) and hex / base64 codecs (now the `hex` and
+   `base64` crates, same accepted inputs). The self-test exercises only real behaviour. The HUD's non-working
+   Init / Invite / Join actions became a panel of the CLI commands (the page carries no API token by design).
+3. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
+   **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
 
@@ -142,7 +143,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 - **Supervisor owns children.** `tokio::process` with `kill_on_drop`, process groups (Unix) / Job Objects (Windows), exponential restart backoff, spawn errors recorded in status, `shutdown_all` on SIGTERM / ctrl-c.
 - **API & HUD.** API task reads `watch` snapshots and never holds the mesh lock; HUD moves to `src/hud/*` via `include_str!` with vendored three.js / h3-js; token fetched by an authenticated seed call, never templated; one live channel (`/ws` push or polling — not both).
 
-### Cleanup plan
+### Cleanup plan (done 2026-10-23 / 2026-10-25)
 
 | Tier | What | Size |
 |---|---|---|
@@ -154,7 +155,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 1. **Phase 1 — Security (critical 1-5) — done 2026-10-23:** handshake allowlist hook + live allowlist, Ed25519-signed payloads with counter check, remove env-flag auto-deploy (gate behind signed `Deploy`), stop gossiping `env`, HUD escaping / `textContent` / no templated token.
 2. **Phase 2 — Reliability — done 2026-10-23:** release the state lock before IO, ctrl-c shutdown + child process groups, re-subscribe backoff, no `?` in the loop, config parse errors fail loudly, stats unknowns as `None`, peers keyed by `NodeId` with TTL pruning.
-3. **Phase 3 — Cleanup:** tiers A → B → C, fix or remove the HUD `/api/channel/*` buttons.
+3. **Phase 3 — Cleanup — done 2026-10-25:** tiers A → B → C, fix or remove the HUD `/api/channel/*` buttons.
 4. **Phase 4 — Architecture:** actor split of `run_node`, FsStore + downloader, typed message enum + inventory-on-change, hyper/httparse server, HUD as static files with vendored JS.
 
 ## 0. Current Priority Goal: Authentic Stats, Inter-Host RTT, & 5s / 30s Summary Variability Beats

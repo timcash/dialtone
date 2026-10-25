@@ -25,17 +25,6 @@ actions:
   node                     Run the node without the HUD or API
   status                   Print this node's NodeId and transport report
   self-test | ci           Run full 7-capability live verification suite
-  state-fixture            Print representative daemon state JSON
-  mesh-fixture             Print global mesh peer index JSON
-  gossip-fixture           Print Iroh gossip & service discovery JSON
-  iroh-runtime-fixture     Print Iroh 1.3 runtime identity & transport diagnostics
-  deploy-plan-fixture      Print deploy target plan or build-decision evidence
-  blob-fetch-report        Print tiered blob hydration plan (cache / iroh-blobs / fallback)
-  process-intent-fixture   Print start/stop/restart process intent plan & diff
-  rollback-plan-fixture    Print side-effect-free guarded rollback plan
-  alert-ack-fixture        Print side-effect-free alert acknowledgement preview
-  proof-validation-fixture Print session proof acceptance/rejection report
-  program-catalog-fixture  Print program catalog & named dataset evidence
   service                  Render OS login service unit (macos | linux | windows)
   help                     Show this help
 
@@ -64,16 +53,6 @@ flags:
   --no-relay               Disable Iroh relay servers
   --relay-only             Advertise relay-only gossip tickets
   --relay-url <url>        Custom Iroh relay URL (repeatable)
-  --deploy-target <t>      robot-v4-default | dialtone | all-daemon | all-with-daemons
-  --build-case <c>         unchanged-skip | cache-reused | peer-local-async
-  --intent-action <a>      start | stop | restart
-  --proof-case <c>         valid | missing | stale | cross-session | non-daemon-fallback |
-                           no-renderer-fallback | peer-build-deps-missing
-  --digest <digest>        SHA-256 digest for blob-fetch-report
-  --uri <uri>              Blob URI for blob-fetch-report
-  --http-fallback-enabled  Allow HTTP peer-bridge fallback for blob-fetch-report
-  --actor <name>           Actor name for alert-ack-fixture
-  --note <text>            Note for alert-ack-fixture
   --os <macos|linux|windows> Target OS for service unit generation
   --once                   Run one cycle and exit
 ```
@@ -184,7 +163,7 @@ Running `./dialtone` (with no arguments, or `./dialtone up` / `start` / `hub`) b
 
 ## 2. Local Web HUD, Terminal `top` UI & Stats
 
-Open **`http://127.0.0.1:8788`** (also served at `/nodes`, `/peer`, and `/hud`) to access the embedded tactical HUD:
+Open **`http://127.0.0.1:8788`** to access the embedded tactical HUD:
 
 - **Terminal `top` Process & Resource Table**: Displays every discovered peer (`NODE`, `OS/ARCH`, `BIND IP`, `HB`, `CORES`, `CPU%`, `MEM%`, `DISK%`, `NET RX/TX`, `STATUS / WARNINGS`).
 - **Automatic Threshold Warnings**: Rows remain monochrome greyscale when nominal and highlight in red (`#ff2e3b`) only when limits are breached:
@@ -193,13 +172,11 @@ Open **`http://127.0.0.1:8788`** (also served at `/nodes`, `/peer`, and `/hud`) 
   - `DISK >= 85%`
   - `VPN PATH` (`tailnet_used: true` detected on transport path)
 - **Interactive 3D Mesh Topology**: Drag to orbit, scroll to zoom, or click any peer node to inspect its live QUIC links and metadata.
-- **Menu** (bottom-right button):
-  - `RESET ORBIT` — Return the camera to the tour view.
-  - `INIT NEW PRIVATE MESH`, `GENERATE INVITE`, `JOIN MESH` — Call `POST /api/channel/{init,invite,join}`, which the API does not implement yet (see goal.md roadmap, Phase 3); use the CLI (`dialtone secret`, `dialtone invite`, `dialtone join`) meanwhile.
-- **Live WebSocket & Health Endpoints**:
-  - `GET /ws` — RFC 6455 WebSocket upgrade streaming real-time mesh state snapshots.
-  - `GET /health` — Lightweight JSON health check (`{"ok": true, "node": "..."}`).
-  - `GET /api/boot-status` (alias `GET /api/config`) — Returns the 5 boot stages, active `mesh_config` (with `derived_keys` redacted), and `blob_cache_dir`.
+- **Menu** (bottom-right button): tour and camera controls, zoom layers, display toggles, and — under
+  *05 // Mesh setup (CLI)* — the commands for creating a mesh, inviting and allowing nodes. The page holds no API
+  token, so mesh changes are made with the CLI.
+- **Endpoints the HUD uses**: `GET /` (the page) and `GET /api/mesh` (polled every 1.5s); `GET /health` returns
+  `{"ok": true, "node": "..."}`.
 
 ---
 
@@ -434,11 +411,9 @@ To preview or pipe service definitions for system-wide deployment:
 ./dialtone service --os windows --node node-beta
 ```
 
-Seed script and release manifest endpoints are also served over HTTP at `GET /install/v1/install.sh` and `GET /install/v1/manifest.json`.
-
 ---
 
-## 6. Blob Store & Tiered Hydration
+## 6. Blob Store
 
 All blobs and executable payloads are stored by SHA-256 digest under `~/.dialtone/blobs/<2-hex-prefix>/<64-hex-digest>`. Uploads are staged to a temporary file, verified against SHA-256, and atomically renamed into the store.
 
@@ -459,26 +434,6 @@ curl -I "http://127.0.0.1:8788/api/blob?sha256=<64-hex-digest>"
 curl -s "http://127.0.0.1:8788/api/blob?sha256=<64-hex-digest>"
 ```
 
-### Tiered Blob Fetch Planning (`blob-fetch-report`)
-
-When hydrating an blob across the mesh, `dialtone` evaluates a 3-tier resolution order:
-1. **`local-cache`** (`status: "cache_hit"`) — `0` network bytes transferred if the verified SHA-256 already exists in `~/.dialtone/blobs`.
-2. **`iroh-blobs-ticket`** — Native peer-to-peer QUIC transfer when the URI is `iroh-blobs://ticket/<ticket>#sha256:<hex>`.
-3. **`http-peer-fallback`** — Guarded HTTP fallback (`http://<peer>/...`) used only when `--http-fallback-enabled` (`http_fallback_enabled: true`) is set.
-
-```bash
-# CLI evaluation
-./dialtone blob-fetch-report \
-  --sha256 sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d \
-  --uri "iroh-blobs://ticket/blob123#sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d"
-
-# HTTP evaluation
-curl -X POST http://127.0.0.1:8788/api/blob-fetch-report \
-  -H "Authorization: Bearer $(cat ~/.dialtone/api-token)" \
-  -H "Content-Type: application/json" \
-  -d '{"digest":"sha256:5b9134298b0802a1f4c1201d61bee747a5e3fcca2219cbcf00cec335a3365c7d","uri":"iroh-blobs://ticket/blob123","provider_node":"node-gamma","expected_bytes":4096}'
-```
-
 ### Live Cross-Peer `iroh-blobs` QUIC Share & Pull (`blob share` / `blob pull`)
 
 Every running `dialtone` daemon attaches `iroh_blobs::BlobsProtocol` to its live QUIC router so peers can share and pull content-addressed blobs directly over QUIC:
@@ -494,7 +449,7 @@ Every running `dialtone` daemon attaches `iroh_blobs::BlobsProtocol` to its live
 
 ---
 
-## 7. Supervised Blob Processes & Process Intent
+## 7. Supervised Processes
 
 ### Keep a store Blob Running as a Daemon Process
 
@@ -533,146 +488,32 @@ curl -X POST http://127.0.0.1:8788/api/processes/blob \
 - **Environment Sanitization**: Internal daemon environment variables (`DIALTONE_*`, `DAEMON_V1_*`) are stripped before spawning child processes.
 - **Restart Persistence**: process definitions are saved to `~/.dialtone/config.json` and automatically re-staged and started when `dialtone` boots.
 
-### Process Intent Planning & Dependency Auditing (`process-intent-fixture`)
-
-Preview `start`, `stop`, or `restart` convergence diffs, systemd drop-in drift repairs (`25-daemon-intent.conf`), and runtime dependency audits (which reject `.ts.net` hostnames, hardcoded LAN IPs, or SSH/Git dependencies):
-
-```bash
-./dialtone process-intent-fixture --node edge-1 --intent-action restart
-```
-
-Or via HTTP: `GET /api/process-intent?node=edge-1&action=restart` and `POST /api/process-intent`.
-
----
-
-## 8. Manifest-Driven Deployment, Build Cache & Rollback
-
-### Deploy Target Plans (`deploy-plan-fixture`)
-
-`dialtone` separates regular workload rollouts from daemon self-updates:
-
-```bash
-# Default application rollout (includes_daemon_self_update: false)
-./dialtone deploy-plan-fixture --deploy-target robot-v4-default
-
-# Explicit daemon self-update targets (includes_daemon_self_update: true)
-./dialtone deploy-plan-fixture --deploy-target dialtone
-./dialtone deploy-plan-fixture --deploy-target all-daemon
-./dialtone deploy-plan-fixture --deploy-target all-with-daemons
-```
-
-### Blob Manifest Validation & Guarded Apply
-
-Submit `dialtone.blob_manifest.v1` manifests to `POST /api/deploy/gossip-manifest` or `POST /api/deploy/apply-manifest`:
-- Rejects `whole_repo_sync: true`, `ssh_required: true`, `git_required: true`, or empty blob lists.
-- Rejects source bundles containing `.git`, `target`, `node_modules`, `.venv`, `dist`, `build`, or `__pycache__`.
-- Enforces allowed staging roots (`/opt/dialtone/`, `/var/lib/dialtone/`, `/tmp/dialtone-staging/`, configurable via `DIALTONE_DEPLOY_ALLOWED_ROOTS`).
-
-### Distributed Build Cache Decisions (`--build-case`)
-
-Evaluate build cache reuse and non-blocking async peer builds:
-
-```bash
-./dialtone deploy-plan-fixture --build-case unchanged-skip
-./dialtone deploy-plan-fixture --build-case cache-reused
-./dialtone deploy-plan-fixture --build-case peer-local-async
-```
-
-Or via HTTP: `GET /api/build-decision?case=peer-local-async` and `POST /api/deploy/build-request`.
-
-### Dual-Slot Verified Rollback (`rollback-plan-fixture`)
-
-Preview or execute a rollback from `slot-b` (`current_bad_sha256`) to `slot-a` (`previous_good_sha256`) with SHA-256 verification before cutover:
-
-```bash
-./dialtone rollback-plan-fixture --node edge-1
-```
-
-Or via HTTP: `GET /api/rollback-plan?node=edge-1`, `POST /api/rollback-plan`, and `POST /api/deploy/rollback`.
-
----
-
-## 9. Service Discovery, Command Journals, Catalogs & Evidence
-
-### Canonical `dialtone://` Service Discovery
-
-Service endpoints use the 3-segment peer-qualified URI format:
-
-```text
-dialtone://<peer>/<role>/<name>
-```
-
-Examples: `dialtone://node-alpha/control/hub-api`, `dialtone://edge-1/rover/rtcore-cmd`, `dialtone://node-gamma/builder/blob-cache`. Ambiguous role-only URIs (such as `dialtone://rover-1/rtcore-cmd`) are rejected.
-
-### Deduplicated Command Journal & `rtcore-udp` Dispatch
-
-Submit command intents with an `id` to `POST /api/commands/intent`. Terminal or duplicate intents return `"merged": false` without re-executing, while `rtcore-udp` commands encode into deterministic 64-byte binary UDP packets (`RTCORE_ARM_MAGIC: 0x41524d44` / `"ARMD"`, mode-bound v2).
-
-### Program Catalogs & Named Datasets (`program-catalog-fixture`)
-
-Inspect the built-in row calibration catalog or query named datasets (`programs`, `jobs`):
-
-```bash
-./dialtone program-catalog-fixture
-```
-
-HTTP endpoints: `GET /api/program-catalog`, `GET /api/catalogs`, and `GET /api/catalogs/<dataset_name>`.
-
-### State Pagination, Alert Acks & Session Proofs
-
-- **Paginated State & KV**: `./dialtone state-fixture --node node-alpha` or `GET /api/state?include_kv=true&kv_offset=0&kv_limit=50`
-- **Cursor Job Pagination**: `GET /api/cursor/jobs?offset=0&limit=50`
-- **Alert Acknowledgement Preview**:
-  ```bash
-  ./dialtone alert-ack-fixture --actor operator-a --note "verified nominal"
-  ```
-  (HTTP: `GET /api/alert-ack?actor=operator-a&note=ok` or `POST /api/alert-ack`)
-- **Session Proof Validation**:
-  ```bash
-  ./dialtone proof-validation-fixture --proof-case valid
-  ./dialtone proof-validation-fixture --proof-case non-daemon-fallback
-  ```
-  Supported `--proof-case` values: `valid`, `missing`, `stale`, `cross-session`, `non-daemon-fallback`, `no-renderer-fallback`, `peer-build-deps-missing`.
-
----
-
-## 10. HTTP API Quick Reference
+## 8. HTTP API Quick Reference
 
 All `POST` routes require `Authorization: Bearer <token>` (or `X-Dialtone-Token: <token>`) matching `~/.dialtone/api-token`.
 
 | Method & Path | Description |
 | :--- | :--- |
-| `GET /` (`/nodes`, `/peer`, `/hud`) | Embedded 3D Tactical HUD & Terminal `top` Web UI |
-| `GET /ws` | Real-time WebSocket stats stream |
-| `GET /health` | Node health status JSON |
-| `GET /api/boot-status` (`/api/config`) | 5-stage boot progress, mesh config (`derived_keys` redacted), and blob store path |
-| `POST /api/mesh/join` (`/api/config/join`) | Join or switch encrypted gossip channel live |
-| `POST /api/daemon/install` | Install persistent OS user daemon |
-| `GET /api/state` | Full daemon runtime state (supports `include_kv`, `kv_offset`, `kv_limit`) |
-| `GET /api/mesh` (`/api/mesh`) | Active mesh peer beats and `dialtone://` service endpoints |
-| `GET /api/iroh-runtime` | Live Iroh 1.3 NodeIdentity, relay, and NIC binding diagnostics |
-| `POST /api/blob` | Store base64 payload in SHA-256 verified store (`~/.dialtone/blobs`) |
-| `GET /api/blob?sha256=...` | Fetch verified blob bytes & metadata from store (`HEAD` also supported) |
-| `POST /api/blob-fetch-report` | Evaluate tiered blob hydration plan (`GET /api/blob-fetch-report`) |
-| `POST /api/blob/share` | Share a payload or store SHA-256 via live `iroh-blobs` and return its `iroh-blob://` ticket URI |
-| `POST /api/blob/pull` | Pull a remote `iroh-blob://` ticket URI over live QUIC into the local store |
-| `GET /api/processes` | List supervised child processes with live PID reconciliation |
-| `POST /api/processes/blob` (`/api/processes`) | Stage a store blob (or `ticket_uri`) and supervise it as a daemon process (`running`/`stopped`) |
-| `GET/POST /api/process-intent` | Preview start/stop/restart convergence plan and dependency audit |
-| `GET/POST /api/deploy-plan` | Generate target deployment plan (`target=robot-v4-default`, `dialtone`, etc.) |
-| `POST /api/deploy/gossip-manifest` | Validate a `dialtone.blob_manifest.v1` payload |
-| `POST /api/deploy/apply-manifest` | Validate and stage a deployment manifest into allowed roots |
-| `POST /api/deploy/build-request` | Evaluate distributed build cache & async peer build (`GET /api/build-decision`) |
-| `GET/POST /api/rollback-plan` | Preview side-effect-free dual-slot SHA-256 rollback plan (`POST /api/deploy/rollback` to execute) |
-| `GET/POST /api/alert-ack` | Preview side-effect-free alert acknowledgement |
-| `POST /api/commands/intent` | Record deduplicated command intent in the command journal |
-| `GET /api/cursor/jobs` | Paginated Cursor job log (`offset`, `limit`) |
-| `GET /api/program-catalog` (`/api/catalogs/*`) | Program catalog and named datasets |
-| `GET /install/v1/install.sh` | Cross-platform shell seed script (`/install/v1/manifest.json`) |
+| `GET /` | The HUD (served with a per-response Content-Security-Policy nonce) |
+| `GET /health` | `{"ok": true, "node": "..."}` |
+| `GET /api/config` (`/api/boot-status`) | Boot stages, mesh config (`derived_keys` redacted), store path |
+| `POST /api/mesh/join` | Join or switch the channel of the running node |
+| `POST /api/daemon/install` | Install the daemon (OS login service) |
+| `GET /api/state` | Full node state (supports `include_kv`, `kv_offset`, `kv_limit`) |
+| `GET /api/mesh` | Every node's latest beat, the Rtt matrix and Services |
+| `POST /api/blob` | Put a base64 blob in the store (`~/.dialtone/blobs`) |
+| `GET /api/blob?digest=...` | Blob bytes and metadata (`HEAD` also supported) |
+| `POST /api/blob/share` | Put a blob in the store and return its `iroh-blobs://ticket/...` |
+| `POST /api/blob/pull` | Pull a blob by ticket over QUIC into the store |
+| `GET /api/processes` | Supervised processes with live PID / status |
+| `POST /api/processes/blob` | Stage a program blob (or ticket) and run / stop it as a process |
+| `POST /api/probe` | Run one probe (BLB, KVS, PRC, MSH, A/B) |
+
+Old route names (`/api/gossip`, `/api/artifacts/blob`, `/api/blobs/*`, `/api/e2e/*`) are still accepted for one release.
 
 ---
 
-## 11. Environment Variables & Local Paths
+## 9. Environment Variables & Local Paths
 
 | Variable / Path | Default | Purpose |
 | :--- | :--- | :--- |
@@ -680,10 +521,7 @@ All `POST` routes require `Authorization: Bearer <token>` (or `X-Dialtone-Token:
 | `DIALTONE_IROH_SECRET_KEY_FILE` | `~/.dialtone/iroh-secret-key` | Persistent 32-byte Ed25519 Iroh endpoint secret key (`0600` permissions) |
 | `DIALTONE_API_TOKEN` | `~/.dialtone/api-token` | Bearer token required for all `POST` control API routes (and required when `--listen` is non-loopback) |
 | `DIALTONE_CHANNEL` | `dialtone` | Default gossip channel name when `--channel` is not passed |
-| `DIALTONE_SECRET` (`DIALTONE_SECRET_KEY`) | *(unset)* | Secret used to derive Argon2id `v2` channel keys on boot |
-| `DIALTONE_NODE` | System hostname | Override default node name when `--node` is not passed |
-| `DIALTONE_QUIC_PORT` | *(OS dynamic)* | Optional deterministic UDP port for the Iroh QUIC endpoint (`--quic-port`) |
-| `DIALTONE_DEPLOY_ALLOWED_ROOTS` | `/opt/dialtone/,/var/lib/dialtone/,/tmp/dialtone-staging/` | Comma-separated allowed filesystem prefixes for manifest staging |
+| `DIALTONE_SECRET` (`DIALTONE_SECRET_KEY`; old: `DIALTONE_PASSWORD`) | *(unset)* | Channel secret used to derive Argon2id `v2` channel keys on boot |
 | `~/.dialtone/config.json` | — | Host-local mesh config (`0600`): Argon2id `derived_keys` (no plaintext secret), `seeds`, `allowlist`, `used_invite_nonces`, and supervised process specs |
 | `~/.dialtone/api-token` | — | Auto-generated 256-bit local HTTP control API bearer token (`0600`) |
 | `~/.dialtone/blobs/` | — | SHA-256 Content-Addressed Blob Store (`<2-hex>/<64-hex>`) |
@@ -691,18 +529,18 @@ All `POST` routes require `Authorization: Bearer <token>` (or `X-Dialtone-Token:
 
 ---
 
-## 12. Self-Test, Live Mesh Verification & Local CI
+## 10. Self-Test, Live Mesh Verification & Local CI
 
-Run the built-in 7-capability live verification suite, the live multi-node mesh verification command, or the full local CI pipeline at any time:
+Run the built-in live self-test (Key, signed gossip, blob transfer, A/B slot, supervisor, KV, API), the live multi-node mesh verification command, or the full local CI pipeline at any time:
 
 ```bash
-# Built-in 7-capability live self-test (spawns ephemeral local Iroh 1.3 gossip & store checks)
+# Built-in live self-test: real Iroh gossip and blob transfer between two local nodes, plus supervisor, slot, KV and API checks
 ./dialtone self-test
 
 # Verify the running local daemon's security posture, zero public directory exposure,
 # N-peer encrypted gossip convergence, and live QUIC blob transfer
 ./dialtone mesh-test --expect-peers 3 --timeout 15s
 
-# Full local CI suite (fmt, cargo test, release build, CLI fixtures, and live blob process crash auto-respawn)
+# Full local CI suite (zero-leak and domain-language gates, fmt, tests, release build, live node acceptance)
 ./ci.sh
 ```
