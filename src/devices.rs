@@ -162,7 +162,30 @@ pub fn normalize(devices: Vec<Device>) -> Vec<Device> {
             &b.detail,
         ))
     });
-    out.dedup_by(|a, b| a.kind == b.kind && a.name == b.name && a.bus == b.bus);
+    // Identical keyboard and pointer entries are one device seen through several HID
+    // collections; identical displays and disks are separate devices, so they are counted.
+    let mut counted: Vec<(Device, usize)> = Vec::new();
+    for d in out {
+        match counted.last_mut() {
+            Some((prev, n)) if prev.kind == d.kind && prev.name == d.name && prev.bus == d.bus => {
+                *n += 1
+            }
+            _ => counted.push((d, 1)),
+        }
+    }
+    let mut out: Vec<Device> = counted
+        .into_iter()
+        .map(|(mut d, n)| {
+            if n > 1 && matches!(d.kind.as_str(), "display" | "storage") {
+                d.detail = if d.detail.is_empty() {
+                    format!("{n}x")
+                } else {
+                    format!("{n}x {}", d.detail)
+                };
+            }
+            d
+        })
+        .collect();
     out.truncate(MAX_DEVICES);
     out
 }
@@ -775,6 +798,13 @@ mod tests {
             1,
             "duplicate HID collections collapse"
         );
+        let monitors = normalize(parse_pnp(
+            r#"[{"Class":"Monitor","FriendlyName":"Office Monitor","InstanceId":"DISPLAY\\A\\1"},
+                {"Class":"Monitor","FriendlyName":"Office Monitor","InstanceId":"DISPLAY\\A\\2"},
+                {"Class":"Monitor","FriendlyName":"Office Monitor","InstanceId":"DISPLAY\\A\\3"}]"#,
+        ));
+        assert_eq!(monitors.len(), 1);
+        assert_eq!(monitors[0].detail, "3x", "identical displays are counted");
         // A single device comes back from ConvertTo-Json as an object, not an array.
         let one = parse_pnp(
             r#"{"Class":"Keyboard","FriendlyName":"Solo Keyboard","InstanceId":"HID\\1"}"#,

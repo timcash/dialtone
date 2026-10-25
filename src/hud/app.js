@@ -1823,8 +1823,10 @@ function renderDeviceLines(target, isFocusStep) {
     lines.push(`<span class="dim">  no devices reported yet</span>`);
     return lines;
   }
-  const cell = (d) =>
-    `<span class="${codeCls}">${padR(DEVICE_CODES[d.kind] || "DEV", 4)}</span><span class="hi">${padR(d.name, 40)}</span> <span class="dim">${padR(d.bus || "", 10)}</span>`;
+    const cell = (d) => {
+    const label = d.detail ? `${d.name} (${d.detail})` : d.name;
+    return `<span class="${codeCls}">${padR(DEVICE_CODES[d.kind] || "DEV", 4)}</span><span class="hi">${padR(label, 44)}</span> <span class="dim">${padR(d.bus || "", 10)}</span>`;
+  };
   const shown = devices.slice(0, DEVICE_LIST_ROWS * DEVICE_LIST_COLS);
   for (let i = 0; i < shown.length; i += DEVICE_LIST_COLS) {
     lines.push("  " + shown.slice(i, i + DEVICE_LIST_COLS).map(cell).join("  "));

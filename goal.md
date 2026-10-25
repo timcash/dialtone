@@ -20,7 +20,8 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Seed** | A peer address used to dial into the mesh | `Seed`, `seeds` | bootstrap peer |
 | **Message** | What nodes gossip on a channel, signed and encrypted: a Beat, Summary, Echo or Inventory | `Message` | frame, packet |
 | **Beat** | A node's status (stats, Rtt echoes), gossiped every 5s; a *Summary* adds the 30s rolling summary, an *Echo* answers an Rtt probe | `Beat`, `beat` | heartbeat, hb, ping, pulse |
-| **Inventory** | A node's processes and services, gossiped when they change | `Inventory` | manifest, catalog |
+| **Inventory** | A node's processes, services and devices, gossiped when they change | `Inventory` | manifest, catalog |
+| **Device** | Hardware connected to a node: camera, microphone, speaker, keyboard, pointer, display, printer, storage, bluetooth, gamepad | `Device`, `devices` | peripheral, gadget |
 | **Stats** | Measured machine numbers: cpu, mem, disk, net | `Stats`, `stats` | telemetry, host resources, metrics |
 | **Rtt** | Round-trip time between two nodes, in ms | `rtt_ms` | latency |
 | **Blob** | Immutable bytes named by a digest | `Blob`, `blob` | artifact, payload, sha blob |
@@ -38,7 +39,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Daemon** | The OS login service (launchd / systemd / Scheduled Task) that starts the node | `daemon` | — |
 | **HUD** | The node's local web UI | `hud` | dashboard, index page |
 | **API** | The node's local HTTP control surface on `127.0.0.1:8788` | `api` | control plane routes |
-| **Actor** | One task of the running node: Mesh, Stats, Supervisor, Links, Allowlist, Deploy | `actors.rs` | worker, loop |
+| **Actor** | One task of the running node: Mesh, Stats, Supervisor, Devices, Links, Allowlist, Deploy | `actors.rs` | worker, loop |
 
 ### Code layout follows the words
 
@@ -54,6 +55,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | `service.rs` | Service and service references (was `metadata.rs`) |
 | `api.rs` / `hud.rs` | API routes and node state / HUD page (was `http.rs`) |
 | `actors.rs` | The running node's actors and the channels between them |
+| `devices.rs` | Device listing per OS (`system_profiler`, `Get-PnpDevice`, `/sys`) |
 | `hud/` | The HUD's static files and vendored three.js / h3-js |
 
 ### Commands and routes use the words
@@ -76,7 +78,11 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
    inventory-driven auto-deploy; let iroh's address lookup find peers instead of gossiping all-peer seed lists and
    re-joining every 5s; Rtt from iroh connection paths instead of broadcast echoes; the API reading `watch`
    snapshots instead of locking node state.
-2. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
+2. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
+   speakers, keyboards, pointers, displays, printers, storage and Bluetooth devices (no serials or IDs); they
+   travel in the Inventory, appear in `GET /api/devices` and `/api/mesh`, and the HUD lists the focused node's
+   devices with a 7th tour step, `DEV`.
+3. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
    vendored three.js 0.179.1 and h3-js 4.4.0 (no CDN). The API parses requests with `httparse` and rejects
    `Transfer-Encoding`, ambiguous `Content-Length` and oversize heads. One persistent iroh-blobs `FsStore` replaces
    the SHA-256 file tree and the in-memory store: blobs are named by `sha256/<hex>` tags, GC removes untagged data,
@@ -84,14 +90,14 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
    `run_node` boots the node and starts six actors (`actors.rs`: Mesh, Stats, Supervisor, Links, Allowlist,
    Deploy) stopped by one `CancellationToken`. Gossip carries a typed `Message` (envelope v4: Beat, Summary, Echo,
    Inventory); processes and services travel only in inventories, sent on change.
-3. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
+4. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
    seeded node state (`dialtone hud` now serves live state); the deploy-plan, build-cache, build-decision, manifest,
    proof-validation, alert-ack, tiered-fetch, process-intent, install.sh, catalog, command-journal / rtcore UDP,
    cursor-job, key-lease, service-ref, systemd drop-in and peer-cache code; 22 API routes no caller used, including
    the one-frame `/ws` stub; the hand-written SHA-1 (now unneeded) and hex / base64 codecs (now the `hex` and
    `base64` crates, same accepted inputs). The self-test exercises only real behaviour. The HUD's non-working
    Init / Invite / Join actions became a panel of the CLI commands (the page carries no API token by design).
-4. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
+5. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
    **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
@@ -105,7 +111,8 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | F5 | **Supervisor & probe** | Stage programs from blobs, start / restart / stop processes, default `probe` program, the five-check Probe (`BLB` `KVS` `PRC` `MSH` `A/B`) | `supervisor.rs`, node state in `api.rs` |
 | F6 | **Deploy, slots & daemon install** | Deploy contract, A/B slot rollback, launchd / systemd `--user` / Scheduled Task daemon install | `deploy.rs` |
 | F7 | **Node runtime & API** | 5-stage boot, six actors with one shutdown token, shared node state, `httparse` API on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `actors.rs`, `api.rs` |
-| F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, 6-step tour with captions, blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
+| F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, focused node's device list, 7-step tour with captions, blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
+| F12 | **Devices** | Per-OS listing of connected cameras, microphones, speakers, keyboards, pointers, displays, printers, storage, Bluetooth devices; gossiped in the Inventory | `devices.rs`, Devices actor |
 | F9 | **Verification** | `self-test`, `mesh-test`, `probe`, unit + live iroh tests, `ci.sh` (zero-leak gate, domain-language gate, fmt, tests, live acceptance), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
 | F10 | **Services & records** | Service refs, Services, key leases, policies, Event / Alert / Log / Kv records with cursor pagination, proof validation | `service.rs`, `record.rs` |
 | F11 | **CLI & fixtures** | Argument parsing, `help`, and the `*-fixture` preview commands | `main.rs` |

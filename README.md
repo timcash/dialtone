@@ -20,6 +20,7 @@ actions:
   invite [--ttl 15m]       Mint a signed, expiring, single-use invite
   daemon [install|status]  Install or inspect the daemon that starts the node at login
   probe                    Run one probe on the local node (BLB, KVS, PRC, MSH, A/B)
+  devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)
   mesh-test                Check the running node's security, mesh convergence and blob transfer
   hud                      Serve the HUD and API only (no mesh)
   node                     Run the node without the HUD or API
@@ -286,7 +287,7 @@ Or open **`http://127.0.0.1:8788`** in your browser to view the live 3D topology
 **How the mesh is protected**
 
 - **Allowlist at the handshake.** Every QUIC connection (gossip and blobs, in and out) is closed right after the TLS handshake unless the remote NodeId is on the allowlist. `dialtone allowlist add/remove` edits `~/.dialtone/config.json`; a running node picks the change up within 5 seconds, no restart.
-- **Signed messages.** Nodes gossip four typed messages: a **Beat** every 5 seconds (liveness, stats, Rtt echoes), a **Summary** every 30 seconds, an **Echo** in reply to an Rtt probe, and an **Inventory** (the node's processes and services) when it changes, when a neighbor joins and with every summary. Each message is signed with the sender's Key and encrypted with the channel keys. A node drops messages whose signature does not match the NodeId they claim, messages from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
+- **Signed messages.** Nodes gossip four typed messages: a **Beat** every 5 seconds (liveness, stats, Rtt echoes), a **Summary** every 30 seconds, an **Echo** in reply to an Rtt probe, and an **Inventory** (the node's processes, services and devices) when it changes, when a neighbor joins and with every summary. Each message is signed with the sender's Key and encrypted with the channel keys. A node drops messages whose signature does not match the NodeId they claim, messages from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
 - **No process secrets on the wire.** An inventory lists each process without its `env` or `args`.
 - **Deploys only from the allowlist.** A process offered for mesh deploy is pulled only from an allowlisted signer and an allowlisted blob provider, never a peer's probe program, and only once per (peer, digest). Blob pulls use the node's own endpoint, so the provider's allowlist decides.
 - **HUD.** The page carries no API token; a per-response Content-Security-Policy nonce lets only its own scripts run. three.js and h3-js are compiled into the binary and served from `/hud/vendor/`, so the HUD loads nothing from the Internet.
@@ -449,6 +450,20 @@ Every running `dialtone` daemon attaches `iroh_blobs::BlobsProtocol` to its live
 
 ---
 
+### Devices
+
+Every node lists the devices connected to it — cameras, microphones, speakers, keyboards, pointers (mice, trackpads), displays, printers, storage, Bluetooth devices and gamepads — using the OS's own view: `system_profiler` on macOS, `Get-PnpDevice` on Windows, `/sys` and `/proc` on Linux. Only each device's kind, name, bus (`built-in`, `usb`, `bluetooth`, `hid`, `display`, ...) and a short detail are kept; serial numbers and device IDs are dropped.
+
+```bash
+./dialtone devices          # table of this machine's devices
+./dialtone devices --json   # the same as JSON
+curl -s http://127.0.0.1:8788/api/devices | jq
+```
+
+A running node lists its devices every 60 seconds and gossips them in its inventory when they change, so every node's devices appear in `GET /api/mesh` (`nodes[].devices`). The HUD lists the focused node's devices under the node table, and the tour's `DEV` step describes them. Device names (for example a Bluetooth headset named after its owner) are visible to every node in the mesh.
+
+---
+
 ## 7. Supervised Processes
 
 ### Keep a store Blob Running as a Daemon Process
@@ -509,6 +524,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | `POST /api/blob/share` | Put a blob in the store and return its `iroh-blobs://ticket/...` |
 | `POST /api/blob/pull` | Pull a blob by ticket over QUIC into the store |
 | `GET /api/processes` | Supervised processes with live PID / status |
+| `GET /api/devices` | Devices connected to this node (cameras, microphones, keyboards, ...) |
 | `POST /api/processes/blob` | Stage a program blob (or ticket) and run / stop it as a process |
 | `POST /api/probe` | Run one probe (BLB, KVS, PRC, MSH, A/B) |
 
