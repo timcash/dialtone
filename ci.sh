@@ -163,6 +163,16 @@ STOP_STATUS=$(curl -fsS -X POST http://127.0.0.1:18794/api/processes/blob \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"ci-process\",\"digest\":\"$BLOB_DIGEST\",\"desired_state\":\"stopped\"}" | python3 -c 'import sys,json; d=json.load(sys.stdin)["process"]; assert d["pid"] is None; print(d["status"])')
 echo "    4. Stopped the process cleanly (status=$STOP_STATUS)"
+curl -fsS -X POST http://127.0.0.1:18794/api/processes \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ci-process","desired_state":"removed"}' | grep -q '"status":"removed"'
+curl -fsS http://127.0.0.1:18794/api/processes | python3 -c 'import sys,json; assert not [p for p in json.load(sys.stdin)["processes"] if p["name"]=="ci-process"]'
+if ls "$CI_BLOB_DIR"/run/ci-process-* >/dev/null 2>&1; then
+  echo "ERROR: removed process left its staged program behind" >&2
+  exit 1
+fi
+echo "       Removed it: gone from /api/processes and its staged program deleted"
 
 # 5. Verify blob share & pull and mesh-test against the running node
 SHARE_JSON=$(DIALTONE_STATE_DIR="$CI_BLOB_DIR" "$BIN" blob share "ci-live-blob-payload" --listen 127.0.0.1:18794)

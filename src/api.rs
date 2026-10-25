@@ -1373,12 +1373,15 @@ fn route_request(
             if name.is_empty() {
                 return write_json(&mut stream, 400, &json!({ "error": "name is required" }));
             }
-            let desired_state = parsed
+                        let desired_state = parsed
                 .get("desired_state")
                 .and_then(Value::as_str)
                 .unwrap_or("running")
                 .trim()
                 .to_string();
+            if desired_state == "removed" {
+                return remove_process(&mut stream, &mut st, &name);
+            }
             let args: Vec<String> = parsed
                 .get("args")
                 .and_then(Value::as_array)
@@ -1613,6 +1616,60 @@ fn route_request(
             &json!({ "error": "not found", "path": path }),
         ),
     }
+}
+
+/// Stop a process and forget it: drop its spec from the node state and `config.json`, and
+/// delete its staged program file when no other spec runs it.
+fn remove_process<W: Write>(stream: &mut W, st: &mut NodeState, name: &str) -> Result<(), String> {
+    let in_config = st.mesh_config.processes.iter().any(|p| p.name == name);
+    let Some(mut spec) = st
+        .processes
+        .iter()
+        .position(|p| p.name == name)
+        .map(|i| st.processes.remove(i))
+        .or_else(|| {
+            st.mesh_config
+                .processes
+                .iter()
+                .find(|p| p.name == name)
+                .cloned()
+        })
+    else {
+        return write_json(
+            stream,
+            404,
+            &json!({ "error": format!("no process named {name:?}") }),
+        );
+    };
+    spec.desired_state = "removed".to_string();
+    if let Ok(mut sup) = st.supervisor.lock() {
+        let _ = sup.reconcile(std::slice::from_mut(&mut spec));
+    }
+    if in_config {
+        st.mesh_config.processes.retain(|p| p.name != name);
+        st.mesh_config.updated_at_unix = now_unix();
+        let _ = save_mesh_config(&default_config_path(), &st.mesh_config);
+    }
+    let run_dir = st.store_dir.parent().unwrap_or(&st.store_dir).join("run");
+    let staged = std::path::Path::new(&spec.path);
+    if staged.starts_with(&run_dir) && !st.processes.iter().any(|p| p.path == spec.path) {
+        let _ = fs::remove_file(staged);
+    }
+    let procs_snapshot = st.processes.clone();
+    if let Some(me) = st.self_entry_mut() {
+        me.processes = procs_snapshot;
+    }
+    st.record_log(
+        "supervisor",
+        "INFO",
+        "stdout",
+        format!("removed process '{name}'"),
+    );
+    write_json(
+        stream,
+        200,
+        &json!({ "status": "removed", "node": st.node, "process": name }),
+    )
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
