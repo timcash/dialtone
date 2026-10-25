@@ -32,5 +32,3 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run Unit & Integration Tests
         run: cargo test
-      - name: Run 7-Capability Live Self-Test
-        run: cargo run --release -- self-test

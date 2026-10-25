@@ -6,18 +6,16 @@ use std::time::Duration;
 use futures_lite::future::block_on;
 use futures_lite::StreamExt;
 use iroh::address_lookup::memory::MemoryLookup;
-use iroh::protocol::Router;
 use iroh_blobs::api::blobs::BlobStatus;
 use iroh_blobs::api::downloader::Downloader;
 use iroh_blobs::store::fs::options::Options as FsOptions;
 use iroh_blobs::store::fs::FsStore;
-use iroh_blobs::store::mem::MemStore;
 use iroh_blobs::store::GcConfig;
-use iroh_blobs::{ticket::BlobTicket, BlobsProtocol, Hash};
+use iroh_blobs::{ticket::BlobTicket, Hash};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::node::{build_endpoint_builder, IrohTransportConfig};
+use crate::node::IrohTransportConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlobTransportReport {
@@ -382,97 +380,6 @@ pub fn parse_blob_ticket_uri(uri: &str) -> Result<(BlobTicket, String), String> 
     Ok((ticket, digest))
 }
 
-/// Live end-to-end native `iroh-blobs` transfer between a provider endpoint and
-/// a fetcher endpoint over QUIC, verifying SHA-256 before storing into the target cache.
-pub async fn transfer_blob_via_iroh_ticket(
-    payload: &[u8],
-    work_dir: &Path,
-    config: &IrohTransportConfig,
-) -> Result<BlobTransportReport, String> {
-    fs::create_dir_all(work_dir)
-        .map_err(|e| format!("create work dir {}: {e}", work_dir.display()))?;
-    let digest = digest_of(payload);
-    let cached_bytes = payload.to_vec();
-
-    let provider_endpoint = build_endpoint_builder(config)?
-        .bind()
-        .await
-        .map_err(|e| format!("bind provider endpoint: {e}"))?;
-    let provider_id = provider_endpoint.id();
-    let store = MemStore::new();
-    let tag = store
-        .blobs()
-        .add_slice(&cached_bytes)
-        .await
-        .map_err(|e| format!("import blob into MemStore: {e}"))?;
-    let ticket = BlobTicket::new(provider_endpoint.addr(), tag.hash, tag.format);
-    let ticket_uri = format_blob_ticket_uri(&ticket, &digest);
-    let blake3_hash = tag.hash.to_string();
-
-    let blobs_proto = BlobsProtocol::new(&store, None);
-    let router = Router::builder(provider_endpoint.clone())
-        .accept(iroh_blobs::ALPN, blobs_proto)
-        .spawn();
-
-    let (parsed_ticket, expected_digest) = parse_blob_ticket_uri(&ticket_uri)?;
-    let fetcher_endpoint = build_endpoint_builder(config)?
-        .bind()
-        .await
-        .map_err(|e| format!("bind fetcher endpoint: {e}"))?;
-    let memory_lookup = MemoryLookup::new();
-    memory_lookup.add_endpoint_info(parsed_ticket.addr().clone());
-    fetcher_endpoint
-        .address_lookup()
-        .map_err(|e| format!("address lookup handle: {e}"))?
-        .add(memory_lookup);
-
-    let mem_store = MemStore::new();
-    let downloader = mem_store.downloader(&fetcher_endpoint);
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        downloader.download(parsed_ticket.hash(), Some(parsed_ticket.addr().id)),
-    )
-    .await
-    .map_err(|_| "iroh-blobs download timed out".to_string())?
-    .map_err(|e| format!("iroh-blobs download failed: {e}"))?;
-
-    let (active_address_modes, known_address_modes, remote_info_status) =
-        observe_remote_info(&fetcher_endpoint, provider_id).await;
-
-    let exported_tmp = work_dir.join("exported.bin");
-    mem_store
-        .blobs()
-        .export(parsed_ticket.hash(), &exported_tmp)
-        .await
-        .map_err(|e| format!("export downloaded blob: {e}"))?;
-    let downloaded_bytes =
-        fs::read(&exported_tmp).map_err(|e| format!("read exported blob: {e}"))?;
-    let verified_digest = digest_of(&downloaded_bytes);
-    if verified_digest != expected_digest {
-        return Err(format!(
-            "blob digest mismatch: expected {expected_digest}, observed {verified_digest}"
-        ));
-    }
-
-    fetcher_endpoint.close().await;
-    let _ = router.shutdown().await;
-    let _ = fs::remove_dir_all(work_dir);
-
-    Ok(BlobTransportReport {
-        digest: verified_digest,
-        blake3_hash,
-        provider_node_id: provider_id.to_string(),
-        ticket_uri,
-        bytes: downloaded_bytes.len() as u64,
-        transferred_bytes: downloaded_bytes.len() as u64,
-        method: "iroh-blobs-ticket".to_string(),
-        fallback_used: false,
-        active_address_modes,
-        known_address_modes,
-        remote_info_status,
-    })
-}
-
 async fn observe_remote_info(
     endpoint: &iroh::Endpoint,
     provider: iroh::EndpointId,
@@ -658,6 +565,10 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::build_endpoint_builder;
+    use iroh::protocol::Router;
+    use iroh_blobs::store::mem::MemStore;
+    use iroh_blobs::BlobsProtocol;
     use std::env;
 
     fn temp_store(name: &str) -> (PathBuf, Blobs) {
@@ -873,31 +784,5 @@ mod tests {
             assert!(fetch(stranger, provider_addr, tag.hash).await.is_err());
             let _ = router.shutdown().await;
         });
-    }
-
-    #[test]
-    fn live_iroh_blobs_ticket_transfer_verifies_sha256_and_records_path_evidence() {
-        let dir = env::temp_dir().join(format!(
-            "dialtone-live-blob-transfer-{}",
-            std::process::id()
-        ));
-        let payload = b"dialtone content-addressed blob payload over iroh-blobs QUIC";
-        let expected_sha = digest_of(payload);
-
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let report = rt
-            .block_on(transfer_blob_via_iroh_ticket(
-                payload,
-                &dir,
-                &IrohTransportConfig::local_offline(),
-            ))
-            .unwrap();
-
-        assert_eq!(report.digest, expected_sha);
-        assert_eq!(report.bytes, payload.len() as u64);
-        assert!(report.ticket_uri.starts_with("iroh-blobs://ticket/"));
-        assert!(report
-            .known_address_modes
-            .contains(&"direct-ip".to_string()));
     }
 }

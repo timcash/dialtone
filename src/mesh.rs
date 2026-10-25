@@ -4,31 +4,20 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     XChaCha20Poly1305, XNonce,
 };
-use futures_lite::StreamExt;
-use iroh::address_lookup::memory::MemoryLookup;
-use iroh::protocol::Router;
 use iroh::EndpointAddr;
-use iroh_gossip::{
-    api::Event as GossipEvent,
-    net::{Gossip, GOSSIP_ALPN},
-    proto::TopicId,
-};
+use iroh_gossip::proto::TopicId;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::node::{
-    advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, is_tailnet_ip,
-    IrohTransportConfig, IrohTransportDiagnostics,
-};
+use crate::node::{is_tailnet_ip, IrohTransportDiagnostics};
 use crate::service::Service;
-use crate::stats::{sample_stats, Stats, StatsSummary};
+use crate::stats::{Stats, StatsSummary};
 
 pub const BEAT_SCHEMA: &str = "dialtone.iroh.beat.v1";
 /// v4: the encrypted plaintext is a `SignedMessage` (a typed `Message` as JSON + the sender
@@ -2009,201 +1998,214 @@ pub fn prune_stale_peers(peers: &mut Vec<Beat>, now: u64, ttl_secs: u64) -> usiz
     before.saturating_sub(peers.len())
 }
 
-/// Live in-process two-peer `iroh-gossip` beat exchange over QUIC protected by Argon2id + XChaCha20-Poly1305.
-pub async fn verify_live_gossip_exchange(
-    node_a: &str,
-    node_b: &str,
-) -> Result<(Beat, Beat), String> {
-    let config = IrohTransportConfig::local_offline();
-    let test_secret = "dt-SelfTest_HighEntropy_Channel_Key_2026!";
-    let keys = derive_channel_keys_v2(DEFAULT_CHANNEL_NAME, test_secret);
-    let topic_id = keys.topic_id;
-
-    // Each node allowlists only the other, exactly as a two-node mesh would.
-    let key_a = iroh::SecretKey::generate();
-    let key_b = iroh::SecretKey::generate();
-    let lookup_a = MemoryLookup::new();
-    let endpoint_a = build_endpoint_builder(&config)?
-        .address_lookup(lookup_a.clone())
-        .secret_key(key_a.clone())
-        .hooks(crate::node::AllowlistHook::new(LiveAllowlist::new(&[
-            key_b.public().to_string(),
-        ])))
-        .bind()
-        .await
-        .map_err(|e| format!("bind endpoint A: {e}"))?;
-    let gossip_a = Gossip::builder()
-        .max_message_size(65_536)
-        .spawn(endpoint_a.clone());
-    let router_a = Router::builder(endpoint_a.clone())
-        .accept(GOSSIP_ALPN, gossip_a.clone())
-        .spawn();
-
-    let lookup_b = MemoryLookup::new();
-    let endpoint_b = build_endpoint_builder(&config)?
-        .address_lookup(lookup_b.clone())
-        .secret_key(key_b.clone())
-        .hooks(crate::node::AllowlistHook::new(LiveAllowlist::new(&[
-            key_a.public().to_string(),
-        ])))
-        .bind()
-        .await
-        .map_err(|e| format!("bind endpoint B: {e}"))?;
-    let gossip_b = Gossip::builder()
-        .max_message_size(65_536)
-        .spawn(endpoint_b.clone());
-    let router_b = Router::builder(endpoint_b.clone())
-        .accept(GOSSIP_ALPN, gossip_b.clone())
-        .spawn();
-
-    let addr_a = advertised_endpoint_addr(&endpoint_a.addr(), &config);
-    let addr_b = advertised_endpoint_addr(&endpoint_b.addr(), &config);
-    lookup_a.add_endpoint_info(addr_b.clone());
-    lookup_b.add_endpoint_info(addr_a.clone());
-
-    let id_a = endpoint_a.id();
-    let id_b = endpoint_b.id();
-
-    let ticket_a = SeedList {
-        topic: topic_id,
-        peers: vec![addr_a.clone()],
-    }
-    .to_text()?;
-    let ticket_b = SeedList {
-        topic: topic_id,
-        peers: vec![addr_b.clone()],
-    }
-    .to_text()?;
-
-    let topic_a = gossip_a
-        .subscribe(topic_id, vec![id_b])
-        .await
-        .map_err(|e| format!("subscribe A: {e}"))?;
-    let topic_b = gossip_b
-        .subscribe(topic_id, vec![id_a])
-        .await
-        .map_err(|e| format!("subscribe B: {e}"))?;
-
-    let (sender_a, _receiver_a) = topic_a.split();
-    let (sender_b, mut receiver_b) = topic_b.split();
-
-    sender_a
-        .join_peers(vec![id_b])
-        .await
-        .map_err(|e| format!("join_peers A->B: {e}"))?;
-    sender_b
-        .join_peers(vec![id_a])
-        .await
-        .map_err(|e| format!("join_peers B->A: {e}"))?;
-
-    let beat_a = Beat {
-        schema: BEAT_SCHEMA.to_string(),
-        node: node_a.to_string(),
-        node_id: id_a.to_string(),
-        ticket: ticket_a,
-        counter: 1,
-        updated_at_unix: now_unix(),
-        kind: "summary".to_string(),
-        beat_interval_secs: BEAT_INTERVAL_SECS,
-        summary_interval_secs: SUMMARY_INTERVAL_SECS,
-        sent_mono_ms: monotonic_now_ms(),
-        rtt_probe_requested: true,
-        peer_echoes: HashMap::new(),
-        peer_rtt_ms: std::collections::BTreeMap::new(),
-        summary_stats: None,
-        sent_unix_ms: 0,
-        os: default_os(),
-        arch: default_arch(),
-        role: node_role_for(node_a),
-        capabilities: node_capabilities_for(node_a),
-        stats: sample_stats(node_a, None, 1),
-        service_endpoints: vec![Service {
-            name: "nats".to_string(),
-            kind: "nats-jetstream".to_string(),
-            protocol: "nats".to_string(),
-            url: format!("dialtone://{node_a}/controller/nats"),
-            listen: "127.0.0.1:4222".to_string(),
-            status: "running".to_string(),
-            advertised_by: node_a.to_string(),
-            role: "controller".to_string(),
-            mesh: "dialtone-iroh-gossip".to_string(),
-            subjects: vec!["dialtone/events.>".to_string()],
-        }],
-        processes: Vec::new(),
-        iroh_transport: build_diagnostics(&config, &addr_a, None, &id_a.to_string()),
-        observed_remote_addrs: Vec::new(),
-        tailnet_used: false,
-        devices: Vec::new(),
-        geo_location: None,
-        probe: None,
-        store: None,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::node::{
+        advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, IrohTransportConfig,
     };
+    use crate::stats::sample_stats;
+    use futures_lite::StreamExt;
+    use iroh::address_lookup::memory::MemoryLookup;
+    use iroh::protocol::Router;
+    use iroh_gossip::{
+        api::Event as GossipEvent,
+        net::{Gossip, GOSSIP_ALPN},
+    };
+    use std::time::Duration;
 
-    let received_beat: Beat = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let encrypted_payload_a =
-                seal_message(&Message::Summary(beat_a.clone()), &keys, &key_a)?;
-            let _ = sender_a.broadcast(encrypted_payload_a.into()).await;
-            while let Ok(Some(event)) =
-                tokio::time::timeout(Duration::from_millis(120), receiver_b.next()).await
-            {
-                if let GossipEvent::Received(msg) = event.map_err(|e| e.to_string())? {
-                    if let Some(parsed) = open_message(&msg.content, &keys)
-                        .ok()
-                        .and_then(Message::into_beat)
-                    {
-                        if parsed.node == node_a {
-                            return Ok::<Beat, String>(parsed);
+    /// Live in-process two-peer `iroh-gossip` beat exchange over QUIC protected by Argon2id + XChaCha20-Poly1305.
+    async fn verify_live_gossip_exchange(
+        node_a: &str,
+        node_b: &str,
+    ) -> Result<(Beat, Beat), String> {
+        let config = IrohTransportConfig::local_offline();
+        let test_secret = "dt-SelfTest_HighEntropy_Channel_Key_2026!";
+        let keys = derive_channel_keys_v2(DEFAULT_CHANNEL_NAME, test_secret);
+        let topic_id = keys.topic_id;
+
+        // Each node allowlists only the other, exactly as a two-node mesh would.
+        let key_a = iroh::SecretKey::generate();
+        let key_b = iroh::SecretKey::generate();
+        let lookup_a = MemoryLookup::new();
+        let endpoint_a = build_endpoint_builder(&config)?
+            .address_lookup(lookup_a.clone())
+            .secret_key(key_a.clone())
+            .hooks(crate::node::AllowlistHook::new(LiveAllowlist::new(&[
+                key_b.public().to_string(),
+            ])))
+            .bind()
+            .await
+            .map_err(|e| format!("bind endpoint A: {e}"))?;
+        let gossip_a = Gossip::builder()
+            .max_message_size(65_536)
+            .spawn(endpoint_a.clone());
+        let router_a = Router::builder(endpoint_a.clone())
+            .accept(GOSSIP_ALPN, gossip_a.clone())
+            .spawn();
+
+        let lookup_b = MemoryLookup::new();
+        let endpoint_b = build_endpoint_builder(&config)?
+            .address_lookup(lookup_b.clone())
+            .secret_key(key_b.clone())
+            .hooks(crate::node::AllowlistHook::new(LiveAllowlist::new(&[
+                key_a.public().to_string(),
+            ])))
+            .bind()
+            .await
+            .map_err(|e| format!("bind endpoint B: {e}"))?;
+        let gossip_b = Gossip::builder()
+            .max_message_size(65_536)
+            .spawn(endpoint_b.clone());
+        let router_b = Router::builder(endpoint_b.clone())
+            .accept(GOSSIP_ALPN, gossip_b.clone())
+            .spawn();
+
+        let addr_a = advertised_endpoint_addr(&endpoint_a.addr(), &config);
+        let addr_b = advertised_endpoint_addr(&endpoint_b.addr(), &config);
+        lookup_a.add_endpoint_info(addr_b.clone());
+        lookup_b.add_endpoint_info(addr_a.clone());
+
+        let id_a = endpoint_a.id();
+        let id_b = endpoint_b.id();
+
+        let ticket_a = SeedList {
+            topic: topic_id,
+            peers: vec![addr_a.clone()],
+        }
+        .to_text()?;
+        let ticket_b = SeedList {
+            topic: topic_id,
+            peers: vec![addr_b.clone()],
+        }
+        .to_text()?;
+
+        let topic_a = gossip_a
+            .subscribe(topic_id, vec![id_b])
+            .await
+            .map_err(|e| format!("subscribe A: {e}"))?;
+        let topic_b = gossip_b
+            .subscribe(topic_id, vec![id_a])
+            .await
+            .map_err(|e| format!("subscribe B: {e}"))?;
+
+        let (sender_a, _receiver_a) = topic_a.split();
+        let (sender_b, mut receiver_b) = topic_b.split();
+
+        sender_a
+            .join_peers(vec![id_b])
+            .await
+            .map_err(|e| format!("join_peers A->B: {e}"))?;
+        sender_b
+            .join_peers(vec![id_a])
+            .await
+            .map_err(|e| format!("join_peers B->A: {e}"))?;
+
+        let beat_a = Beat {
+            schema: BEAT_SCHEMA.to_string(),
+            node: node_a.to_string(),
+            node_id: id_a.to_string(),
+            ticket: ticket_a,
+            counter: 1,
+            updated_at_unix: now_unix(),
+            kind: "summary".to_string(),
+            beat_interval_secs: BEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_INTERVAL_SECS,
+            sent_mono_ms: monotonic_now_ms(),
+            rtt_probe_requested: true,
+            peer_echoes: HashMap::new(),
+            peer_rtt_ms: std::collections::BTreeMap::new(),
+            summary_stats: None,
+            sent_unix_ms: 0,
+            os: default_os(),
+            arch: default_arch(),
+            role: node_role_for(node_a),
+            capabilities: node_capabilities_for(node_a),
+            stats: sample_stats(node_a, None, 1),
+            service_endpoints: vec![Service {
+                name: "nats".to_string(),
+                kind: "nats-jetstream".to_string(),
+                protocol: "nats".to_string(),
+                url: format!("dialtone://{node_a}/controller/nats"),
+                listen: "127.0.0.1:4222".to_string(),
+                status: "running".to_string(),
+                advertised_by: node_a.to_string(),
+                role: "controller".to_string(),
+                mesh: "dialtone-iroh-gossip".to_string(),
+                subjects: vec!["dialtone/events.>".to_string()],
+            }],
+            processes: Vec::new(),
+            iroh_transport: build_diagnostics(&config, &addr_a, None, &id_a.to_string()),
+            observed_remote_addrs: Vec::new(),
+            tailnet_used: false,
+            devices: Vec::new(),
+            geo_location: None,
+            probe: None,
+            store: None,
+        };
+
+        let received_beat: Beat = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let encrypted_payload_a =
+                    seal_message(&Message::Summary(beat_a.clone()), &keys, &key_a)?;
+                let _ = sender_a.broadcast(encrypted_payload_a.into()).await;
+                while let Ok(Some(event)) =
+                    tokio::time::timeout(Duration::from_millis(120), receiver_b.next()).await
+                {
+                    if let GossipEvent::Received(msg) = event.map_err(|e| e.to_string())? {
+                        if let Some(parsed) = open_message(&msg.content, &keys)
+                            .ok()
+                            .and_then(Message::into_beat)
+                        {
+                            if parsed.node == node_a {
+                                return Ok::<Beat, String>(parsed);
+                            }
                         }
                     }
                 }
             }
-        }
-    })
-    .await
-    .map_err(|_| "timed out waiting for encrypted iroh-gossip beat".to_string())??;
+        })
+        .await
+        .map_err(|_| "timed out waiting for encrypted iroh-gossip beat".to_string())??;
 
-    let beat_b = Beat {
-        schema: BEAT_SCHEMA.to_string(),
-        node: node_b.to_string(),
-        node_id: id_b.to_string(),
-        ticket: ticket_b,
-        counter: 1,
-        updated_at_unix: now_unix(),
-        kind: "summary".to_string(),
-        beat_interval_secs: BEAT_INTERVAL_SECS,
-        summary_interval_secs: SUMMARY_INTERVAL_SECS,
-        sent_mono_ms: monotonic_now_ms(),
-        rtt_probe_requested: false,
-        peer_echoes: HashMap::new(),
-        peer_rtt_ms: std::collections::BTreeMap::new(),
-        summary_stats: None,
-        sent_unix_ms: 0,
-        os: default_os(),
-        arch: default_arch(),
-        role: node_role_for(node_b),
-        capabilities: node_capabilities_for(node_b),
-        stats: sample_stats(node_b, None, 1),
-        service_endpoints: Vec::new(),
-        processes: Vec::new(),
-        iroh_transport: build_diagnostics(&config, &addr_b, None, &id_b.to_string()),
-        observed_remote_addrs: Vec::new(),
-        tailnet_used: false,
-        devices: Vec::new(),
-        geo_location: None,
-        probe: None,
-        store: None,
-    };
+        let beat_b = Beat {
+            schema: BEAT_SCHEMA.to_string(),
+            node: node_b.to_string(),
+            node_id: id_b.to_string(),
+            ticket: ticket_b,
+            counter: 1,
+            updated_at_unix: now_unix(),
+            kind: "summary".to_string(),
+            beat_interval_secs: BEAT_INTERVAL_SECS,
+            summary_interval_secs: SUMMARY_INTERVAL_SECS,
+            sent_mono_ms: monotonic_now_ms(),
+            rtt_probe_requested: false,
+            peer_echoes: HashMap::new(),
+            peer_rtt_ms: std::collections::BTreeMap::new(),
+            summary_stats: None,
+            sent_unix_ms: 0,
+            os: default_os(),
+            arch: default_arch(),
+            role: node_role_for(node_b),
+            capabilities: node_capabilities_for(node_b),
+            stats: sample_stats(node_b, None, 1),
+            service_endpoints: Vec::new(),
+            processes: Vec::new(),
+            iroh_transport: build_diagnostics(&config, &addr_b, None, &id_b.to_string()),
+            observed_remote_addrs: Vec::new(),
+            tailnet_used: false,
+            devices: Vec::new(),
+            geo_location: None,
+            probe: None,
+            store: None,
+        };
 
-    let _ = router_a.shutdown().await;
-    let _ = router_b.shutdown().await;
+        let _ = router_a.shutdown().await;
+        let _ = router_b.shutdown().await;
 
-    Ok((received_beat, beat_b))
-}
+        Ok((received_beat, beat_b))
+    }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
     use std::env;
 
     #[test]

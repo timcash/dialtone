@@ -11,6 +11,7 @@ use dialtone::api::{
     validate_listen_addr_security, NodeState,
 };
 use dialtone::blob::{Blobs, Store};
+use dialtone::collect_node_diagnostics;
 use dialtone::deploy::{install_persistent_os_daemon, render_os_service_unit};
 use dialtone::mesh::{
     allow_peer_in_config_with_addrs, cached_local_public_ip_geo, default_arch, default_config_path,
@@ -28,7 +29,6 @@ use dialtone::node::{
     IrohTransportDiagnostics,
 };
 use dialtone::stats::{sample_stats, StatsWindow};
-use dialtone::{collect_node_diagnostics, run_self_test};
 use iroh::address_lookup::memory::MemoryLookup;
 use iroh::protocol::Router;
 use iroh_gossip::net::{Gossip, GOSSIP_ALPN};
@@ -55,7 +55,6 @@ fn print_usage() {
          \x20 hud                      Serve the HUD and API only (no mesh)\n\
          \x20 node                     Run the node without the HUD or API\n\
          \x20 status                   Print this node's NodeId and transport report\n\
-         \x20 self-test | ci           Run full 7-capability live verification suite\n\
          \x20 service                  Render OS login service unit (macos | linux | windows)\n\
          \x20 help                     Show this help\n\n\
          flags:\n\
@@ -180,10 +179,6 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "help" | "-h" | "--help" => {
                 opts.action = "help".to_string();
                 return Ok(opts);
-            }
-            "self-test" | "--self-test" | "ci" => {
-                opts.action = "self-test".to_string();
-                action_set = true;
             }
             "mesh-test" | "fleet-test" /* compat */ if !action_set => { // compat
                 opts.action = "mesh-test".to_string();
@@ -1819,9 +1814,6 @@ async fn main() {
                 }))
                 .unwrap()
             );
-        }),
-        "self-test" => run_self_test().await.map(|report| {
-            println!("{}", serde_json::to_string_pretty(&report).unwrap());
         }),
         "service" => {
             let exe =

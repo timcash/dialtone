@@ -46,10 +46,8 @@ ci_cleanup() {
 trap ci_cleanup EXIT
 export DIALTONE_STATE_DIR="$CI_BLOB_DIR"
 
-echo "==> [4/5] Running end-to-end single-binary CLI & 7-capability acceptance suite"
-"$BIN" self-test > /tmp/dialtone-ci-self-test.json
-grep -q '"status": "passed"' /tmp/dialtone-ci-self-test.json
-grep -q '"iroh_version": "1.3.0"' /tmp/dialtone-ci-self-test.json
+echo "==> [4/5] Running end-to-end single-binary CLI checks"
+"$BIN" devices --json > /tmp/dialtone-ci-devices.json
 
 "$BIN" status --node node-alpha > /tmp/dialtone-ci-status.json
 grep -q '"steady_state_data_plane": "iroh-quic"' /tmp/dialtone-ci-status.json

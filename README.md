@@ -25,7 +25,6 @@ actions:
   hud                      Serve the HUD and API only (no mesh)
   node                     Run the node without the HUD or API
   status                   Print this node's NodeId and transport report
-  self-test | ci           Run full 7-capability live verification suite
   service                  Render OS login service unit (macos | linux | windows)
   help                     Show this help
 
@@ -120,14 +119,14 @@ echo "Channel secret: $CHANNEL_PW"
 ./dialtone up --node node-alpha
 ```
 
-### 4. Optional: Install as a Background Login Service & Run Self-Test
+### 4. Optional: Install as a Background Login Service & Check the Mesh
 
 ```bash
 # Register dialtone as a user-level OS service (launchd / systemd --user / Windows Scheduled Task)
 ./dialtone daemon install
 
-# Verify all 7 capabilities (live Iroh 1.3 QUIC gossip, store, and process supervision)
-./dialtone self-test
+# Check the running node: security, mesh convergence and a live blob transfer
+./dialtone mesh-test --expect-peers 1
 ```
 
 ---
@@ -548,14 +547,11 @@ Old route names (`/api/gossip`, `/api/artifacts/blob`, `/api/blobs/*`, `/api/e2e
 
 ---
 
-## 10. Self-Test, Live Mesh Verification & Local CI
+## 10. Live Mesh Verification & Local CI
 
-Run the built-in live self-test (Key, signed gossip, blob transfer, A/B slot, supervisor, KV, API), the live multi-node mesh verification command, or the full local CI pipeline at any time:
+`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, A/B slots, the supervisor, KV paging and the API). Check a running node or run the whole local pipeline at any time:
 
 ```bash
-# Built-in live self-test: real Iroh gossip and blob transfer between two local nodes, plus supervisor, slot, KV and API checks
-./dialtone self-test
-
 # Verify the running local daemon's security posture, zero public directory exposure,
 # N-peer encrypted gossip convergence, and live QUIC blob transfer
 ./dialtone mesh-test --expect-peers 3 --timeout 15s
@@ -563,3 +559,5 @@ Run the built-in live self-test (Key, signed gossip, blob transfer, A/B slot, su
 # Full local CI suite (zero-leak and domain-language gates, fmt, tests, release build, live node acceptance)
 ./ci.sh
 ```
+
+**Build profiles.** `cargo build --release` is the everyday optimized build (no LTO, parallel and incremental codegen): `ci.sh`, GitHub CI and fleet deploys use it, and a one-file change rebuilds in about a second. Published binaries are built with `cargo build --profile dist` (size-optimized, fat LTO), which takes about a minute and only runs when a version is tagged.

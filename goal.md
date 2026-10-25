@@ -78,11 +78,16 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
    inventory-driven auto-deploy; let iroh's address lookup find peers instead of gossiping all-peer seed lists and
    re-joining every 5s; Rtt from iroh connection paths instead of broadcast echoes; the API reading `watch`
    snapshots instead of locking node state.
-2. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
+2. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
+   (`dist` profile keeps it for tagged releases): a one-file change rebuilds in ~1.5s instead of ~52s, `ci.sh` and
+   fleet deploys reuse that build. Removed the in-process `self-test` command (`run_self_test`, the MemStore blob
+   transfer and the gossip fixture in production code), which duplicated `cargo test`; GitHub CI no longer builds a
+   second LTO binary just to run it, and `cargo test` builds one test binary instead of three.
+3. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
    speakers, keyboards, pointers, displays, printers, storage and Bluetooth devices (no serials or IDs); they
    travel in the Inventory, appear in `GET /api/devices` and `/api/mesh`, and the HUD lists the focused node's
    devices with a 7th tour step, `DEV`.
-3. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
+4. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
    vendored three.js 0.179.1 and h3-js 4.4.0 (no CDN). The API parses requests with `httparse` and rejects
    `Transfer-Encoding`, ambiguous `Content-Length` and oversize heads. One persistent iroh-blobs `FsStore` replaces
    the SHA-256 file tree and the in-memory store: blobs are named by `sha256/<hex>` tags, GC removes untagged data,
@@ -90,14 +95,14 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
    `run_node` boots the node and starts six actors (`actors.rs`: Mesh, Stats, Supervisor, Links, Allowlist,
    Deploy) stopped by one `CancellationToken`. Gossip carries a typed `Message` (envelope v4: Beat, Summary, Echo,
    Inventory); processes and services travel only in inventories, sent on change.
-4. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
+5. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
    seeded node state (`dialtone hud` now serves live state); the deploy-plan, build-cache, build-decision, manifest,
    proof-validation, alert-ack, tiered-fetch, process-intent, install.sh, catalog, command-journal / rtcore UDP,
    cursor-job, key-lease, service-ref, systemd drop-in and peer-cache code; 22 API routes no caller used, including
    the one-frame `/ws` stub; the hand-written SHA-1 (now unneeded) and hex / base64 codecs (now the `hex` and
    `base64` crates, same accepted inputs). The self-test exercises only real behaviour. The HUD's non-working
    Init / Invite / Join actions became a panel of the CLI commands (the page carries no API token by design).
-5. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
+6. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
    **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
@@ -113,7 +118,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | F7 | **Node runtime & API** | 5-stage boot, six actors with one shutdown token, shared node state, `httparse` API on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `actors.rs`, `api.rs` |
 | F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, focused node's device list, 7-step tour with captions, blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
 | F12 | **Devices** | Per-OS listing of connected cameras, microphones, speakers, keyboards, pointers, displays, printers, storage, Bluetooth devices; gossiped in the Inventory | `devices.rs`, Devices actor |
-| F9 | **Verification** | `self-test`, `mesh-test`, `probe`, unit + live iroh tests, `ci.sh` (zero-leak gate, domain-language gate, fmt, tests, live acceptance), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
+| F9 | **Verification** | `mesh-test`, `probe`, unit + live iroh tests, `ci.sh` (zero-leak gate, domain-language gate, fmt, tests, live acceptance), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
 | F10 | **Services & records** | Service refs, Services, key leases, policies, Event / Alert / Log / Kv records with cursor pagination, proof validation | `service.rs`, `record.rs` |
 | F11 | **CLI & fixtures** | Argument parsing, `help`, and the `*-fixture` preview commands | `main.rs` |
 

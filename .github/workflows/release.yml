@@ -55,12 +55,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build release binary (size-optimized dist profile)
+        run: cargo build --profile dist --target ${{ matrix.target }}
       - name: Stage release asset & SHA-256 digest
         shell: bash
         run: |
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" "${{ matrix.asset_name }}"
+          cp "target/${{ matrix.target }}/dist/${{ matrix.bin_name }}" "${{ matrix.asset_name }}"
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
           else
