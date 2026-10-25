@@ -25,7 +25,7 @@ RULES=(
 
 status=0
 show="${DOMAIN_LINT_SHOW:-5}"
-files=$(ls src/*.rs | grep -v 'src/h3_land.rs')
+files=$(ls src/*.rs src/hud/*.html src/hud/*.css src/hud/*.js | grep -v 'src/h3_land.rs')
 for rule in "${RULES[@]}"; do
   pattern="${rule%=*}"
   use="${rule##*=}"

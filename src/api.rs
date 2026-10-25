@@ -886,6 +886,21 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
         return write_json(&mut stream, 403, &json!({ "error": err }));
     }
 
+    // The HUD's static files need no node state.
+    if method.eq_ignore_ascii_case("GET") {
+        if let Some((content_type, body, cache)) = crate::hud::hud_asset(path) {
+            let headers = format!("Cache-Control: {cache}\r\nX-Content-Type-Options: nosniff\r\n");
+            return write_response_with_headers(
+                &mut stream,
+                200,
+                content_type,
+                &headers,
+                body,
+                false,
+            );
+        }
+    }
+
     // Routes write their response into a buffer while they hold the node-state lock; the
     // socket write happens after the lock is released, so a slow client never stalls the mesh.
     let mut out = Vec::new();
@@ -1706,13 +1721,13 @@ fn write_json<W: Write, T: Serialize>(
     write_response(stream, status, "application/json", &body, false)
 }
 
-/// Headers for the HUD page. The CSP lets only the page's own nonce-tagged scripts (plus the
-/// pinned three.js / h3-js modules they import) run, so markup a peer manages to get into the
+/// Headers for the HUD page. The CSP lets only the page's own nonce-tagged scripts and the
+/// HUD's own files (served by this node, three.js / h3-js vendored) run, so markup a peer manages to get into the
 /// page can never execute; the page may only talk back to this API.
 fn hud_security_headers(nonce: &str) -> String {
     format!(
-        "Content-Security-Policy: default-src 'none'; script-src 'nonce-{nonce}' https://cdn.jsdelivr.net; \
-         style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; \
+        "Content-Security-Policy: default-src 'none'; script-src 'nonce-{nonce}' 'self'; \
+         style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; \
          base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n\
          X-Content-Type-Options: nosniff\r\n\
          Referrer-Policy: no-referrer\r\n\
@@ -1842,15 +1857,58 @@ mod tests {
             .unwrap();
         assert!(nonce.len() >= 16);
         assert!(csp.contains("default-src 'none'") && !csp.contains("unsafe-eval"));
-        assert_eq!(body.matches(&format!("nonce=\"{nonce}\"")).count(), 2);
-        assert_eq!(
-            body.matches("<script").count(),
-            2,
-            "only the two nonce-tagged scripts"
-        );
+        assert!(!csp.contains("jsdelivr"), "the HUD loads no CDN code");
+        // importmap, h3-js and app.js carry the nonce; the rest are inert JSON data blocks.
+        assert_eq!(body.matches(&format!("nonce=\"{nonce}\"")).count(), 3);
+        for tag in body.split("<script").skip(1) {
+            let open = tag.split('>').next().unwrap();
+            assert!(
+                open.contains(&format!("nonce=\"{nonce}\""))
+                    || open.contains("type=\"application/json\""),
+                "script without nonce: <script{open}>"
+            );
+        }
+        assert!(!body.contains("cdn.jsdelivr"));
         assert!(!body.contains("dtk-must-never-appear-in-html"));
         assert!(!body.contains("__API_TOKEN__") && !body.contains("__CSP_NONCE__"));
         assert!(head.contains("X-Content-Type-Options: nosniff"));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn hud_static_files_are_served_with_their_types_and_cache_policy() {
+        let tmp_dir = env::temp_dir().join(format!("dialtone-hud-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let ep_addr = EndpointAddr::new(SecretKey::generate().public());
+        let diag = build_diagnostics(&IrohTransportConfig::local_offline(), &ep_addr, None, "n1");
+        let node = NodeState::new_live(
+            "node-alpha",
+            "hub",
+            &addr.to_string(),
+            tmp_dir.clone(),
+            diag,
+        );
+        let state = Arc::new(Mutex::new(node));
+        let handle = thread::spawn(move || {
+            serve_http_blocking(listener, state, Some(4)).unwrap();
+        });
+        let get = |path: &str| {
+            raw_http_request(
+                addr,
+                &format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n"),
+            )
+        };
+        let app = get("/hud/app.js");
+        assert!(app.starts_with("HTTP/1.1 200"));
+        assert!(app.contains("Content-Type: text/javascript") && app.contains("no-cache"));
+        let three = get("/hud/vendor/three@0.179.1/three.module.min.js");
+        assert!(three.contains("immutable") && three.contains("nosniff"));
+        let css = get("/hud/style.css");
+        assert!(css.contains("Content-Type: text/css"));
+        assert!(get("/hud/../Cargo.toml").starts_with("HTTP/1.1 404"));
+        handle.join().unwrap();
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 

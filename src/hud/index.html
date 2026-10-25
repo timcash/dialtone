@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>dialtone // __SELF_NODE__ — Dialtone Iroh 1.3 Mesh Control Plane</title>
+<script type="importmap" nonce="__CSP_NONCE__">
+{
+  "imports": {
+    "three": "/hud/vendor/three@0.179.1/three.module.min.js"
+  }
+}
+</script>
+<link rel="stylesheet" href="/hud/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <canvas id="hud-3d-canvas"></canvas>
+  <div class="scene-shade"></div>
+
+  <!-- Top terminal overlay showing strictly aligned overall stats and per-row stats -->
+  <section id="terminal-overlay" class="terminal-overlay" data-severity="nominal" aria-live="polite">
+    <pre id="node-top-hud" class="top-shell-pre"></pre>
+  </section>
+
+  <!-- Bottom terminal overlay: channel name & mesh status, then Closed Captions (CC) narrating the live system tour -->
+  <section id="tour-cc-bar" class="tour-cc-bar" aria-live="polite">
+    <div id="channel-line" class="cc-channel"></div>
+    <div id="tour-cc-header" class="cc-header"></div>
+    <div id="tour-cc-body" class="cc-body"></div>
+  </section>
+
+  <!-- Single bottom-right thumb button opening the full-screen menu -->
+  <button id="thumb-menu-btn" class="thumb-btn" type="button" aria-expanded="false" aria-controls="fullscreen-menu" aria-label="Open 3D Globe &amp; Mesh Controls Menu" title="Open 3D Globe &amp; Mesh Controls">
+    <svg class="icon-sliders" viewBox="0 0 24 24" aria-hidden="true">
+      <line x1="4" y1="6" x2="20" y2="6"></line>
+      <line x1="4" y1="12" x2="20" y2="12"></line>
+      <line x1="4" y1="18" x2="20" y2="18"></line>
+      <circle cx="9" cy="6" r="2.2" fill="var(--ground)"></circle>
+      <circle cx="15" cy="12" r="2.2" fill="var(--ground)"></circle>
+      <circle cx="11" cy="18" r="2.2" fill="var(--ground)"></circle>
+    </svg>
+    <svg class="icon-close" viewBox="0 0 24 24" aria-hidden="true">
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+    </svg>
+  </button>
+
+  <!-- Full-screen menu of buttons and sliders for controlling items in the 3D globe display -->
+  <aside id="fullscreen-menu" class="fullscreen-menu" hidden>
+    <div class="menu-container">
+      <header class="menu-header">
+        <div>
+          <h1 class="menu-title">DIALTONE 3D GLOBE &amp; LAYER CONTROLS</h1>
+          <p class="menu-subtitle">GREYSCALE LINE-ART // BLUE FOCUS // YELLOW WARN // RED ERROR</p>
+        </div>
+        <button id="menu-theme-btn" class="ctrl-btn" type="button">THEME: DARK</button>
+      </header>
+
+      <!-- 1. Tour Playback & Endless Loop Controls -->
+      <section class="menu-section is-focus-section">
+        <div class="menu-section-title">
+          <span>01 // ENDLESS TOUR &amp; CAMERA PLAYBACK</span>
+          <span class="hi" id="menu-tour-status">PLAYING LOOP</span>
+        </div>
+        <div class="btn-row">
+          <button id="tour-playback" class="ctrl-btn is-focus" type="button" aria-pressed="true">▶ TOUR LOOP: ON</button>
+          <button id="btn-prev-stop" class="ctrl-btn" type="button">◀ PREV STOP</button>
+          <button id="btn-next-stop" class="ctrl-btn" type="button">NEXT STOP ▶</button>
+          <button id="btn-reset-cam" class="ctrl-btn" type="button">RESET ORBIT</button>
+        </div>
+      </section>
+
+      <!-- 2. deployrobotic Zoom Layer Selector (Layers 1..5) -->
+      <section class="menu-section">
+        <div class="menu-section-title">
+          <span>02 // DEPLOYROBOTIC ZOOM LAYER STACK (1–5)</span>
+          <span class="hi" id="menu-layer-readout">L1 GLOBE</span>
+        </div>
+        <div class="btn-row" id="layer-btn-row">
+          <button class="ctrl-btn is-focus" type="button" data-layer-mode="1" aria-pressed="true">1 GLOBE</button>
+          <button class="ctrl-btn" type="button" data-layer-mode="2" aria-pressed="false">2 REGION</button>
+          <button class="ctrl-btn" type="button" data-layer-mode="3" aria-pressed="false">3 SITE SYMBOL</button>
+          <button class="ctrl-btn" type="button" data-layer-mode="4" aria-pressed="false">4 CONTAINERS</button>
+          <button class="ctrl-btn" type="button" data-layer-mode="5" aria-pressed="false">5 PROCESSES</button>
+        </div>
+      </section>
+
+      <!-- 3. Mesh Node Focus Selector -->
+      <section class="menu-section">
+        <div class="menu-section-title">
+          <span>03 // MESH NODES (CLICK TO FOCUS TACTICAL SYMBOL)</span>
+          <span class="hi" id="menu-node-count">0 NODES</span>
+        </div>
+        <div class="btn-row" id="menu-node-buttons"></div>
+      </section>
+
+      <!-- 4. Sliders for Controlling 3D Globe & Tactical Symbol Elements -->
+      <section class="menu-section">
+        <div class="menu-section-title">
+          <span>04 // 3D GLOBE &amp; SYMBOLOGY PARAMETERS</span>
+          <span class="hi">LIVE SLIDERS</span>
+        </div>
+        <div class="slider-grid">
+          <label class="slider-row">
+            <span class="slider-label"><span>CAMERA ZOOM LAYER</span><strong id="val-zoom-layer">1.0 (GLOBE)</strong></span>
+            <input id="slider-zoom-layer" type="range" min="1.0" max="5.0" step="0.1" value="1.0">
+          </label>
+          <label class="slider-row">
+            <span class="slider-label"><span>NODE DWELL &amp; RING SCAN</span><strong id="val-tour-dwell">8.0s</strong></span>
+            <input id="slider-tour-dwell" type="range" min="4.0" max="16.0" step="0.5" value="8.0">
+          </label>
+          <label class="slider-row">
+            <span class="slider-label"><span>TACTICAL SYMBOL SCALE</span><strong id="val-factory-scale">1.0x</strong></span>
+            <input id="slider-factory-scale" type="range" min="0.4" max="2.4" step="0.1" value="1.0">
+          </label>
+          <label class="slider-row">
+            <span class="slider-label"><span>H3 LAND CELL INK</span><strong id="val-land-ink">100%</strong></span>
+            <input id="slider-land-ink" type="range" min="0" max="100" step="5" value="100">
+          </label>
+          <label class="slider-row">
+            <span class="slider-label"><span>CLOUD &amp; ATMOSPHERE</span><strong id="val-cloud-opacity">50%</strong></span>
+            <input id="slider-cloud-opacity" type="range" min="0" max="100" step="5" value="50">
+          </label>
+          <label class="slider-row">
+            <span class="slider-label"><span>QUIC PACKET SPEED</span><strong id="val-packet-speed">1.0x</strong></span>
+            <input id="slider-packet-speed" type="range" min="0.0" max="2.5" step="0.1" value="1.0">
+          </label>
+          <label class="slider-row">
+            <span class="slider-label"><span>TERMINAL OVERLAY OPACITY</span><strong id="val-term-opacity">92%</strong></span>
+            <input id="slider-term-opacity" type="range" min="15" max="100" step="5" value="92">
+          </label>
+        </div>
+        <div class="btn-row" style="margin-top:4px">
+          <button id="toggle-h3-land" class="ctrl-btn" type="button" aria-pressed="true">H3 LAND: ON</button>
+          <button id="toggle-quic-arcs" class="ctrl-btn" type="button" aria-pressed="true">QUIC ARCS: ON</button>
+          <button id="toggle-clouds" class="ctrl-btn" type="button" aria-pressed="true">CLOUDS: ON</button>
+          <button id="toggle-drones" class="ctrl-btn" type="button" aria-pressed="true">SYMBOL ACTIVITY: ON</button>
+        </div>
+      </section>
+
+      <!-- 5. Mesh setup: the CLI commands for this node (the HUD carries no API token) -->
+      <section class="menu-section" id="menu-mesh-section">
+        <div class="menu-section-title">
+          <span>05 // MESH SETUP (CLI)</span>
+          <span class="hi" id="menu-mesh-state-label">CHECKING...</span>
+        </div>
+        <pre id="menu-mesh-output" class="mesh-output">Run these on this node:
+  New mesh       dialtone secret            then: dialtone join &lt;secret&gt;
+  Invite a node  dialtone invite --ttl 15m
+  Join a mesh    dialtone join &lt;secret&gt; --invite &lt;invite&gt;
+  Allow a node   dialtone allowlist add &lt;node_id&gt;</pre>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<script type="application/json" id="initial-state">__INITIAL_JSON__</script>
+<script type="application/json" id="land-cells">"__LAND_H3_BITSET_B64__"</script>
+<script src="/hud/vendor/h3-js@4.4.0/h3-js.umd.js" nonce="__CSP_NONCE__"></script>
+<script type="module" src="/hud/app.js" nonce="__CSP_NONCE__"></script>
+</body>
+</html>
