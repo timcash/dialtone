@@ -25,10 +25,10 @@ use dialtone::blob::Blobs;
 use dialtone::mesh::{
     build_mesh_rtt_matrix, cached_local_public_ip_geo, compute_rtt_ms_from_echo, default_seeds,
     is_valid_node_name, merge_beat, merge_inventory, monotonic_now_ms, normalize_channel_name,
-    now_unix, observe_peer_remote_addrs, open_message, place_nodes, prune_stale_peers,
-    seal_message, try_load_mesh_config, Beat, ChannelKeys, Inventory, LiveAllowlist,
-    MeshControlCommand, Message, ReplayGuard, SeedList, BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME,
-    DEFAULT_PEER_TTL_SECS, SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
+    now_unix, observe_peer_remote_addrs, open_message, prune_stale_peers, seal_message,
+    try_load_mesh_config, Beat, ChannelKeys, Inventory, LiveAllowlist, MeshControlCommand, Message,
+    ReplayGuard, SeedList, BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS,
+    SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{advertised_endpoint_addr, build_diagnostics, IrohTransportConfig};
 use dialtone::service::ProcessSpec;
@@ -174,7 +174,6 @@ async fn stats_actor(
                 }
             }
             let matrix = build_mesh_rtt_matrix(&st.nodes);
-            place_nodes(&mut st.nodes, &matrix);
             st.mesh_rtt_ms = matrix;
             st.refresh_live_alerts();
         });
@@ -779,7 +778,6 @@ impl Mesh {
             local_copy.summary_stats = local_summary.clone();
             merge_beat(&mut st.nodes, local_copy);
             let matrix = build_mesh_rtt_matrix(&st.nodes);
-            place_nodes(&mut st.nodes, &matrix);
             st.mesh_rtt_ms = matrix;
             st.refresh_live_alerts();
             if let (true, Some(s)) = (is_summary, &local_summary) {
@@ -1042,7 +1040,6 @@ impl Mesh {
                 }
             }
             let matrix = build_mesh_rtt_matrix(&st.nodes);
-            place_nodes(&mut st.nodes, &matrix);
             st.mesh_rtt_ms = matrix;
             st.refresh_live_alerts();
             if first_seen {

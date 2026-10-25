@@ -19,9 +19,9 @@ use crate::hud::render_hud;
 use crate::mesh::{
     build_mesh_rtt_matrix, cached_local_public_ip_geo, default_arch, default_config_path,
     default_os, default_state_dir, monotonic_now_ms, node_capabilities_for, node_role_for,
-    normalize_channel_name, now_unix, place_nodes, prune_stale_peers, save_mesh_config,
-    validate_secret, Beat, BootStageStatus, MeshConfig, MeshControlCommand, ProbeReport,
-    BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
+    normalize_channel_name, now_unix, prune_stale_peers, save_mesh_config, validate_secret, Beat,
+    BootStageStatus, MeshConfig, MeshControlCommand, ProbeReport, BEAT_INTERVAL_SECS,
+    DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
 };
 use crate::node::IrohTransportDiagnostics;
 use crate::record::{
@@ -373,7 +373,6 @@ impl NodeState {
             }
         }
         self.mesh_rtt_ms = build_mesh_rtt_matrix(&self.nodes);
-        place_nodes(&mut self.nodes, &self.mesh_rtt_ms);
     }
 
     /// Execute one end-to-end 5-capability verification cycle driven by the supervised process blob:
@@ -750,7 +749,6 @@ impl NodeState {
                 pct_or_unknown(stats.disk_percent)
             ),
         );
-        place_nodes(&mut st.nodes, &st.mesh_rtt_ms);
         st.refresh_live_alerts();
         st
     }
