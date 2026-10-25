@@ -45,6 +45,11 @@ pub fn stage_program(blobs: &Blobs, name: &str, digest: &str) -> Result<(String,
     };
 
     let target_path = run_dir.join(&filename);
+    // The file name carries the digest, so an identical file is already the right program.
+    // Rewriting it would also fail on Windows while that program is running.
+    if fs::read(&target_path).is_ok_and(|existing| existing == bytes) {
+        return Ok((normalized_sha, target_path));
+    }
     let tmp_path = run_dir.join(format!(".{filename}.tmp.{}", std::process::id()));
     fs::write(&tmp_path, &bytes)
         .map_err(|e| format!("write staged blob {}: {e}", tmp_path.display()))?;
@@ -517,6 +522,7 @@ impl Drop for Supervisor {
 mod tests {
     use super::*;
     use std::env;
+    #[cfg(unix)]
     use std::time::Duration;
 
     /// Writes a shell program into `dir/run/` that starts a background grandchild, records its
@@ -661,6 +667,14 @@ mod tests {
         let digest = blobs.put_blocking(script_bytes, None).unwrap();
         let (verified_sha, staged_path) =
             stage_program(&blobs, "stats-blob-process", &digest).unwrap();
+        // Staging the same program again keeps the file it already staged.
+        let first_staged = fs::metadata(&staged_path).unwrap().modified().unwrap();
+        let (_, again) = stage_program(&blobs, "stats-blob-process", &digest).unwrap();
+        assert_eq!(again, staged_path);
+        assert_eq!(
+            fs::metadata(&again).unwrap().modified().unwrap(),
+            first_staged
+        );
         assert_eq!(verified_sha, digest);
         assert!(staged_path.exists());
 
