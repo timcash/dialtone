@@ -538,6 +538,7 @@ Old route names (`/api/gossip`, `/api/artifacts/blob`, `/api/blobs/*`, `/api/e2e
 | `DIALTONE_STATE_DIR` / `DIALTONE_HOME` | `~/.dialtone` | Root state directory for config, identity, blobs, and staged executables |
 | `DIALTONE_IROH_SECRET_KEY_FILE` | `~/.dialtone/iroh-secret-key` | Persistent 32-byte Ed25519 Iroh endpoint secret key (`0600` permissions) |
 | `DIALTONE_API_TOKEN` | `~/.dialtone/api-token` | Bearer token required for all `POST` control API routes (and required when `--listen` is non-loopback) |
+| `DIALTONE_HUD_DIR` | *(unset)* | Serve the HUD from this directory (e.g. `src/hud`) instead of the copy in the binary, uncached: HUD edits show on a browser reload with no rebuild or restart |
 | `DIALTONE_CHANNEL` | `dialtone` | Default gossip channel name when `--channel` is not passed |
 | `DIALTONE_SECRET` (`DIALTONE_SECRET_KEY`; old: `DIALTONE_PASSWORD`) | *(unset)* | Channel secret used to derive Argon2id `v2` channel keys on boot |
 | `~/.dialtone/config.json` | — | Host-local mesh config (`0600`): Argon2id `derived_keys` (no plaintext secret), `seeds`, `allowlist`, `used_invite_nonces`, and supervised process specs |

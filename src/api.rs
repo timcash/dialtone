@@ -959,7 +959,7 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<NodeState>>) -> Re
                 200,
                 content_type,
                 &headers,
-                body,
+                &body,
                 false,
             );
         }
