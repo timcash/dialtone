@@ -273,6 +273,32 @@ impl Blobs {
         Ok(bytes)
     }
 
+    /// Drop the name `sha256/<hex>`; GC then removes the data unless another tag keeps it.
+    pub async fn forget(&self, digest: &str) -> Result<(), String> {
+        let digest = normalize_digest(digest)?;
+        let Some(hash) = self.hash_of(&digest).await else {
+            return Ok(());
+        };
+        let size = match self.store.blobs().status(hash).await {
+            Ok(BlobStatus::Complete { size }) => size,
+            _ => 0,
+        };
+        self.store
+            .tags()
+            .delete(sha256_tag(&digest))
+            .await
+            .map_err(|e| format!("forget blob {digest}: {e}"))?;
+        if let Ok(mut s) = self.summary.lock() {
+            s.blob_keys = s.blob_keys.saturating_sub(1);
+            s.blob_bytes = s.blob_bytes.saturating_sub(size);
+        }
+        Ok(())
+    }
+
+    pub fn forget_blocking(&self, digest: &str) -> Result<(), String> {
+        block_on(self.forget(digest))
+    }
+
     pub fn put_blocking(
         &self,
         bytes: &[u8],

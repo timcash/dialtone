@@ -49,7 +49,7 @@ fn print_usage() {
          \x20 blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket\n\
          \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use invite\n\
          \x20 daemon [install|status]  Install or inspect the daemon that starts the node at login\n\
-         \x20 probe                    Run one probe on the local node (BLB, KVS, PRC, MSH, A/B)\n\
+         \x20 probe                    Run one probe now (MSH, STO, PUL, BEAT, PRC; nodes also probe every 30s)\n\
          \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
          \x20 mesh-test                Check the running node's security, mesh convergence and blob transfer\n\
          \x20 hud                      Serve the HUD and API only (no mesh)\n\
@@ -873,7 +873,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                     default_ticket.as_deref(),
                 );
                 st.reconcile_processes();
-                let _ = st.run_probe();
             }
         }
     }

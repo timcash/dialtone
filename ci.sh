@@ -207,6 +207,15 @@ logs_txt = json.dumps(st.get("logs", []))
 assert "nats://" not in logs_txt, "fake seeded NATS log found in live node state"
 '
 echo "    7. Verified live /api/state reports real stats, 5s/30s summaries, and non-synthetic logs"
+curl -fsS -X POST http://127.0.0.1:18794/api/probe -H "Authorization: Bearer $API_TOKEN" | python3 -c '
+import sys, json
+p = json.load(sys.stdin)["probe"]
+checks = {c["code"]: c for c in p["checks"]}
+assert sorted(checks) == ["BEAT", "MSH", "PRC", "PUL", "STO"], checks
+assert checks["STO"]["ok"] and checks["PRC"]["ok"], checks
+assert p["blob_ticket"].startswith("iroh-blobs://ticket/"), p
+'
+echo "       Probe ran: store round trip and probe program OK, blob ticket published for peers"
 
 # 8. `dialtone hud` next to a running node serves the HUD but never rewrites its config
 CFG_BEFORE=$(shasum "$CI_BLOB_DIR/config.json" | awk '{print $1}')

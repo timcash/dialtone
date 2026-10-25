@@ -79,11 +79,11 @@ pub fn is_probe_program(name: &str) -> bool {
     name == PROBE_PROGRAM_NAME
 }
 
-/// Canonical cross-platform polyglot probe test process blob (`sh` on macOS/Linux, `cmd.exe` on Windows)
-/// sharing an identical SHA-256 digest across all OS/arch nodes in the mesh.
-/// Continuously exercises SHA-256 blobs, Key-Value store, Process supervision, Mesh connectivity, and A/B rollback.
+/// The probe program: a polyglot script (`sh` on macOS/Linux, `cmd.exe` on Windows, same
+/// digest everywhere) that just stays alive. The probe checks that the supervisor staged it
+/// from the store and keeps it running; the probe itself runs in the node (`probe.rs`).
 pub fn probe_program_bytes() -> &'static [u8] {
-    b":; while true; do if [ -n \"$APP_LISTEN\" ]; then \"$APP_BIN\" probe --listen \"$APP_LISTEN\"; fi; sleep 5; done; exit 0;\r\n@echo off\r\n:dialtone_probe_loop\r\nif defined APP_LISTEN \"%APP_BIN%\" probe --listen \"%APP_LISTEN%\"\r\nping -n 6 127.0.0.1 >NUL\r\ngoto dialtone_probe_loop\r\n"
+    b":; while true; do sleep 5; done; exit 0;\r\n@echo off\r\n:dialtone_probe_loop\r\nping -n 6 127.0.0.1 >NUL\r\ngoto dialtone_probe_loop\r\n"
 }
 
 /// Automatically store, verify, and stage the default cross-platform process blob

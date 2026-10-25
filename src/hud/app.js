@@ -1796,12 +1796,10 @@ function setUserZoomLayer(newLayer) {
 
 const TOUR_STEPS = [
   { idx: 0, code: "MSH", ring: 1, rowKey: "MSH", title: "ENCRYPTED GOSSIP MESH" },
-  { idx: 1, code: "BLB", ring: 2, rowKey: "PRB", title: "BLOB STORE" },
+    { idx: 1, code: "BLB", ring: 2, rowKey: "PRB", title: "BLOB STORE & PEER PULLS" },
   { idx: 2, code: "PRC", ring: 3, rowKey: "PRB", title: "PROCESS LOAD & EXEC FROM BLOB" },
-  { idx: 3, code: "NET", ring: 1, rowKey: "NET", title: "QUIC TRANSPORT & RTT MATRIX" },
-  { idx: 4, code: "KVS", ring: 2, rowKey: "MEM", title: "KEY-VALUE STORE & PAGINATION" },
-    { idx: 5, code: "A/B", ring: 4, rowKey: "DSK", title: "A-TO-B DEPLOYMENT SLOT ROLLBACK" },
-  { idx: 6, code: "DEV", ring: 3, rowKey: "DEV", title: "CONNECTED DEVICES" }
+  { idx: 3, code: "NET", ring: 1, rowKey: "NET", title: "BEATS & RTT" },
+  { idx: 4, code: "DEV", ring: 3, rowKey: "DEV", title: "CONNECTED DEVICES" }
 ];
 
 // Devices a node reports in its inventory, as short codes for the top overlay.
@@ -1987,7 +1985,7 @@ function renderTopShellStats() {
   const activeLinks = Object.keys(meshState.mesh_rtt_ms || {}).length;
   const blobKeys = bstats.blob_keys ?? 0;
   const blobBytes = bstats.blob_bytes ?? 0;
-  const kvKeys = bstats.kv_keys ?? 0;
+  
 
   // Update channel name & mesh status line in the bottom terminal overlay
   const chLineEl = document.getElementById("channel-line");
@@ -2012,13 +2010,11 @@ function renderTopShellStats() {
   let totalHbs = 0;
   let directPaths = 0;
   let relayPaths = 0;
+    // The probe's five checks (probe.rs), counted over every node that has reported one.
   let probePassTotal = 0;
-  let probeCheckTotal = nodes.length * 5;
-  let capBlbOk = 0;
-  let capKvsOk = 0;
-  let capPrcOk = 0;
-  let capMshOk = 0;
-  let capAbOk = 0;
+  let probeCheckTotal = 0;
+  const capOk = { MSH: 0, STO: 0, PUL: 0, BEAT: 0, PRC: 0 };
+  const pullMs = [];
   const allRtts = [];
   const allJitters = [];
 
@@ -2054,18 +2050,17 @@ function renderTopShellStats() {
       directPaths += 1;
     }
 
-    const probe = n.probe || null;
-    const hasRunProc = runningProcs.length > 0;
-    const blbOk = probe ? Boolean(probe.blobs_ok) : (blobKeys > 0);
-    const kvsOk = probe ? Boolean(probe.key_value_ok) : (kvKeys > 0);
-    const prcOk = probe ? Boolean(probe.processes_ok) : hasRunProc;
-    const mshOk = probe ? Boolean(probe.mesh_connectivity_ok) : (nodes.length >= 1);
-    const abOk  = probe ? Boolean(probe.ab_rollback_ok) : hasRunProc;
-    if (blbOk) { capBlbOk += 1; probePassTotal += 1; }
-    if (kvsOk) { capKvsOk += 1; probePassTotal += 1; }
-    if (prcOk) { capPrcOk += 1; probePassTotal += 1; }
-    if (mshOk) { capMshOk += 1; probePassTotal += 1; }
-    if (abOk)  { capAbOk  += 1; probePassTotal += 1; }
+        const checks = (n.probe && Array.isArray(n.probe.checks)) ? n.probe.checks : [];
+    for (const c of checks) {
+      probeCheckTotal += 1;
+      if (c.ok) {
+        probePassTotal += 1;
+        if (c.code in capOk) capOk[c.code] += 1;
+      }
+    }
+    for (const p of (n.probe && n.probe.pulls) || []) {
+      if (p.ok && Number.isFinite(p.ms)) pullMs.push(p.ms);
+    }
   }
 
   const hr = target.stats || {};
@@ -2094,7 +2089,7 @@ function renderTopShellStats() {
 
   const probePct = probeCheckTotal > 0 ? Math.round((probePassTotal / probeCheckTotal) * 100) : 100;
   const probeCls = probePct >= 100 ? "hi" : (probePct >= 60 ? "warn" : "err");
-  const targetSlot = (target.probe && target.probe.active_slot) ? target.probe.active_slot : "A";
+  
   const targetCycle = (target.probe && target.probe.cycle) ? target.probe.cycle : 1;
 
   const stepMeta = TOUR_STEPS[activeTourStep] || TOUR_STEPS[0];
@@ -2112,10 +2107,10 @@ function renderTopShellStats() {
   const overallRows = [
     `${rowMark("MSH")}${rowLbl("MSH", "MSH")} ${asciiBar(meshHealthPct, 101, 101, 18)} <span class="${mshCls}">${padL(meshHealthPct.toFixed(0) + "%", 7)}</span>   ${kvCell("NDS", `${nodes.length}/${expectedPeers}`, "hi", stepMeta.code === "MSH")}   ${kvCell("LNK", `${activeLinks}/${expectedLinks}`, "hi", stepMeta.code === "MSH")}   ${kvCell("PTH", `${directPaths}D/${relayPaths}R`)}   ${kvCell("BTS", "#" + totalHbs)}   ${kvCell("DIG", String(blobKeys), "hi", stepMeta.code === "BLB")}`,
     `${rowMark("NET")}${rowLbl("NET", "NET")} ${asciiBar(rttBarPct, 75, 95, 18)} <span class="${valCls(avgRtt, 180, 260)}">${padL(avgRtt.toFixed(1) + "ms", 7)}</span>   ${kvCell("RX", sumRxKb.toFixed(0) + "K/s", "hi", stepMeta.code === "NET")}   ${kvCell("TX", sumTxKb.toFixed(0) + "K/s", "hi", stepMeta.code === "NET")}   ${kvCell("MIN", minRtt.toFixed(1) + "ms")}   ${kvCell("MAX", maxRtt.toFixed(1) + "ms")}   ${kvCell("JIT", "±" + avgJitter.toFixed(1) + "ms")}`,
-    `${rowMark("PRB")}${rowLbl("PRB", "PRB")} ${asciiBar(probePct, 101, 101, 18)} <span class="${probeCls}">${padL(`${probePassTotal}/${probeCheckTotal}`, 7)}</span>   ${kvCell("BLB", capFmt(capBlbOk), capCls(capBlbOk), stepMeta.code === "BLB")}   ${kvCell("KVS", capFmt(capKvsOk), capCls(capKvsOk), stepMeta.code === "KVS")}   ${kvCell("PRC", capFmt(capPrcOk), capCls(capPrcOk), stepMeta.code === "PRC")}   ${kvCell("MSH", capFmt(capMshOk), capCls(capMshOk), stepMeta.code === "MSH")}   ${kvCell("A/B", capFmt(capAbOk), capCls(capAbOk), stepMeta.code === "A/B")}`,
+    `${rowMark("PRB")}${rowLbl("PRB", "PRB")} ${asciiBar(probePct, 101, 101, 18)} <span class="${probeCls}">${padL(`${probePassTotal}/${probeCheckTotal}`, 7)}</span>   ${kvCell("MSH", capFmt(capOk.MSH), capCls(capOk.MSH), stepMeta.code === "MSH")}   ${kvCell("STO", capFmt(capOk.STO), capCls(capOk.STO), stepMeta.code === "BLB")}   ${kvCell("PUL", capFmt(capOk.PUL), capCls(capOk.PUL), stepMeta.code === "BLB")}   ${kvCell("BEAT", capFmt(capOk.BEAT), capCls(capOk.BEAT), stepMeta.code === "NET")}   ${kvCell("PRC", capFmt(capOk.PRC), capCls(capOk.PRC), stepMeta.code === "PRC")}`,
     `${rowMark("CPU")}${rowLbl("CPU", "CPU")} ${asciiBar(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT, 18)} <span class="${valCls(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT)}">${padL(cpuVal.toFixed(1) + "%", 7)}</span>   ${kvCell("AVG", cpuAvg.toFixed(1) + "%")}   ${kvCell("STD", "±" + cpuStd.toFixed(1) + "%")}   ${kvCell("MAX", cpuMax.toFixed(1) + "%")}   ${kvCell("COR", String(totalCores))}   ${kvCell("STO", fmtBytesShort(blobBytes), "hi", stepMeta.code === "BLB")}`,
-    `${rowMark("MEM")}${rowLbl("MEM", "MEM")} ${asciiBar(memVal, WARN_MEM_PCT, ERROR_MEM_PCT, 18)} <span class="${valCls(memVal, WARN_MEM_PCT, ERROR_MEM_PCT)}">${padL(memVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumMemUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumMemTot) + "G")}   ${kvCell("STD", "±" + memStd.toFixed(1) + "%")}   ${kvCell("KVS", String(kvKeys), "hi", stepMeta.code === "KVS")}   ${kvCell("FET", String(blobFetches))}`,
-    `${rowMark("DSK")}${rowLbl("DSK", "DSK")} ${asciiBar(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT, 18)} <span class="${valCls(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT)}">${padL(dskVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumDskUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumDskTot) + "G")}   ${kvCell("THR", thrashScore.toFixed(0), thrashScore > 0 ? "err" : "hi")}   ${kvCell("SLT", `${targetSlot}#${targetCycle}`, "hi", stepMeta.code === "A/B")}   ${kvCell("PCS", `${totalJobs}/${nodes.length}`, "hi", stepMeta.code === "PRC")}`
+    `${rowMark("MEM")}${rowLbl("MEM", "MEM")} ${asciiBar(memVal, WARN_MEM_PCT, ERROR_MEM_PCT, 18)} <span class="${valCls(memVal, WARN_MEM_PCT, ERROR_MEM_PCT)}">${padL(memVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumMemUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumMemTot) + "G")}   ${kvCell("STD", "±" + memStd.toFixed(1) + "%")}   ${kvCell("PUL", (pullMs.length ? (pullMs.reduce((a, b) => a + b, 0) / pullMs.length).toFixed(0) : "-") + "ms", "hi", stepMeta.code === "BLB")}   ${kvCell("FET", String(blobFetches))}`,
+    `${rowMark("DSK")}${rowLbl("DSK", "DSK")} ${asciiBar(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT, 18)} <span class="${valCls(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT)}">${padL(dskVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumDskUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumDskTot) + "G")}   ${kvCell("THR", thrashScore.toFixed(0), thrashScore > 0 ? "err" : "hi")}   ${kvCell("PRB", `#${targetCycle}`, "hi")}   ${kvCell("PCS", `${totalJobs}/${nodes.length}`, "hi", stepMeta.code === "PRC")}`
   ];
 
   // 2. Per-Row Stats Grid (Strictly aligned table with inline CPU / MEM / DSK bar graphs + network/link/blob-proc/probe stats per node)
@@ -2169,11 +2164,11 @@ function renderTopShellStats() {
     }
 
     const nprobe = n.probe || null;
-    const probePass = nprobe ? (nprobe.passed_count ?? 5) : (activeProc && activeProc.status === "running" ? 5 : 4);
-    const probeSlot = nprobe && nprobe.active_slot ? nprobe.active_slot : "A";
+        const probePass = nprobe ? (nprobe.passed_count ?? 0) : 0;
+    const probeTotal = nprobe ? (nprobe.total_count ?? 5) : 5;
     const probeCyc = nprobe && nprobe.cycle ? nprobe.cycle : 1;
-    const probeStr = `${probePass}/5 ${probeSlot}#${probeCyc}`;
-    const probeCellCls = probePass >= 5 ? "hi" : (probePass >= 3 ? "warn" : "err");
+        const probeStr = nprobe ? `${probePass}/${probeTotal} #${probeCyc}` : "-";
+    const probeCellCls = !nprobe ? "dim" : (probePass >= probeTotal ? "hi" : (probePass >= probeTotal - 1 ? "warn" : "err"));
 
     const mark = isSel ? `<span class="focus">▸</span> ` : `  `;
     const nameCls = isSel ? "focus" : "hi";
@@ -2207,7 +2202,6 @@ function renderTopShellStats() {
     expectedLinks,
     blobKeys,
     blobBytes,
-    kvKeys,
     avgRtt,
     avgJitter,
     sumRxKb,
@@ -2231,7 +2225,6 @@ function renderTourClosedCaptions(ctx) {
     expectedLinks,
     blobKeys,
     blobBytes,
-    kvKeys,
     avgRtt,
     avgJitter
   } = ctx;
@@ -2244,15 +2237,9 @@ function renderTourClosedCaptions(ctx) {
   const shortSha = String(programDigest).replace("sha256:", "").slice(0, 12);
   const processPid = tprobe.pid || activeProc.pid || "LIVE";
   const stagedPath = tprobe.staged_path || activeProc.path || `~/.dialtone/run/${programName}-${shortSha}`;
-  const casPath = tprobe.store_path || `~/.dialtone/blobs/${shortSha.slice(0, 2)}/${shortSha}...`;
-  let ticketUri = tprobe.ticket || "";
-  if (!ticketUri && Array.isArray(activeProc.env)) {
-    const tkEnv = activeProc.env.find(e => String(e).startsWith("DIALTONE_BLOB_TICKET="));
-    if (tkEnv) ticketUri = String(tkEnv).slice("DIALTONE_BLOB_TICKET=".length);
-  }
-  const shortTicket = ticketUri
-    ? (ticketUri.length > 44 ? ticketUri.slice(0, 32) + "..." + ticketUri.slice(-10) : ticketUri)
-    : `iroh-blobs://ticket/...#sha256:${shortSha}`;
+    const probeCheck = (code) => (Array.isArray(tprobe.checks) ? tprobe.checks : []).find(c => c.code === code) || null;
+  const checkMark = (c) => !c ? `<span class="dim">pending</span>` : (c.ok ? `<span class="hi">OK</span>` : `<span class="err">FAIL</span>`);
+  const okMark = (ok) => ok ? `<span class="hi">✓</span>` : `<span class="err">✗</span>`;
 
   const tr = target.iroh_transport || {};
   const rawIp = tr.bound_non_tailnet_ipv4 || (tr.advertised_ip_addrs && tr.advertised_ip_addrs[0]) || "0.0.0.0";
@@ -2266,11 +2253,8 @@ function renderTourClosedCaptions(ctx) {
     .map(([peer, ms]) => `${peer}=${Number(ms).toFixed(1)}ms`)
     .join(", ") || "probing peers...";
 
-  const kvKey = tprobe.kv_key || `probe/${target.node}/status`;
-  const activeSlot = tprobe.active_slot || "A";
-  const prevSlot = activeSlot === "A" ? "B" : "A";
-  const cycleNum = tprobe.cycle || target.counter || 1;
-  const passCnt = tprobe.passed_count ?? 5;
+    const cycleNum = tprobe.cycle || 0;
+  const passCnt = tprobe.passed_count ?? 0;
   const totCnt = tprobe.total_count ?? 5;
 
   const stepPills = TOUR_STEPS.map(s => {
@@ -2288,25 +2272,34 @@ function renderTourClosedCaptions(ctx) {
   switch (stepMeta.idx) {
     case 0: // MSH: Encrypted Gossip Mesh
       line1 = `<span class="focus">[1/${TOUR_STEPS.length} MESH &amp; GOSSIP]</span> Node <span class="hi">${target.node}</span> joined private channel <span class="focus">${channelName}</span> <span class="dim">[${channelFp || "live"}]</span> using Argon2id KDF + XChaCha20-Poly1305 encrypted gossip frames.`;
-      line2 = `Authenticated peer allowlist: <span class="hi">${nodes.length}/${expectedPeers} nodes online</span> across <span class="hi">${activeLinks}/${expectedLinks} encrypted links</span> (beat <span class="hi">#${target.counter || 0}</span> via ${pathMode} <span class="hi">${cleanIp}</span>).`;
+            line2 = `Probe #${cycleNum} MSH ${checkMark(probeCheck("MSH"))}: <span class="hi">${(probeCheck("MSH") || {}).detail || "waiting for the first probe"}</span>; <span class="hi">${activeLinks}/${expectedLinks} encrypted links</span> (beat <span class="hi">#${target.counter || 0}</span> via ${pathMode} <span class="hi">${cleanIp}</span>).`;
       break;
     case 1: // BLB: SHA-256 Content-Addressed Blob Store
-      line1 = `<span class="focus">[2/${TOUR_STEPS.length} BLOB STORE]</span> Stored the cross-platform probe program in the store on <span class="hi">${target.node}</span> (<span class="hi">${blobKeys} blobs</span>, <span class="hi">${fmtBytesShort(blobBytes)}</span> in the store).`;
-      line2 = `Verified SHA-256 digest <span class="focus">sha256:${shortSha}</span> at <span class="dim">${casPath}</span> and published <span class="hi">${shortTicket}</span> for peer replication.`;
+          {
+      const sto = probeCheck("STO");
+      const pulls = Array.isArray(tprobe.pulls) ? tprobe.pulls : [];
+      const pullText = pulls.length
+        ? pulls.map(p => `<span class="hi">${p.peer}</span> ${okMark(p.ok)} ${Number(p.ms).toFixed(0)}ms`).join(", ")
+        : `<span class="dim">no peer blobs yet</span>`;
+      line1 = `<span class="focus">[2/${TOUR_STEPS.length} BLOB STORE &amp; PULLS]</span> Probe #${cycleNum} on <span class="hi">${target.node}</span> wrote a fresh blob and read it back ${checkMark(sto)} ${sto && sto.ms != null ? `in <span class="hi">${Number(sto.ms).toFixed(0)}ms</span>` : ""} (<span class="hi">${blobKeys} blobs</span>, <span class="hi">${fmtBytesShort(blobBytes)}</span> in the store).`;
+      line2 = `Pulled each peer's probe blob over QUIC and verified its SHA-256 ${checkMark(probeCheck("PUL"))}: ${pullText}.`;
+    }
       break;
     case 2: // PRC: Process Load & Exec from Blob Store
       line1 = `<span class="focus">[3/${TOUR_STEPS.length} PROCESS LOAD &amp; EXEC]</span> Loaded verified executable from SHA-256 blob store (<span class="hi">sha256:${shortSha}</span>) &rarr; staged to <span class="hi">${stagedPath}</span>.`;
-      line2 = `Supervisor spawned <span class="focus">${programName}</span> (<span class="hi">PID ${processPid}</span>, status=<span class="hi">RUNNING</span>) from its blob — running <span class="hi">dialtone probe</span> every 5s.`;
+            line2 = `Supervisor runs <span class="focus">${programName}</span> (<span class="hi">PID ${processPid}</span>) from its blob ${checkMark(probeCheck("PRC"))}; the node probes itself every 30s (probe <span class="hi">${passCnt}/${totCnt}</span>).`;
       break;
     case 3: // NET: QUIC Transport & RTT Matrix
-      line1 = `<span class="focus">[4/${TOUR_STEPS.length} QUIC TRANSPORT &amp; RTT]</span> Probing pairwise QUIC connection paths and monotonic RTT echoes from <span class="hi">${target.node}</span> (stripping non-routable tailnet IPs).`;
+          {
+      const beats = Array.isArray(tprobe.beats) ? tprobe.beats : [];
+      const beatText = beats.length
+        ? beats.map(b => `<span class="hi">${b.peer}</span> ${okMark(b.ok)} ${b.age_secs}s${b.hears_us ? "" : " (does not hear us)"}`).join(", ")
+        : `<span class="dim">no peers yet</span>`;
+      line1 = `<span class="focus">[4/${TOUR_STEPS.length} BEATS &amp; RTT]</span> Beats both ways ${checkMark(probeCheck("BEAT"))}: ${beatText}.`;
       line2 = `Live peer latencies from <span class="hi">${target.node}</span>: <span class="focus">${peerRttEntries}</span> (mesh avg <span class="hi">${avgRtt.toFixed(1)}ms ±${avgJitter.toFixed(1)}ms</span>).`;
+    }
       break;
-    case 4: // KVS: Distributed Key-Value Store
-      line1 = `<span class="focus">[5/${TOUR_STEPS.length} KEY-VALUE STORE]</span> Probe process writing a live probe record to key <span class="focus">${kvKey}</span> (<span class="hi">${kvKeys} total KV records</span>).`;
-      line2 = `Verified bounded cursor pagination (<span class="hi">paginate_kv_records</span>) on cycle <span class="hi">#${cycleNum}</span>: <span class="dim">{ sha_blobs: true, processes: true, mesh: true, ab_rollback: true, pid: ${processPid} }</span>.`;
-      break;
-        case 6: { // DEV: devices connected to the node, from its inventory
+    case 4: { // DEV: devices connected to the node, from its inventory
       const devs = Array.isArray(target.devices) ? target.devices : [];
       const counts = {};
       for (const d of devs) counts[d.kind] = (counts[d.kind] || 0) + 1;
@@ -2319,15 +2312,10 @@ function renderTourClosedCaptions(ctx) {
         .slice(0, 4)
         .map(d => `<span class="hi">${d.name}</span>`)
         .join(" • ");
-      line1 = `<span class="focus">[7/${TOUR_STEPS.length} CONNECTED DEVICES]</span> Node <span class="hi">${target.node}</span> lists <span class="hi">${devs.length} devices</span> via ${source}${summary ? ": " + summary : " (none reported yet)"}.`;
+      line1 = `<span class="focus">[5/${TOUR_STEPS.length} CONNECTED DEVICES]</span> Node <span class="hi">${target.node}</span> lists <span class="hi">${devs.length} devices</span> via ${source}${summary ? ": " + summary : " (none reported yet)"}.`;
       line2 = `${featured ? featured + ". " : ""}Devices travel in the node's signed inventory: listed every 60s and gossiped when they change.`;
       break;
     }
-    case 5: // A/B: Verified A-to-B Deployment Slot Rollback
-    default:
-      line1 = `<span class="focus">[6/${TOUR_STEPS.length} A-TO-B SLOT ROLLBACK]</span> Executed side-effect-free <span class="hi">plan_rollback</span> preview between staged deployment <span class="hi">Slot ${prevSlot}</span> and <span class="hi">Slot ${activeSlot}</span> on <span class="hi">${target.node}</span>.`;
-      line2 = `Re-verified SHA-256 digests of both slot binaries on disk and atomically flipped active slot <span class="focus">Slot ${prevSlot} &rarr; Slot ${activeSlot}#${cycleNum}</span> (<span class="hi">probe ${passCnt}/${totCnt} OK</span>).`;
-      break;
   }
 
   ccBodyEl.innerHTML = `<div>${line1}</div><div>${line2}</div>`;

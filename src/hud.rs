@@ -33,7 +33,6 @@ pub(crate) fn render_hud(
             "blob_keys": summary.blob_keys,
             "blob_bytes": summary.blob_bytes,
             "blob_fetches": state.blob_fetches.len(),
-            "kv_keys": state.kv.len(),
             "installed_programs": state.installed_programs.len()
         },
         "nodes": state.nodes,

@@ -6,6 +6,7 @@ pub mod h3_land;
 pub mod hud;
 pub mod mesh;
 pub mod node;
+pub mod probe;
 pub mod record;
 pub mod service;
 pub mod stats;

@@ -10,6 +10,8 @@
 //! - **Links** observes how each peer is reached (direct, relay, tailnet).
 //! - **Allowlist** reloads the allowlist when `config.json` changes.
 //! - **Deploy** pulls, verifies and starts programs that allowlisted peers run.
+//! - **Probe** tests the node every 30s: store, blob pulls from every peer, beats both ways,
+//!   the probe program and mesh membership (see `probe.rs`).
 //!
 //! The API runs on its own threads and reaches Mesh through `MeshControlCommand`.
 //! Actors share the node's state (`NodeState`) for reads and writes the HUD shows.
@@ -116,6 +118,7 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
         tokio::spawn(devices_actor(ctx.clone(), inventory_tx)),
         tokio::spawn(links_actor(ctx.clone())),
         tokio::spawn(allowlist_actor(ctx.clone())),
+        tokio::spawn(probe_actor(ctx.clone())),
         tokio::spawn(deploy_actor(ctx, deploy_rx)),
     ]
 }
@@ -333,6 +336,46 @@ async fn allowlist_actor(ctx: Ctx) {
                 "[allowlist] NOT reloaded, keeping the current {} NodeId(s): {err}",
                 ctx.allowlist.len()
             ),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Probe
+// ---------------------------------------------------------------------------------------
+
+/// Wait for the mesh to form, then probe every `PROBE_INTERVAL_SECS`.
+async fn probe_actor(ctx: Ctx) {
+    let Some(state) = ctx.state.clone() else {
+        return;
+    };
+    let period = Duration::from_secs(dialtone::probe::PROBE_INTERVAL_SECS);
+    let mut tick = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(10),
+        period,
+    );
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = ctx.cancel.cancelled() => break,
+            _ = tick.tick() => {}
+        }
+        let state = state.clone();
+        match tokio::task::spawn_blocking(move || dialtone::probe::run_probe_now(&state)).await {
+            Ok(Ok(report)) => println!(
+                "[probe] #{} {}/{} ok{}",
+                report.cycle,
+                report.passed_count,
+                report.total_count,
+                report
+                    .checks
+                    .iter()
+                    .filter(|c| !c.ok)
+                    .map(|c| format!("; {} failed: {}", c.code, c.detail))
+                    .collect::<String>()
+            ),
+            Ok(Err(err)) => eprintln!("[probe] could not run: {err}"),
+            Err(_) => eprintln!("[probe] run panicked"),
         }
     }
 }

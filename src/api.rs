@@ -12,9 +12,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::blob::{BlobTransportReport, Blobs, Store};
-use crate::deploy::{
-    execute_verified_rollback, install_persistent_os_daemon, plan_rollback, DeploySlot,
-};
+use crate::deploy::install_persistent_os_daemon;
 use crate::hud::render_hud;
 use crate::mesh::{
     build_mesh_rtt_matrix, cached_local_public_ip_geo, default_arch, default_config_path,
@@ -24,14 +22,10 @@ use crate::mesh::{
     DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
 };
 use crate::node::IrohTransportDiagnostics;
-use crate::record::{
-    paginate_kv_records, AlertRecord, EventRecord, KeyValueRecord, KvPageMeta, ServiceLogRecord,
-};
+use crate::record::{AlertRecord, EventRecord, ServiceLogRecord};
 use crate::service::{InstalledProgram, ProcessSpec, Service};
 use crate::stats::{pct_or_unknown, sample_stats, Stats};
-use crate::supervisor::{
-    ensure_probe_program, probe_program_bytes, stage_program, Supervisor, PROBE_PROGRAM_NAME,
-};
+use crate::supervisor::{ensure_probe_program, stage_program, Supervisor, PROBE_PROGRAM_NAME};
 
 pub const MAX_HTTP_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_CONCURRENT_HTTP_CONNECTIONS: usize = 32;
@@ -169,7 +163,7 @@ pub struct NodeState {
     pub mesh_rtt_ms: std::collections::BTreeMap<String, f64>,
     pub installed_programs: Vec<InstalledProgram>,
     pub processes: Vec<ProcessSpec>,
-    pub deploy_slots: Vec<DeploySlot>,
+
     /// Devices connected to this node, refreshed by the Devices actor.
     pub devices: Vec<crate::devices::Device>,
     pub blob_fetches: Vec<BlobTransportReport>,
@@ -178,11 +172,12 @@ pub struct NodeState {
     pub events: Vec<EventRecord>,
     pub logs: Vec<ServiceLogRecord>,
     pub alerts: Vec<AlertRecord>,
-    pub kv: Vec<KeyValueRecord>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kv_page: Option<KvPageMeta>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeReport>,
+    /// Digests of this node's recent probe blobs, oldest first (see `probe.rs`).
+    #[serde(skip)]
+    pub probe_blobs: Vec<String>,
 }
 
 impl NodeState {
@@ -375,211 +370,67 @@ impl NodeState {
         self.mesh_rtt_ms = build_mesh_rtt_matrix(&self.nodes);
     }
 
-    /// Execute one end-to-end 5-capability verification cycle driven by the supervised process blob:
-    /// 1. SHA-256 content-addressed blob storage & verification (`blobs_ok`)
-    /// 2. Key-Value store write, read & pagination (`key_value_ok`)
-    /// 3. Process supervision & process-intent planning (`processes_ok`)
-    /// 4. Encrypted gossip mesh connectivity & QUIC transport audit (`mesh_connectivity_ok`)
-    /// 5. A-to-B deployment slot rollback preview & verified slot flip (`ab_rollback_ok`)
-    pub fn run_probe(&mut self) -> ProbeReport {
-        let now = now_unix();
-        let next_cycle = self
-            .probe
-            .as_ref()
-            .map(|r| r.cycle.saturating_add(1))
-            .unwrap_or(1);
-
-        // 1. BLB: put and verify the probe program blob and this cycle's probe record blob in the store
-        let exec_payload = probe_program_bytes();
-        let (program_digest, store_path, exec_blob_ok) =
-            match self.blobs.put_blocking(exec_payload, None) {
-                Ok(sha) => {
-                    let read_ok = self
-                        .blobs
-                        .get_blocking(&sha)
-                        .map(|b| b == exec_payload)
-                        .unwrap_or(false);
-                    (sha, self.store_dir.to_string_lossy().to_string(), read_ok)
-                }
-                Err(_) => (String::new(), String::new(), false),
-            };
-
-        let blob_payload = format!("dialtone-probe-sha-blob-node={}", self.node);
-        let (verified_digest, cycle_blob_ok) =
-            match self.blobs.put_blocking(blob_payload.as_bytes(), None) {
-                Ok(sha) => {
-                    let read_ok = self
-                        .blobs
-                        .get_blocking(&sha)
-                        .map(|b| b == blob_payload.as_bytes())
-                        .unwrap_or(false);
-                    (sha, read_ok)
-                }
-                Err(_) => (String::new(), false),
-            };
-        let blobs_ok = exec_blob_ok && cycle_blob_ok;
-
-        // 2. Sub-Processes: load executable from SHA-256 blob store -> stage to run dir -> supervise & verify PID
-        let staged_from_store_ok = if !program_digest.is_empty() {
-            stage_program(&self.blobs, PROBE_PROGRAM_NAME, &program_digest).is_ok()
-        } else {
-            false
-        };
+    /// Gather what a probe run needs (see `probe.rs`), keeping the probe program running.
+    pub fn probe_inputs(&mut self) -> crate::probe::ProbeInputs {
         let _ = ensure_probe_program(&self.blobs, &mut self.processes, None);
         self.reconcile_processes();
-        let probe_proc = self
-            .processes
+        let now = now_unix();
+        let own_id = self.iroh_runtime.node_id.clone();
+        let peers = self
+            .nodes
             .iter()
-            .find(|p| p.name == PROBE_PROGRAM_NAME)
-            .or_else(|| {
-                self.processes
-                    .iter()
-                    .find(|p| p.status.as_deref() == Some("running"))
+            .filter(|n| n.node_id != own_id && n.node != self.node)
+            .map(|n| crate::probe::PeerView {
+                node: n.node.clone(),
+                node_id: n.node_id.clone(),
+                age_secs: now.saturating_sub(n.updated_at_unix),
+                hears_us: n.peer_rtt_ms.contains_key(&self.node),
+                blob_ticket: n
+                    .probe
+                    .as_ref()
+                    .map(|p| p.blob_ticket.clone())
+                    .filter(|t| !t.is_empty()),
             })
-            .cloned();
-        let (program_name, program_digest, pid, staged_path, ticket, processes_ok) =
-            if let Some(ref proc) = probe_proc {
-                let running = proc.status.as_deref() == Some("running") && proc.pid.is_some();
-                let ticket = proc
-                    .env
-                    .iter()
-                    .find_map(|kv| kv.strip_prefix("DIALTONE_BLOB_TICKET="))
-                    .unwrap_or("")
-                    .to_string();
-                (
-                    proc.name.clone(),
-                    proc.digest.clone(),
-                    proc.pid,
-                    proc.path.clone(),
-                    ticket,
-                    staged_from_store_ok && running,
-                )
-            } else {
-                (
-                    PROBE_PROGRAM_NAME.to_string(),
-                    String::new(),
-                    None,
-                    String::new(),
-                    String::new(),
-                    false,
-                )
-            };
-
-        // 3. Mesh Connectivity: verify bound QUIC endpoint & active gossip peer table
-        let mesh_peers_seen = self.nodes.len();
-        let mesh_connectivity_ok = !self.iroh_runtime.node_id.is_empty() && mesh_peers_seen >= 1;
-
-        // 4. A-to-B Rollback: stage verified slot A & slot B blobs, plan rollback, and flip A <-> B
-        let slot_a_bytes = format!("dialtone-slot-A-binary-{}", self.node);
-        let slot_b_bytes = format!("dialtone-slot-B-binary-{}", self.node);
-        let mut ab_rollback_ok = false;
-        let mut active_slot = "A".to_string();
-        let stage_slot = |bytes: &[u8], slot: &str| {
-            let sha = self.blobs.put_blocking(bytes, None)?;
-            stage_program(&self.blobs, slot, &sha)
-        };
-        if let (Ok((sha_a, path_a)), Ok((sha_b, path_b))) = (
-            stage_slot(slot_a_bytes.as_bytes(), "probe-slot-a"),
-            stage_slot(slot_b_bytes.as_bytes(), "probe-slot-b"),
-        ) {
-            let path_a_str = path_a.to_string_lossy().to_string();
-            let path_b_str = path_b.to_string_lossy().to_string();
-            if !self
-                .deploy_slots
+            .collect();
+        let expired = crate::probe::expired(&self.probe_blobs);
+        self.probe_blobs.retain(|d| !expired.contains(d));
+        crate::probe::ProbeInputs {
+            node: self.node.clone(),
+            node_id: own_id,
+            cycle: self.probe.as_ref().map(|r| r.cycle + 1).unwrap_or(1),
+            blobs: self.blobs.clone(),
+            store: self.store.clone(),
+            peers,
+            allowlist: self.mesh_config.allowlist.clone(),
+            probe_program: self
+                .processes
                 .iter()
-                .any(|s| s.name == "dialtone-probe-slot")
-            {
-                self.deploy_slots.push(DeploySlot {
-                    name: "dialtone-probe-slot".to_string(),
-                    active: true,
-                    path: path_a_str.clone(),
-                    digest: sha_a.clone(),
-                    previous_path: Some(path_b_str.clone()),
-                    previous_digest: Some(sha_b.clone()),
-                    status: "active-A".to_string(),
-                });
-            }
-            if let Some(slot) = self
-                .deploy_slots
-                .iter_mut()
-                .find(|s| s.name == "dialtone-probe-slot")
-            {
-                if let Ok(plan) = plan_rollback(&self.node, slot) {
-                    if plan.eligible
-                        && plan.side_effect_free_preview
-                        && execute_verified_rollback(slot).is_ok()
-                    {
-                        active_slot = if slot.digest == sha_a {
-                            "A".to_string()
-                        } else {
-                            "B".to_string()
-                        };
-                        slot.status = format!("active-{active_slot}");
-                        ab_rollback_ok = true;
-                    }
-                }
-            }
+                .find(|p| p.name == PROBE_PROGRAM_NAME)
+                .cloned(),
+            expired_blobs: expired,
         }
+    }
 
-        // 5. Key-Value Store: write live probe status record & verify paginated read-back
-        let kv_key = format!("probe/{}/status", self.node);
-        let kv_val = json!({
-            "node": self.node,
-            "cycle": next_cycle,
-            "sha_blobs": blobs_ok,
-            "processes": processes_ok,
-            "mesh_connectivity": mesh_connectivity_ok,
-            "ab_rollback": ab_rollback_ok,
-            "active_slot": active_slot,
-            "pid": pid,
-            "updated_at_unix": now
-        });
-        if let Some(existing_kv) = self.kv.iter_mut().find(|r| r.key == kv_key) {
-            existing_kv.value = kv_val;
-            existing_kv.updated_at_unix = now;
-        } else {
-            self.kv.push(KeyValueRecord {
-                key: kv_key.clone(),
-                value: kv_val,
-                updated_at_unix: now,
-            });
+    /// Keep a probe report, publish it in this node's beats and log failed checks.
+    pub fn record_probe(&mut self, report: &ProbeReport) {
+        if !report.blob_digest.is_empty() {
+            self.probe_blobs.push(report.blob_digest.clone());
         }
-        let key_value_ok = paginate_kv_records(&self.kv, true, Some(0), Some(64))
-            .map(|(records, _)| records.iter().any(|r| r.key == kv_key))
-            .unwrap_or(false);
-
-        let passed_count = (blobs_ok as u8)
-            + (key_value_ok as u8)
-            + (processes_ok as u8)
-            + (mesh_connectivity_ok as u8)
-            + (ab_rollback_ok as u8);
-
-        let report = ProbeReport {
-            program_name,
-            program_digest,
-            pid,
-            store_path,
-            staged_path,
-            ticket,
-            cycle: next_cycle,
-            updated_at_unix: now,
-            passed_count,
-            total_count: 5,
-            blobs_ok,
-            key_value_ok,
-            processes_ok,
-            mesh_connectivity_ok,
-            ab_rollback_ok,
-            active_slot,
-            verified_digest,
-            kv_key,
-            mesh_peers_seen,
-        };
+        for check in report.checks.iter().filter(|c| !c.ok) {
+            self.record_log(
+                "probe",
+                "WARN",
+                "stderr",
+                format!(
+                    "probe #{} {} failed: {}",
+                    report.cycle, check.code, check.detail
+                ),
+            );
+        }
         self.probe = Some(report.clone());
-        if let Some(self_beat) = self.self_entry_mut() {
-            self_beat.probe = Some(report.clone());
+        if let Some(me) = self.self_entry_mut() {
+            me.probe = Some(report.clone());
         }
-        report
     }
 
     pub fn new_live(
@@ -686,7 +537,7 @@ impl NodeState {
             mesh_rtt_ms: std::collections::BTreeMap::new(),
             installed_programs,
             processes: Vec::new(),
-            deploy_slots: Vec::new(),
+
             devices: Vec::new(),
             blob_fetches: Vec::new(),
             service_endpoints,
@@ -694,30 +545,8 @@ impl NodeState {
             events: Vec::new(),
             logs: Vec::new(),
             alerts: Vec::new(),
-            kv: vec![
-                KeyValueRecord {
-                    key: "mesh/self_node".to_string(),
-                    value: json!(node),
-                    updated_at_unix: now,
-                },
-                KeyValueRecord {
-                    key: "mesh/protocol".to_string(),
-                    value: json!("iroh-1.3.0"),
-                    updated_at_unix: now,
-                },
-                KeyValueRecord {
-                    key: "mesh/beat_interval_secs".to_string(),
-                    value: json!(BEAT_INTERVAL_SECS),
-                    updated_at_unix: now,
-                },
-                KeyValueRecord {
-                    key: "mesh/summary_interval_secs".to_string(),
-                    value: json!(SUMMARY_INTERVAL_SECS),
-                    updated_at_unix: now,
-                },
-            ],
-            kv_page: None,
             probe: None,
+            probe_blobs: Vec::new(),
         };
         st.record_event(
             "mesh.boot",
@@ -1168,22 +997,9 @@ fn route_request(
         }
         ("GET", "/api/state") => {
             st.reconcile_processes();
-            let include_kv = query
-                .get("include_kv")
-                .map(|v| v != "false" && v != "0")
-                .unwrap_or(true);
-            let offset = query.get("kv_offset").and_then(|v| v.parse::<usize>().ok());
-            let limit = query.get("kv_limit").and_then(|v| v.parse::<usize>().ok());
-            match paginate_kv_records(&st.kv, include_kv, offset, limit) {
-                Ok((kv_slice, page_meta)) => {
-                    let mut projected = st.clone();
-                    projected.mesh_config = masked_mesh_config(&st.mesh_config);
-                    projected.kv = kv_slice;
-                    projected.kv_page = page_meta;
-                    write_json(&mut stream, 200, &projected)
-                }
-                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-            }
+            let mut projected = st.clone();
+            projected.mesh_config = masked_mesh_config(&st.mesh_config);
+            write_json(&mut stream, 200, &projected)
         }
         ("GET", "/api/devices") => {
             let body = json!({ "node": st.node, "devices": st.devices });
@@ -1205,7 +1021,6 @@ fn route_request(
                     "blob_keys": summary.blob_keys,
                     "blob_bytes": summary.blob_bytes,
                     "blob_fetches": st.blob_fetches.len(),
-                    "kv_keys": st.kv.len(),
                     "installed_programs": st.installed_programs.len()
                 },
                 "nodes": st.nodes,
@@ -1562,21 +1377,26 @@ fn route_request(
             )
         }
         ("POST", "/api/probe") | ("GET", "/api/probe") => {
-            let report = if method == "POST" || st.probe.is_none() {
-                st.run_probe()
-            } else {
-                st.probe.clone().unwrap_or_default()
-            };
-            write_json(
-                &mut stream,
-                200,
-                &json!({
-                    "status": "ok",
-                    "node": st.node,
-                    "probe": report,
-                    "deploy_slots": st.deploy_slots
-                }),
-            )
+            if method == "GET" {
+                if let Some(report) = st.probe.clone() {
+                    return write_json(
+                        &mut stream,
+                        200,
+                        &json!({ "status": "ok", "node": st.node, "probe": report }),
+                    );
+                }
+            }
+            // A probe pulls blobs from peers: run it without the node-state lock.
+            let node = st.node.clone();
+            drop(st);
+            match crate::probe::run_probe_now(state) {
+                Ok(report) => write_json(
+                    &mut stream,
+                    200,
+                    &json!({ "status": "ok", "node": node, "probe": report }),
+                ),
+                Err(err) => write_json(&mut stream, 500, &json!({ "error": err })),
+            }
         }
         _ => write_json(
             &mut stream,
@@ -2005,13 +1825,11 @@ mod tests {
         assert!(resp_ui.contains("200 OK"));
         assert!(resp_ui.contains("Dialtone Iroh 1.3 Mesh Control Plane"));
 
-        // 2. GET /api/state?kv_offset=0&kv_limit=1
-        let resp_state = raw_http_request(
-            addr,
-            "GET /api/state?kv_offset=0&kv_limit=1 HTTP/1.1\r\nHost: localhost\r\n\r\n",
-        );
+        // 2. GET /api/state
+        let resp_state =
+            raw_http_request(addr, "GET /api/state HTTP/1.1\r\nHost: localhost\r\n\r\n");
         assert!(resp_state.contains("200 OK"));
-        assert!(resp_state.contains("\"kv_page\""));
+        assert!(resp_state.contains("\"processes\""));
 
         // 5. Reject external Host / cross-origin POST (CSRF / DNS rebinding defense)
         let resp_csrf = raw_http_request(
@@ -2129,45 +1947,6 @@ mod tests {
 
         drop(_stalled_stream);
         handle.join().unwrap();
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-    }
-
-    #[test]
-    fn probe_runs_all_five_checks_and_flips_ab_slot() {
-        let tmp_dir = env::temp_dir().join(format!("dialtone-probe-tick-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-        let cfg = IrohTransportConfig::local_offline();
-        let ep_addr = EndpointAddr::new(SecretKey::generate().public());
-        let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-probe");
-
-        let mut st = NodeState::new_live(
-            "node-alpha",
-            "hub",
-            "127.0.0.1:0",
-            Blobs::open_blocking(&tmp_dir).unwrap(),
-            diag,
-        );
-
-        let report1 = st.run_probe();
-        assert_eq!(report1.cycle, 1);
-        assert!(report1.blobs_ok);
-        assert!(report1.key_value_ok);
-        assert!(report1.processes_ok);
-        assert!(report1.mesh_connectivity_ok);
-        assert!(report1.ab_rollback_ok);
-        assert_eq!(report1.passed_count, 5);
-        assert_eq!(report1.total_count, 5);
-        assert_eq!(report1.active_slot, "B");
-        assert!(!report1.store_path.is_empty());
-        assert!(!report1.staged_path.is_empty());
-        assert!(std::path::Path::new(&report1.store_path).exists());
-        assert!(std::path::Path::new(&report1.staged_path).exists());
-
-        let report2 = st.run_probe();
-        assert_eq!(report2.cycle, 2);
-        assert_eq!(report2.passed_count, 5);
-        assert_eq!(report2.active_slot, "A");
-
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 

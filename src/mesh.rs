@@ -1071,30 +1071,67 @@ fn default_summary_interval_secs() -> u64 {
     SUMMARY_INTERVAL_SECS
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// One check in a probe run.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProbeCheck {
+    /// `MSH` allowlisted peers in the mesh, `STO` local store round trip, `PUL` blobs pulled
+    /// from peers, `BEAT` beats from and to every peer, `PRC` the probe program is running.
+    pub code: String,
+    pub ok: bool,
+    pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ms: Option<f64>,
+}
+
+/// A blob this node pulled from a peer during a probe.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProbePull {
+    pub peer: String,
+    pub ok: bool,
+    pub ms: f64,
+    pub bytes: u64,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub error: String,
+}
+
+/// How fresh a peer's beats are, and whether the peer hears this node's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProbeBeat {
+    pub peer: String,
+    pub age_secs: u64,
+    /// The peer reports an Rtt to this node, so it receives this node's beats.
+    pub hears_us: bool,
+    pub ok: bool,
+}
+
+/// The latest probe: the node testing itself (see `probe.rs`). Gossiped in beats so every
+/// HUD shows every node's results, and so peers can pull this run's blob.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ProbeReport {
-    pub program_name: String,
-    pub program_digest: String,
-    pub pid: Option<u32>,
-    #[serde(default)]
-    pub store_path: String,
-    #[serde(default)]
-    pub staged_path: String,
-    #[serde(default)]
-    pub ticket: String,
     pub cycle: u64,
     pub updated_at_unix: u64,
     pub passed_count: u8,
     pub total_count: u8,
-    pub blobs_ok: bool,
-    pub key_value_ok: bool,
-    pub processes_ok: bool,
-    pub mesh_connectivity_ok: bool,
-    pub ab_rollback_ok: bool,
-    pub active_slot: String,
-    pub verified_digest: String,
-    pub kv_key: String,
-    pub mesh_peers_seen: usize,
+    pub checks: Vec<ProbeCheck>,
+    /// This run's probe blob; peers pull it in their next run.
+    pub blob_digest: String,
+    pub blob_ticket: String,
+    pub pulls: Vec<ProbePull>,
+    pub beats: Vec<ProbeBeat>,
+    pub program_name: String,
+    pub program_digest: String,
+    pub pid: Option<u32>,
+    pub staged_path: String,
+}
+
+impl ProbeReport {
+    pub fn check(&self, code: &str) -> Option<&ProbeCheck> {
+        self.checks.iter().find(|c| c.code == code)
+    }
 }
 
 /// Per-node store counters, gossiped so every HUD can see blobs land on peers.

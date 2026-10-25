@@ -19,7 +19,7 @@ actions:
   blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket
   invite [--ttl 15m]       Mint a signed, expiring, single-use invite
   daemon [install|status]  Install or inspect the daemon that starts the node at login
-  probe                    Run one probe on the local node (BLB, KVS, PRC, MSH, A/B)
+  probe                    Run one probe now (MSH, STO, PUL, BEAT, PRC; nodes also probe every 30s)
   devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)
   mesh-test                Check the running node's security, mesh convergence and blob transfer
   hud                      Serve the HUD and API only (no mesh)
@@ -63,7 +63,7 @@ HUD keys (at http://127.0.0.1:8788):
   Up / Down Arrow                          Zoom camera in/out across Layers 1..5 (GLOBE -> PROCESS)
   Left / Right Arrow                       Step backward/forward through the 6-Step System Tour & Nodes
   Double-Click Node / Row                  Zoom into focused node symbol (resets to L1 GLOBE after L5)
-  Click [1 MSH] .. [6 A/B] in Bottom CC    Jump directly to any capability step in the live Closed Captions
+  Click [1 MSH] .. [5 DEV] in Bottom CC    Jump directly to any capability step in the live Closed Captions
 ```
 
 ---
@@ -525,7 +525,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | `GET /api/processes` | Supervised processes with live PID / status |
 | `GET /api/devices` | Devices connected to this node (cameras, microphones, keyboards, ...) |
 | `POST /api/processes/blob` | Stage a program blob (or ticket) and run / stop it as a process |
-| `POST /api/probe` | Run one probe (BLB, KVS, PRC, MSH, A/B) |
+| `POST /api/probe` | Run one probe now (`GET` returns the latest); nodes probe themselves every 30s |
 
 
 ---
