@@ -13,17 +13,14 @@ use dialtone::api::{
 use dialtone::blob::{Blobs, Store};
 use dialtone::deploy::{install_persistent_os_daemon, render_os_service_unit};
 use dialtone::mesh::{
-    allow_peer_in_config_with_addrs, build_mesh_rtt_matrix, cached_local_public_ip_geo,
-    compute_rtt_ms_from_echo, default_arch, default_config_path, default_os, default_seeds,
-    default_store_dir, derive_standby_topic_id, detect_default_node_name, is_allowed_peer_in_list,
-    is_valid_node_name, load_mesh_config, merge_beat, monotonic_now_ms, new_invite, new_secret,
-    node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
-    observe_peer_remote_addrs, open_beat, parse_duration_secs, place_nodes, prune_stale_peers,
-    redeem_invite, revoke_peer_in_config, save_mesh_config, seal_beat,
-    spawn_background_public_ip_geo_probe, try_load_mesh_config, validate_secret, Beat, ChannelKeys,
-    LiveAllowlist, MeshControlCommand, PeerRttEcho, ReplayGuard, SeedList, StoreStats,
-    BEAT_INTERVAL_SECS, BEAT_SCHEMA, DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS, INVITE_PREFIX,
-    SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
+    allow_peer_in_config_with_addrs, cached_local_public_ip_geo, default_arch, default_config_path,
+    default_os, default_seeds, default_store_dir, derive_standby_topic_id,
+    detect_default_node_name, is_allowed_peer_in_list, load_mesh_config, monotonic_now_ms,
+    new_invite, new_secret, node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
+    parse_duration_secs, redeem_invite, revoke_peer_in_config, save_mesh_config, seal_beat,
+    spawn_background_public_ip_geo_probe, validate_secret, Beat, ChannelKeys, LiveAllowlist,
+    MeshControlCommand, PeerRttEcho, SeedList, StoreStats, BEAT_INTERVAL_SECS, BEAT_SCHEMA,
+    DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
@@ -32,14 +29,12 @@ use dialtone::node::{
 };
 use dialtone::stats::{sample_stats, StatsWindow};
 use dialtone::{collect_node_diagnostics, run_self_test};
-use futures_lite::StreamExt;
 use iroh::address_lookup::memory::MemoryLookup;
 use iroh::protocol::Router;
-use iroh_gossip::{
-    api::Event as GossipEvent,
-    net::{Gossip, GOSSIP_ALPN},
-};
+use iroh_gossip::net::{Gossip, GOSSIP_ALPN};
 use serde_json::json;
+
+mod actors;
 
 fn print_usage() {
     println!(
@@ -634,12 +629,12 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             opts.invites.push(t.clone());
         }
     }
-    let mut active_channel = normalize_channel_name(Some(&opts.channel));
+    let active_channel = normalize_channel_name(Some(&opts.channel));
     let validated_secret = opts
         .secret_key
         .as_deref()
         .and_then(|raw| validate_secret(raw).ok());
-    let mut active_keys: Option<ChannelKeys> = if let Some(ref pass) = validated_secret {
+    let active_keys: Option<ChannelKeys> = if let Some(ref pass) = validated_secret {
         Some(saved_cfg.apply_secret(&active_channel, pass))
     } else if saved_cfg.channel == active_channel {
         saved_cfg.active_channel_keys()
@@ -675,7 +670,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     // =========================================================================
     // [BOOT 2/5] Local Web HUD & Configuration Console (starts FIRST!)
     // =========================================================================
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::unbounded_channel::<MeshControlCommand>();
+    let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel::<MeshControlCommand>();
     let mut local_web_url = format!("http://{}", opts.listen);
 
     let placeholder_diag = IrohTransportDiagnostics {
@@ -844,9 +839,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let node_key = secret_key.clone();
     // Enforced at the QUIC handshake for every protocol, and for beats and deploys below.
     let live_allowlist = LiveAllowlist::new(&saved_cfg.allowlist);
-    let mut allowlist_mtime = std::fs::metadata(&config_path)
-        .and_then(|m| m.modified())
-        .ok();
     let memory_lookup = MemoryLookup::new();
     let endpoint = build_endpoint_builder(&opts.transport)?
         .address_lookup(memory_lookup.clone())
@@ -951,7 +943,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         }
     }
 
-    let (mut topic_id, mut channel_fp) = if let Some(ref keys) = active_keys {
+    let (topic_id, channel_fp) = if let Some(ref keys) = active_keys {
         (keys.topic_id, keys.fingerprint())
     } else {
         (
@@ -1018,12 +1010,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     .to_text()?;
 
     let mut rolling_window = StatsWindow::new(SUMMARY_INTERVAL_SECS);
-    let mut last_rx_from_peer: std::collections::HashMap<String, (u64, u64)> =
-        std::collections::HashMap::new();
-    let mut measured_peer_rtt_ms: std::collections::BTreeMap<String, f64> =
-        std::collections::BTreeMap::new();
-    let mut last_echo_reply_mono_ms: std::collections::HashMap<String, u64> =
-        std::collections::HashMap::new();
+    let measured_peer_rtt_ms = std::collections::BTreeMap::new();
 
     let mut initial_self_beat = self_beat(
         &blobs,
@@ -1072,7 +1059,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         .subscribe(topic_id, seed_ids.clone())
         .await
         .map_err(|e| format!("subscribe gossip topic: {e}"))?;
-    let (mut sender, mut receiver) = topic.split();
+    let (sender, receiver) = topic.split();
     if !seed_ids.is_empty() {
         let _ = tokio::time::timeout(
             Duration::from_millis(800),
@@ -1121,7 +1108,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         }
     }
 
-    let mut counter = 1u64;
     if opts.once {
         let json = serde_json::to_string_pretty(&initial_self_beat).map_err(|e| e.to_string())?;
         println!("{json}");
@@ -1135,821 +1121,44 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         return Ok(());
     }
 
-    let mut last_broadcast_procs = initial_self_beat.processes.clone();
-    let mut auto_pulled_peer_blobs: std::collections::HashSet<(String, String)> =
-        std::collections::HashSet::new();
-    let mut replay_guard = ReplayGuard::default();
     live_allowlist.replace(&saved_cfg.allowlist);
-    let mut sample_tick = tokio::time::interval(Duration::from_secs(1));
-    let mut beat_tick = tokio::time::interval(Duration::from_secs(BEAT_INTERVAL_SECS));
-    beat_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    sample_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut shutdown = std::pin::pin!(shutdown_signal());
-    // When the gossip subscription ends, stop polling it and re-subscribe with backoff.
-    let mut subscribed = true;
-    let mut resubscribe_backoff = Duration::from_secs(1);
-    let resubscribe_at = tokio::time::sleep(Duration::ZERO);
-    tokio::pin!(resubscribe_at);
-    loop {
-        tokio::select! {
-            signal_name = &mut shutdown => {
-                println!("[shutdown] {signal_name} received; stopping processes and closing the endpoint");
-                break;
-            }
-            _ = &mut resubscribe_at, if !subscribed => {
-                match gossip.subscribe(topic_id, seed_ids.clone()).await {
-                    Ok(new_topic) => {
-                        let (new_s, new_r) = new_topic.split();
-                        sender = new_s;
-                        receiver = new_r;
-                        subscribed = true;
-                        resubscribe_backoff = Duration::from_secs(1);
-                        println!("[gossip] re-subscribed to channel '{active_channel}'");
-                    }
-                    Err(err) => {
-                        resubscribe_backoff = (resubscribe_backoff * 2).min(Duration::from_secs(30));
-                        eprintln!("[gossip-err] re-subscribe failed: {err}; retrying in {resubscribe_backoff:?}");
-                        resubscribe_at.as_mut().reset(tokio::time::Instant::now() + resubscribe_backoff);
-                    }
-                }
-            }
-            Some(cmd) = control_rx.recv() => {
-                match cmd {
-                    MeshControlCommand::JoinMesh {
-                        channel: new_channel,
-                        keys: new_keys,
-                        invites: new_tickets,
-                        node_name: maybe_node,
-                    } => {
-                        if let Some(nn) = maybe_node {
-                            opts.node = nn;
-                        }
-                        active_channel = normalize_channel_name(Some(&new_channel));
-                        topic_id = new_keys.topic_id;
-                        channel_fp = new_keys.fingerprint();
-                        active_keys = Some(new_keys);
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let ctx = actors::Ctx {
+        node_id: node_id.clone(),
+        endpoint: endpoint.clone(),
+        memory_lookup: memory_lookup.clone(),
+        transport: opts.transport.clone(),
+        key_path: key_path.clone(),
+        config_path: config_path.clone(),
+        blobs: blobs.clone(),
+        allowlist: live_allowlist.clone(),
+        state: shared_state.clone(),
+        cancel: cancel.clone(),
+    };
+    let actors = actors::spawn_all(
+        ctx,
+        actors::MeshStart {
+            node: opts.node.clone(),
+            node_key,
+            gossip: gossip.clone(),
+            sender,
+            receiver,
+            keys: active_keys,
+            channel: active_channel,
+            topic_id,
+            seed_ids,
+            known_peer_addrs,
+            joined_peer_ids,
+            print_first_beat: !serve_http,
+            control_rx,
+        },
+    );
 
-                        let mut new_boot_ids = Vec::new();
-                        for seed_addr in default_seeds() {
-                            let clean = advertised_endpoint_addr(&seed_addr, &opts.transport);
-                            if clean.id != endpoint.id() {
-                                known_peer_addrs.insert(clean.id, clean.clone());
-                                joined_peer_ids.insert(clean.id);
-                                new_boot_ids.push(clean.id);
-                                memory_lookup.add_endpoint_info(clean);
-                            }
-                        }
-                        for raw_t in &new_tickets {
-                            if let Ok(parsed) = SeedList::from_str(raw_t) {
-                                for p_addr in parsed.peers {
-                                    let clean = advertised_endpoint_addr(&p_addr, &opts.transport);
-                                    if clean.id != endpoint.id() {
-                                        known_peer_addrs.insert(clean.id, clean.clone());
-                                        joined_peer_ids.insert(clean.id);
-                                        if !new_boot_ids.contains(&clean.id) {
-                                            new_boot_ids.push(clean.id);
-                                        }
-                                        memory_lookup.add_endpoint_info(clean);
-                                    }
-                                }
-                            }
-                        }
-
-                        if let Ok(new_topic) = gossip.subscribe(topic_id, new_boot_ids.clone()).await {
-                            let (new_s, new_r) = new_topic.split();
-                            sender = new_s;
-                            receiver = new_r;
-                            seed_ids = new_boot_ids.clone();
-                            if !new_boot_ids.is_empty() {
-                                let _ = tokio::time::timeout(
-                                    Duration::from_millis(800),
-                                    sender.join_peers(new_boot_ids.clone()),
-                                )
-                                .await;
-                            }
-                            println!(
-                                "[GOSSIP-JOIN] Unlocked '{}' gossip channel ({}) with {} peers",
-                                active_channel,
-                                channel_fp,
-                                new_boot_ids.len()
-                            );
-                        }
-                    }
-                }
-            }
-            _ = sample_tick.tick() => {
-                let bound_ip = diagnostics.bound_non_tailnet_ipv4.as_deref();
-                let res = sample_stats(&opts.node, bound_ip, counter);
-                let mut total_restarts = 0u32;
-                let mut procs_changed = None;
-                if let Some(st_arc) = &shared_state {
-                    if let Ok(mut st) = st_arc.lock() {
-                        st.reconcile_processes();
-                        total_restarts = st
-                            .processes
-                            .iter()
-                            .map(|p| p.restart_count)
-                            .sum();
-                        if st.processes != last_broadcast_procs {
-                            last_broadcast_procs = st.processes.clone();
-                            procs_changed = Some((
-                                st.processes.clone(),
-                                st.service_endpoints.clone(),
-                            ));
-                        }
-                    }
-                }
-                let sample_now = now_unix();
-                rolling_window.record_sample(
-                    sample_now,
-                    &res,
-                    &measured_peer_rtt_ms,
-                    total_restarts,
-                );
-                let local_summary = rolling_window.summarize(sample_now);
-
-                if let Some(st_arc) = &shared_state {
-                    if let Ok(mut st) = st_arc.lock() {
-                        st.stats = res.clone();
-                        let self_name = st.node.clone();
-                        if let Some(self_entry) = st.nodes.iter_mut().find(|n| n.node == self_name) {
-                            self_entry.stats = res.clone();
-                            self_entry.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                            self_entry.summary_stats = Some(local_summary.clone());
-                            if let Some(local_geo) = cached_local_public_ip_geo() {
-                                self_entry.geo_location = Some(local_geo);
-                            }
-                            if let Some((ref mp, ref se)) = procs_changed {
-                                self_entry.processes = mp.clone();
-                                self_entry.service_endpoints = se.clone();
-                            }
-                        }
-                        let rtt = build_mesh_rtt_matrix(&st.nodes);
-                        place_nodes(&mut st.nodes, &rtt);
-                        st.mesh_rtt_ms = rtt;
-                        st.refresh_live_alerts();
-                    }
-                }
-
-                // If supervised processes changed state (spawned, stopped, or crashed/respawned),
-                // broadcast an immediate beat so peers observe the transition within ~1s.
-                if let (Some((mp, se)), Some(ref keys)) = (procs_changed, &active_keys) {
-                    let adv = advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
-                    let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &node_id);
-                    let mut ticket_peers = vec![adv];
-                    ticket_peers.extend(known_peer_addrs.values().cloned());
-                    if let Ok(current_ticket) = (SeedList {
-                        topic: topic_id,
-                        peers: ticket_peers,
-                    })
-                    .to_text()
-                    {
-                        let mut proc_beat = self_beat(
-                            &blobs,
-                            &opts.node,
-                            &node_id,
-                            current_ticket,
-                            counter,
-                            diag,
-                        );
-                        proc_beat.stats = res;
-                        proc_beat.processes = mp;
-                        proc_beat.service_endpoints = se;
-                        proc_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                        proc_beat.summary_stats = Some(local_summary);
-                        let now_mono = monotonic_now_ms();
-                        proc_beat.sent_mono_ms = now_mono;
-                        proc_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
-                        if let Ok(wire_bytes) = seal_beat(&proc_beat, keys, &node_key) {
-                            let _ = tokio::time::timeout(
-                                Duration::from_millis(500),
-                                sender.broadcast(wire_bytes.into()),
-                            )
-                            .await;
-                        }
-                    }
-                }
-            }
-            _ = beat_tick.tick() => {
-                if let Some(st_arc) = &shared_state {
-                    if let Ok(mut st) = st_arc.lock() {
-                        let now = now_unix();
-                        if let Some(me) = st.self_entry_mut() {
-                            me.updated_at_unix = now;
-                        }
-                        let pruned = prune_stale_peers(&mut st.nodes, now, DEFAULT_PEER_TTL_SECS);
-                        if pruned > 0 {
-                            let live: std::collections::HashSet<String> =
-                                st.nodes.iter().map(|n| n.node.clone()).collect();
-                            measured_peer_rtt_ms.retain(|name, _| live.contains(name));
-                            last_rx_from_peer.retain(|name, _| live.contains(name));
-                            println!("[mesh] pruned {pruned} peer(s) silent for over {DEFAULT_PEER_TTL_SECS}s");
-                        }
-                    }
-                }
-                let mtime = std::fs::metadata(&config_path).and_then(|m| m.modified()).ok();
-                if mtime != allowlist_mtime {
-                    allowlist_mtime = mtime;
-                    // A running node keeps enforcing its last good allowlist if the file is bad.
-                    let disk = match try_load_mesh_config(&config_path) {
-                        Ok(disk) => disk,
-                        Err(err) => {
-                            eprintln!("[allowlist] NOT reloaded, keeping the current {} NodeId(s): {err}", live_allowlist.len());
-                            continue;
-                        }
-                    };
-                    live_allowlist.replace(&disk.allowlist);
-                    saved_cfg.allowlist = disk.allowlist.clone();
-                    if let Some(st_arc) = &shared_state {
-                        if let Ok(mut st) = st_arc.lock() {
-                            st.mesh_config.allowlist = disk.allowlist;
-                        }
-                    }
-                    println!("[allowlist] reloaded {} NodeId(s) from {}", live_allowlist.len(), config_path.display());
-                }
-                if active_keys.is_some() && !seed_ids.is_empty() {
-                    for seed_addr in default_seeds() {
-                        if seed_addr.id != endpoint.id() {
-                            memory_lookup.add_endpoint_info(seed_addr);
-                        }
-                    }
-                    for p_addr in known_peer_addrs.values() {
-                        memory_lookup.add_endpoint_info(p_addr.clone());
-                    }
-                    let _ = tokio::time::timeout(
-                        Duration::from_millis(600),
-                        sender.join_peers(seed_ids.clone()),
-                    )
-                    .await;
-                }
-                if let Some(st_arc) = &shared_state {
-                    let peer_ids: Vec<String> = st_arc
-                        .lock()
-                        .unwrap()
-                        .nodes
-                        .iter()
-                        .filter(|n| n.node_id != node_id)
-                        .map(|n| n.node_id.clone())
-                        .collect();
-                    for pid in peer_ids {
-                        if let Ok((obs, tailnet)) = tokio::time::timeout(
-                            Duration::from_millis(350),
-                            observe_peer_remote_addrs(&endpoint, &pid),
-                        )
-                        .await
-                        {
-                            if !obs.is_empty() {
-                                let mut st = st_arc.lock().unwrap();
-                                if let Some(peer_entry) = st.nodes.iter_mut().find(|n| n.node_id == pid) {
-                                    peer_entry.observed_remote_addrs = obs;
-                                    peer_entry.tailnet_used = tailnet;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let adv = advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
-                let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &node_id);
-                let mut ticket_peers = vec![adv];
-                ticket_peers.extend(known_peer_addrs.values().cloned());
-                let current_ticket = SeedList {
-                    topic: topic_id,
-                    peers: ticket_peers,
-                }
-                .to_text()
-                .unwrap_or_else(|e| {
-                    eprintln!("[beat] could not encode seed list: {e}");
-                    String::new()
-                });
-                let mut self_beat = self_beat(&blobs, &opts.node, &node_id, current_ticket, counter, diag.clone());
-                self_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
-
-                let is_summary = counter <= 2 || counter.is_multiple_of(SUMMARY_EVERY_N_BEATS);
-                let local_summary = rolling_window.summarize(now_unix());
-                if is_summary {
-                    self_beat.kind = "summary".to_string();
-                    self_beat.summary_stats = Some(local_summary.clone());
-                } else {
-                    self_beat.kind = "regular".to_string();
-                    self_beat.summary_stats = None;
-                }
-
-                let mut missing_peer_rtt = false;
-                if let Some(st_arc) = &shared_state {
-                    let mut st = st_arc.lock().unwrap();
-                    st.reconcile_processes();
-                    last_broadcast_procs = st.processes.clone();
-                    self_beat.processes = st.processes.clone();
-                    self_beat.service_endpoints = st.service_endpoints.clone();
-                    self_beat.probe = st.probe.clone();
-                    for n in &st.nodes {
-                        if n.node_id != node_id && !measured_peer_rtt_ms.contains_key(&n.node) {
-                            missing_peer_rtt = true;
-                        }
-                    }
-                    self_beat.rtt_probe_requested =
-                        missing_peer_rtt || counter <= 2 || counter.is_multiple_of(3);
-                    let now_mono = monotonic_now_ms();
-                    self_beat.sent_mono_ms = now_mono;
-                    self_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
-                    st.iroh_runtime = diag;
-                    st.stats = self_beat.stats.clone();
-                    let mut local_copy = self_beat.clone();
-                    local_copy.summary_stats = Some(local_summary.clone());
-                    merge_beat(&mut st.nodes, local_copy);
-                    let rtt = build_mesh_rtt_matrix(&st.nodes);
-                    place_nodes(&mut st.nodes, &rtt);
-                    st.mesh_rtt_ms = rtt;
-                    st.refresh_live_alerts();
-                    if is_summary {
-                        st.record_log(
-                            "gossip-beat",
-                            "INFO",
-                            "stdout",
-                            format!(
-                                "published 30s summary beat #{} (cpu {:.1}% ±{:.1}%, mem {:.1}% ±{:.1}%, thrashing={}, rtt_peers={})",
-                                counter,
-                                local_summary.cpu_pct.mean,
-                                local_summary.cpu_pct.stddev,
-                                local_summary.mem_pct.mean,
-                                local_summary.mem_pct.stddev,
-                                local_summary.thrashing_detected,
-                                measured_peer_rtt_ms.len()
-                            ),
-                        );
-                    }
-                } else {
-                    self_beat.rtt_probe_requested = counter <= 2 || counter.is_multiple_of(3);
-                    let now_mono = monotonic_now_ms();
-                    self_beat.sent_mono_ms = now_mono;
-                    self_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
-                }
-                if counter == 1 && !serve_http {
-                    println!("{}", serde_json::to_string_pretty(&self_beat).unwrap());
-                }
-                if let Some(ref keys) = active_keys {
-                    if let Ok(wire_bytes) = seal_beat(&self_beat, keys, &node_key) {
-                        let _ = tokio::time::timeout(
-                            Duration::from_millis(600),
-                            sender.broadcast(wire_bytes.into()),
-                        )
-                        .await;
-                    }
-                }
-                counter += 1;
-            }
-            maybe_event = receiver.next(), if subscribed => {
-                match maybe_event {
-                    Some(Ok(GossipEvent::NeighborUp(peer_id))) => {
-                        let Some(ref keys) = active_keys else {
-                            continue;
-                        };
-                        if active_channel == DEFAULT_CHANNEL_NAME {
-                            let allowed_ids = if let Some(st_arc) = &shared_state {
-                                st_arc
-                                    .lock()
-                                    .ok()
-                                    .map(|st| st.mesh_config.allowlist.clone())
-                                    .unwrap_or_else(|| saved_cfg.allowlist.clone())
-                            } else {
-                                saved_cfg.allowlist.clone()
-                            };
-                            if !is_allowed_peer_in_list(
-                                &allowed_ids,
-                                &peer_id.to_string(),
-                                Some(&node_id),
-                            ) {
-                                if !seed_ids.is_empty() {
-                                    let _ = tokio::time::timeout(
-                                        Duration::from_millis(400),
-                                        sender.join_peers(seed_ids.clone()),
-                                    )
-                                    .await;
-                                }
-                                continue;
-                            }
-                        }
-                        let adv = advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
-                        let diag = build_diagnostics(&opts.transport, &adv, Some(&key_path), &node_id);
-                        let mut ticket_peers = vec![adv];
-                        ticket_peers.extend(known_peer_addrs.values().cloned());
-                        let current_ticket = SeedList {
-                            topic: topic_id,
-                            peers: ticket_peers,
-                        }
-                        .to_text()
-                        .unwrap_or_else(|e| {
-                            eprintln!("[beat] could not encode seed list: {e}");
-                            String::new()
-                        });
-                        let mut self_beat = self_beat(&blobs, &opts.node, &node_id, current_ticket, counter, diag);
-                        let now_mono = monotonic_now_ms();
-                        self_beat.kind = "summary".to_string();
-                        self_beat.sent_mono_ms = now_mono;
-                        self_beat.rtt_probe_requested = true;
-                        self_beat.peer_echoes = echoes_for_peers(&last_rx_from_peer, now_mono);
-                        self_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                        self_beat.summary_stats = Some(rolling_window.summarize(now_unix()));
-                        if let Some(st_arc) = &shared_state {
-                            if let Ok(mut st) = st_arc.lock() {
-                                st.reconcile_processes();
-                                self_beat.processes = st.processes.clone();
-                                self_beat.service_endpoints = st.service_endpoints.clone();
-                                self_beat.probe = st.probe.clone();
-                            }
-                        }
-                        if let Ok(wire_bytes) = seal_beat(&self_beat, keys, &node_key) {
-                            let _ = tokio::time::timeout(
-                                Duration::from_millis(600),
-                                sender.broadcast(wire_bytes.into()),
-                            )
-                            .await;
-                        }
-                    }
-                    Some(Ok(GossipEvent::NeighborDown(_peer_id))) => {
-                        if active_keys.is_some() && !seed_ids.is_empty() {
-                            let _ = tokio::time::timeout(
-                                Duration::from_millis(400),
-                                sender.join_peers(seed_ids.clone()),
-                            )
-                            .await;
-                        }
-                    }
-                    Some(Ok(GossipEvent::Received(msg))) => {
-                        let Some(ref keys) = active_keys else {
-                            continue;
-                        };
-                        let mut rx_beat = match open_beat(&msg.content, keys) {
-                            Ok(beat) => beat,
-                            Err(reason) => {
-                                eprintln!(
-                                    "[gossip-auth-reject] dropped gossip payload on channel '{}': {}",
-                                    active_channel, reason
-                                );
-                                continue;
-                            }
-                        };
-                        // open_beat verified the signature, so rx_beat.node_id is the real sender.
-                        if rx_beat.node_id != node_id {
-                            if !live_allowlist.contains_str(&rx_beat.node_id) {
-                                eprintln!(
-                                    "[gossip-allowlist-reject] dropped beat from unlisted node_id={} on channel '{}' (run 'dialtone allowlist add {}' to authorize)",
-                                    rx_beat.node_id, active_channel, rx_beat.node_id
-                                );
-                                continue;
-                            }
-                            if !is_valid_node_name(&rx_beat.node) {
-                                eprintln!(
-                                    "[gossip-auth-reject] dropped beat from node_id={} with an invalid node name",
-                                    rx_beat.node_id
-                                );
-                                continue;
-                            }
-                            let now_ms = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis() as u64)
-                                .unwrap_or(0);
-                            if let Err(reason) =
-                                replay_guard.admit(&rx_beat.node_id, rx_beat.sent_unix_ms, now_ms)
-                            {
-                                eprintln!(
-                                    "[gossip-replay-reject] dropped beat from node={} node_id={}: {}",
-                                    rx_beat.node, rx_beat.node_id, reason
-                                );
-                                continue;
-                            }
-
-                            let rx_mono = monotonic_now_ms();
-                            if rx_beat.sent_mono_ms > 0 {
-                                last_rx_from_peer
-                                    .insert(rx_beat.node.clone(), (rx_beat.sent_mono_ms, rx_mono));
-                            }
-                            if let Some(echo) = rx_beat.peer_echoes.get(&opts.node) {
-                                if echo.hold_time_ms <= 600
-                                    || !measured_peer_rtt_ms.contains_key(&rx_beat.node)
-                                {
-                                    if let Some(rtt_ms) = compute_rtt_ms_from_echo(rx_mono, echo) {
-                                        let updated_rtt = if let Some(&prev) =
-                                            measured_peer_rtt_ms.get(&rx_beat.node)
-                                        {
-                                            (((prev * 0.6) + (rtt_ms * 0.4)) * 10.0).round() / 10.0
-                                        } else {
-                                            rtt_ms
-                                        };
-                                        measured_peer_rtt_ms.insert(rx_beat.node.clone(), updated_rtt);
-                                    }
-                                }
-                            }
-                            if let Some(&peer_reported) = rx_beat.peer_rtt_ms.get(&opts.node) {
-                                if peer_reported > 0.0 {
-                                    measured_peer_rtt_ms
-                                        .entry(rx_beat.node.clone())
-                                        .or_insert(peer_reported);
-                                }
-                            }
-                            if let Some(&our_rtt) = measured_peer_rtt_ms.get(&rx_beat.node) {
-                                rx_beat.peer_rtt_ms.insert(opts.node.clone(), our_rtt);
-                            }
-
-                            let mut discovered_addrs = Vec::new();
-                            if let Ok(peer_ticket) = SeedList::from_str(&rx_beat.ticket) {
-                                discovered_addrs.extend(peer_ticket.peers);
-                            }
-                            if let Ok(pid) = rx_beat.node_id.parse::<iroh::EndpointId>() {
-                                let mut direct_addr = iroh::EndpointAddr::new(pid);
-                                for r in &rx_beat.iroh_transport.advertised_relay_urls {
-                                    if let Ok(rurl) = r.parse::<iroh::RelayUrl>() {
-                                        direct_addr = direct_addr.with_relay_url(rurl);
-                                    }
-                                }
-                                for ip_s in &rx_beat.iroh_transport.advertised_ip_addrs {
-                                    if let Ok(sock) = ip_s.parse::<std::net::SocketAddr>() {
-                                        direct_addr = direct_addr.with_ip_addr(sock);
-                                    }
-                                }
-                                discovered_addrs.push(direct_addr);
-                            }
-                            let mut new_peers = Vec::new();
-                            for p_addr in discovered_addrs {
-                                let clean = advertised_endpoint_addr(&p_addr, &opts.transport);
-                                if clean.id != endpoint.id() {
-                                    known_peer_addrs.insert(clean.id, clean.clone());
-                                    if joined_peer_ids.insert(clean.id) {
-                                        new_peers.push(clean.id);
-                                    }
-                                }
-                                memory_lookup.add_endpoint_info(clean);
-                            }
-                            if !new_peers.is_empty() {
-                                for np in &new_peers {
-                                    if !seed_ids.contains(np) {
-                                        seed_ids.push(*np);
-                                    }
-                                }
-                                let _ = tokio::time::timeout(
-                                    Duration::from_millis(600),
-                                    sender.join_peers(new_peers),
-                                )
-                                .await;
-                            }
-                            let (obs, tailnet) = tokio::time::timeout(
-                                Duration::from_millis(400),
-                                observe_peer_remote_addrs(&endpoint, &rx_beat.node_id),
-                            )
-                            .await
-                            .unwrap_or_else(|_| (vec!["iroh-quic:active".to_string()], false));
-                            rx_beat.observed_remote_addrs = obs;
-                            rx_beat.tailnet_used = tailnet;
-
-                            let rtt_log = measured_peer_rtt_ms
-                                .get(&rx_beat.node)
-                                .map(|v| format!("{v:.1}ms"))
-                                .unwrap_or_else(|| "probing".to_string());
-                            println!(
-                                "[gossip-rx] node={} kind={} counter={} rtt={} addrs={:?} tailnet_used={}",
-                                rx_beat.node,
-                                rx_beat.kind,
-                                rx_beat.counter,
-                                rtt_log,
-                                rx_beat.observed_remote_addrs,
-                                rx_beat.tailnet_used
-                            );
-
-                            let peer_node_name = rx_beat.node.clone();
-                            let peer_node_id = rx_beat.node_id.clone();
-                            let need_echo_reply = rx_beat.rtt_probe_requested
-                                || !measured_peer_rtt_ms.contains_key(&peer_node_name);
-                            // Stamp with receiver's local clock after MAC verification so NTP skew
-                            // between hosts cannot cause premature TTL pruning.
-                            rx_beat.updated_at_unix = now_unix();
-
-                            if let Some(st_arc) = &shared_state {
-                                let mut pending_blob_pulls = Vec::new();
-                                {
-                                    let mut st = st_arc.lock().unwrap();
-                                    for peer_proc in &rx_beat.processes {
-                                        if peer_proc.desired_state == "running"
-                                            && !dialtone::supervisor::is_probe_program(&peer_proc.name)
-                                        {
-                                            // Deploys come only from allowlisted signers (checked
-                                            // above) and only from allowlisted blob providers.
-                                            let provider_ok = |t: &str| {
-                                                dialtone::blob::parse_blob_ticket_uri(t)
-                                                    .map(|(ticket, _)| {
-                                                        live_allowlist.contains(&ticket.addr().id)
-                                                    })
-                                                    .unwrap_or(false)
-                                            };
-                                            if let Some(t_uri) = peer_proc
-                                                .deploy_ticket
-                                                .as_deref()
-                                                .filter(|t| provider_ok(t))
-                                            {
-                                                let already_running = st
-                                                    .processes
-                                                    .iter()
-                                                    .any(|p| {
-                                                        p.name == peer_proc.name
-                                                            && p.digest == peer_proc.digest
-                                                            && p.status.as_deref() == Some("running")
-                                                    });
-                                                let pull_key = (
-                                                    rx_beat.node_id.clone(),
-                                                    peer_proc.digest.clone(),
-                                                );
-                                                if !already_running
-                                                    && auto_pulled_peer_blobs.insert(pull_key)
-                                                {
-                                                    if let Some(ref bridge) = st.store {
-                                                        pending_blob_pulls.push((
-                                                            bridge.clone(),
-                                                            peer_proc.clone(),
-                                                            t_uri.to_string(),
-                                                            rx_beat.node.clone(),
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    let is_first_seen =
-                                        !st.nodes.iter().any(|n| n.node_id == peer_node_id);
-                                    merge_beat(&mut st.nodes, rx_beat);
-                                    if let Some(self_entry) = st.self_entry_mut() {
-                                        self_entry.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                                        if let Some(local_geo) = cached_local_public_ip_geo() {
-                                            self_entry.geo_location = Some(local_geo);
-                                        }
-                                    }
-                                    let rtt = build_mesh_rtt_matrix(&st.nodes);
-                                    place_nodes(&mut st.nodes, &rtt);
-                                    st.mesh_rtt_ms = rtt;
-                                    st.refresh_live_alerts();
-                                    if is_first_seen {
-                                        st.record_event(
-                                            "mesh.peer_joined",
-                                            "info",
-                                            format!("Discovered mesh peer '{}'", peer_node_name),
-                                        );
-                                        st.record_log(
-                                            "gossip-mesh",
-                                            "INFO",
-                                            "stdout",
-                                            format!(
-                                                "peer '{}' joined active gossip mesh (rtt={})",
-                                                peer_node_name, rtt_log
-                                            ),
-                                        );
-                                    }
-                                }
-
-                                for (bridge, peer_proc, t_uri, provider_node) in
-                                    pending_blob_pulls
-                                {
-                                    let st_clone = Arc::clone(st_arc);
-                                    std::thread::spawn(move || {
-                                        if let Ok(rep) = bridge.pull_blob(
-                                            &t_uri,
-                                            false,
-                                        ) {
-                                            if let Ok((verified_sha, staged_path)) =
-                                                dialtone::supervisor::stage_program(
-                                                    &bridge.blobs,
-                                                    &peer_proc.name,
-                                                    &rep.digest,
-                                                )
-                                            {
-                                                if let Ok(mut st) = st_clone.lock() {
-                                                    if !st
-                                                        .blob_fetches
-                                                        .iter()
-                                                        .any(|f| f.ticket_uri == rep.ticket_uri)
-                                                    {
-                                                        st.blob_fetches.push(rep);
-                                                    }
-                                                    let needs_update = !st
-                                                        .processes
-                                                        .iter()
-                                                        .any(|p| {
-                                                            p.name == peer_proc.name
-                                                                && p.digest == verified_sha
-                                                                && p.status.as_deref()
-                                                                    == Some("running")
-                                                        });
-                                                    if needs_update {
-                                                        let mut new_spec = peer_proc.clone();
-                                                        new_spec.digest = verified_sha;
-                                                        new_spec.path = staged_path
-                                                            .to_string_lossy()
-                                                            .to_string();
-                                                        new_spec.pid = None;
-                                                        new_spec.status = None;
-                                                        if let Some(ex) = st
-                                                            .processes
-                                                            .iter_mut()
-                                                            .find(|p| p.name == new_spec.name)
-                                                        {
-                                                            *ex = new_spec;
-                                                        } else {
-                                                            st.processes.push(new_spec);
-                                                        }
-                                                        st.reconcile_processes();
-                                                        st.record_log(
-                                                            "blob-supervisor",
-                                                            "INFO",
-                                                            "stdout",
-                                                            format!(
-                                                                "auto-deployed & executed process blob '{}' from peer '{}'",
-                                                                peer_proc.name, provider_node
-                                                            ),
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    });
-                                }
-                            }
-
-                            let last_reply = last_echo_reply_mono_ms
-                                .get(&peer_node_name)
-                                .copied()
-                                .unwrap_or(0);
-                            if need_echo_reply && rx_mono.saturating_sub(last_reply) >= 1_500 {
-                                last_echo_reply_mono_ms.insert(peer_node_name.clone(), rx_mono);
-                                let adv =
-                                    advertised_endpoint_addr(&endpoint.addr(), &opts.transport);
-                                let diag = build_diagnostics(
-                                    &opts.transport,
-                                    &adv,
-                                    Some(&key_path),
-                                    &node_id,
-                                );
-                                let mut ticket_peers = vec![adv];
-                                ticket_peers.extend(known_peer_addrs.values().cloned());
-                                if let Ok(current_ticket) = (SeedList {
-                                    topic: topic_id,
-                                    peers: ticket_peers,
-                                })
-                                .to_text()
-                                {
-                                    let mut echo_beat = self_beat(
-                                        &blobs,
-                                        &opts.node,
-                                        &node_id,
-                                        current_ticket,
-                                        counter,
-                                        diag,
-                                    );
-                                    let reply_mono = monotonic_now_ms();
-                                    echo_beat.kind = "rtt_echo".to_string();
-                                    echo_beat.sent_mono_ms = reply_mono;
-                                    echo_beat.rtt_probe_requested =
-                                        !measured_peer_rtt_ms.contains_key(&peer_node_name);
-                                    echo_beat.peer_echoes =
-                                        echoes_for_peers(&last_rx_from_peer, reply_mono);
-                                    echo_beat.peer_rtt_ms = measured_peer_rtt_ms.clone();
-                                    echo_beat.summary_stats =
-                                        Some(rolling_window.summarize(now_unix()));
-                                    if let Some(st_arc) = &shared_state {
-                                        if let Ok(st) = st_arc.lock() {
-                                            echo_beat.processes =
-                                                st.processes.clone();
-                                            echo_beat.service_endpoints =
-                                                st.service_endpoints.clone();
-                                        }
-                                    }
-                                    if let Ok(wire_bytes) =
-                                        seal_beat(&echo_beat, keys, &node_key)
-                                    {
-                                        let _ = tokio::time::timeout(
-                                            Duration::from_millis(400),
-                                            sender.broadcast(wire_bytes.into()),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Some(Ok(GossipEvent::Lagged)) => {
-                        eprintln!("[gossip-lagged] channel '{active_channel}': this node fell behind and missed gossip events");
-                    }
-                    Some(Err(err)) => {
-                        eprintln!("[gossip-err] {err}; re-subscribing in {resubscribe_backoff:?}");
-                        subscribed = false;
-                        resubscribe_at.as_mut().reset(tokio::time::Instant::now() + resubscribe_backoff);
-                    }
-                    None => {
-                        eprintln!("[gossip-err] subscription to '{active_channel}' ended; re-subscribing in {resubscribe_backoff:?}");
-                        subscribed = false;
-                        resubscribe_at.as_mut().reset(tokio::time::Instant::now() + resubscribe_backoff);
-                    }
-                }
-            }
-        }
+    let signal_name = shutdown_signal().await;
+    println!("[shutdown] {signal_name} received; stopping processes and closing the endpoint");
+    cancel.cancel();
+    for actor in actors {
+        let _ = tokio::time::timeout(Duration::from_secs(5), actor).await;
     }
 
     // Graceful shutdown: stop every process tree, then close the endpoint.
