@@ -2015,6 +2015,8 @@ function renderTopShellStats() {
   let probePassTotal = 0;
   let probeCheckTotal = 0;
   const capOk = { MSH: 0, NBR: 0, BEAT: 0, STO: 0, PUL: 0, PRC: 0 };
+  // How many nodes reported each check: STO, PUL and PRC only after a full probe.
+  const capRan = { MSH: 0, NBR: 0, BEAT: 0, STO: 0, PUL: 0, PRC: 0 };
   const pullMs = [];
   const allRtts = [];
   const allJitters = [];
@@ -2054,6 +2056,7 @@ function renderTopShellStats() {
         const checks = (n.probe && Array.isArray(n.probe.checks)) ? n.probe.checks : [];
     for (const c of checks) {
       probeCheckTotal += 1;
+      if (c.code in capRan) capRan[c.code] += 1;
       if (c.ok) {
         probePassTotal += 1;
         if (c.code in capOk) capOk[c.code] += 1;
@@ -2101,14 +2104,16 @@ function renderTopShellStats() {
     const vCls = isStepFocus ? "focus" : cls;
     return `<span class="${kCls}">${padR(k, 4)}</span><span class="${vCls}">${padL(v, 8)}</span>`;
   };
-  const capFmt = (okCnt) => `${okCnt}/${nodes.length} OK`;
-  const capCls = (okCnt) => okCnt >= nodes.length ? "hi" : (okCnt > 0 ? "warn" : "err");
+  // A check no node has run lately (a full-probe check) shows "-", not a failure.
+  const capCell = (code, step) => capRan[code]
+    ? kvCell(code, `${capOk[code]}/${capRan[code]} OK`, capOk[code] >= capRan[code] ? "hi" : (capOk[code] > 0 ? "warn" : "err"), stepMeta.code === step)
+    : kvCell(code, "-", "dim", stepMeta.code === step);
 
   // Overall Stats Grid (6 strictly aligned bar-graph rows: MSH, NET, probe, CPU, MEM, DSK)
   const overallRows = [
     `${rowMark("MSH")}${rowLbl("MSH", "MSH")} ${asciiBar(meshHealthPct, 101, 101, 18)} <span class="${mshCls}">${padL(meshHealthPct.toFixed(0) + "%", 7)}</span>   ${kvCell("NDS", `${nodes.length}/${expectedPeers}`, "hi", stepMeta.code === "MSH")}   ${kvCell("LNK", `${activeLinks}/${expectedLinks}`, "hi", stepMeta.code === "MSH")}   ${kvCell("PTH", `${directPaths}D/${relayPaths}R`)}   ${kvCell("BTS", "#" + totalHbs)}   ${kvCell("DIG", String(blobKeys), "hi", stepMeta.code === "BLB")}`,
     `${rowMark("NET")}${rowLbl("NET", "NET")} ${asciiBar(rttBarPct, 75, 95, 18)} <span class="${valCls(avgRtt, 180, 260)}">${padL(avgRtt.toFixed(1) + "ms", 7)}</span>   ${kvCell("RX", sumRxKb.toFixed(0) + "K/s", "hi", stepMeta.code === "NET")}   ${kvCell("TX", sumTxKb.toFixed(0) + "K/s", "hi", stepMeta.code === "NET")}   ${kvCell("MIN", minRtt.toFixed(1) + "ms")}   ${kvCell("MAX", maxRtt.toFixed(1) + "ms")}   ${kvCell("JIT", "±" + avgJitter.toFixed(1) + "ms")}`,
-    `${rowMark("PRB")}${rowLbl("PRB", "PRB")} ${asciiBar(probePct, 101, 101, 18)} <span class="${probeCls}">${padL(`${probePassTotal}/${probeCheckTotal}`, 7)}</span>   ${kvCell("MSH", capFmt(capOk.MSH), capCls(capOk.MSH), stepMeta.code === "MSH")}   ${kvCell("NBR", capFmt(capOk.NBR), capCls(capOk.NBR), stepMeta.code === "NET")}   ${kvCell("BEAT", capFmt(capOk.BEAT), capCls(capOk.BEAT), stepMeta.code === "NET")}   ${kvCell("PUL", capFmt(capOk.PUL), capCls(capOk.PUL), stepMeta.code === "BLB")}   ${kvCell("PRC", capFmt(capOk.PRC), capCls(capOk.PRC), stepMeta.code === "PRC")}`,
+    `${rowMark("PRB")}${rowLbl("PRB", "PRB")} ${asciiBar(probePct, 101, 101, 18)} <span class="${probeCls}">${padL(`${probePassTotal}/${probeCheckTotal}`, 7)}</span>   ${capCell("MSH", "MSH")}   ${capCell("NBR", "NET")}   ${capCell("BEAT", "NET")}   ${capCell("PUL", "BLB")}   ${capCell("PRC", "PRC")}`,
     `${rowMark("CPU")}${rowLbl("CPU", "CPU")} ${asciiBar(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT, 18)} <span class="${valCls(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT)}">${padL(cpuVal.toFixed(1) + "%", 7)}</span>   ${kvCell("AVG", cpuAvg.toFixed(1) + "%")}   ${kvCell("STD", "±" + cpuStd.toFixed(1) + "%")}   ${kvCell("MAX", cpuMax.toFixed(1) + "%")}   ${kvCell("COR", String(totalCores))}   ${kvCell("STO", fmtBytesShort(blobBytes), "hi", stepMeta.code === "BLB")}`,
     `${rowMark("MEM")}${rowLbl("MEM", "MEM")} ${asciiBar(memVal, WARN_MEM_PCT, ERROR_MEM_PCT, 18)} <span class="${valCls(memVal, WARN_MEM_PCT, ERROR_MEM_PCT)}">${padL(memVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumMemUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumMemTot) + "G")}   ${kvCell("STD", "±" + memStd.toFixed(1) + "%")}   ${kvCell("PUL", (pullMs.length ? (pullMs.reduce((a, b) => a + b, 0) / pullMs.length).toFixed(0) : "-") + "ms", "hi", stepMeta.code === "BLB")}   ${kvCell("FET", String(blobFetches))}`,
     `${rowMark("DSK")}${rowLbl("DSK", "DSK")} ${asciiBar(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT, 18)} <span class="${valCls(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT)}">${padL(dskVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumDskUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumDskTot) + "G")}   ${kvCell("THR", thrashScore.toFixed(0), thrashScore > 0 ? "err" : "hi")}   ${kvCell("PRB", `#${targetCycle}`, "hi")}   ${kvCell("PCS", `${totalJobs}/${nodes.length}`, "hi", stepMeta.code === "PRC")}`
