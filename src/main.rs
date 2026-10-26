@@ -843,6 +843,9 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let gossip = Gossip::builder()
         .max_message_size(65_536)
         .spawn(endpoint.clone());
+    if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
+        st.gossip_metrics = Some(gossip.metrics().clone());
+    }
     let blobs_proto = iroh_blobs::BlobsProtocol::new(blobs.api(), None);
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())

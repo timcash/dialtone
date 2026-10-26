@@ -190,6 +190,9 @@ pub struct NodeState {
     /// Peer scores (GossipSub-style), kept by the Mesh, Links and Probe actors.
     #[serde(skip)]
     pub scores: Arc<Mutex<crate::mesh::PeerScores>>,
+    /// iroh-gossip's own counters (data and control messages), for `GET /api/net`.
+    #[serde(skip)]
+    pub gossip_metrics: Option<Arc<iroh_gossip::metrics::Metrics>>,
     /// The node's async runtime, for API routes that fetch from a peer (`/api/details`).
     #[serde(skip)]
     pub runtime: Option<tokio::runtime::Handle>,
@@ -628,6 +631,7 @@ impl NodeState {
             net: Arc::default(),
             frames: Arc::default(),
             scores: Arc::default(),
+            gossip_metrics: None,
             runtime: None,
             details_cache: HashMap::new(),
             gossip_neighbors: Vec::new(),
@@ -1103,6 +1107,18 @@ fn route_request(
                 "socket": socket,
                 "gossip": st.net.snapshot(),
                 "scores": st.scores.lock().map(|s| s.snapshot()).unwrap_or_default(),
+                // Every gossip frame, duplicates and control messages (Plumtree IHave /
+                // Graft / Prune, HyParView) included.
+                "gossip_wire": st.gossip_metrics.as_ref().map(|m| json!({
+                    "data_recv": m.msgs_data_recv.get(),
+                    "data_recv_bytes": m.msgs_data_recv_size.get(),
+                    "data_sent": m.msgs_data_sent.get(),
+                    "data_sent_bytes": m.msgs_data_sent_size.get(),
+                    "ctrl_recv": m.msgs_ctrl_recv.get(),
+                    "ctrl_recv_bytes": m.msgs_ctrl_recv_size.get(),
+                    "ctrl_sent": m.msgs_ctrl_sent.get(),
+                    "ctrl_sent_bytes": m.msgs_ctrl_sent_size.get(),
+                })),
             });
             write_json(&mut stream, 200, &body)
         }

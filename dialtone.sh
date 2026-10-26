@@ -357,12 +357,18 @@ for a, b in zip(start, end):
     msgs_in = (g1["gossip_msgs_in"] - g0["gossip_msgs_in"]) / secs
     out_n = g1["gossip_msgs_out"] - g0["gossip_msgs_out"]
     out_b = g1["gossip_bytes_out"] - g0["gossip_bytes_out"]
-    rows.append((kin, kout, msgs_in, out_b / out_n if out_n else 0, g1["neighbors"], b["socket"]["conns_opened"]))
+    w0, w1 = a.get("gossip_wire") or {}, b.get("gossip_wire") or {}
+    wd = lambda k: (w1.get(k, 0) - w0.get(k, 0))
+    rows.append((kin, kout, msgs_in, out_b / out_n if out_n else 0, g1["neighbors"], b["socket"]["conns_opened"],
+                 wd("data_recv") / max(1, msgs_in * secs), wd("data_recv_bytes") * 8 / secs / 1000,
+                 wd("ctrl_recv_bytes") * 8 / secs / 1000, (g1["gossip_bytes_in"] - g0["gossip_bytes_in"]) * 8 / secs / 1000))
 avg = lambda xs: sum(xs) / len(xs)
 cols = list(zip(*rows))
 print("    per node (avg / max): in %.1f / %.1f kbit/s, out %.1f / %.1f kbit/s" % (avg(cols[0]), max(cols[0]), avg(cols[1]), max(cols[1])))
 print("    gossip: %.1f msgs/s received per node, %.0f bytes per message sent, %.1f neighbors, %.1f connections opened since boot"
       % (avg(cols[2]), avg(cols[3]), avg(cols[4]), avg(cols[5])))
+print("    gossip wire: payload %.1f kbit/s; %.2f data frames per message delivered, data %.1f kbit/s, control %.1f kbit/s"
+      % (avg(cols[9]), avg(cols[6]), avg(cols[7]), avg(cols[8])))
 worst = max(max(cols[0]), max(cols[1]))
 if budget and worst > budget:
     print("    FAIL: %.1f kbit/s is over the budget of %.0f kbit/s" % (worst, budget))
@@ -391,9 +397,10 @@ pick_routes() {
     alts="${!var:-$node}"
     found=""
     IFS='|' read -ra alt <<<"$alts"
-    for a in "${alt[@]}"; do
+    # Two rounds: a jump host that is slow to answer once should not fail a deploy.
+    for a in "${alt[@]}" "${alt[@]}"; do
       # shellcheck disable=SC2086
-      if ssh -o ConnectTimeout=3 -o BatchMode=yes $a "exit 0" >/dev/null 2>&1; then found="$a"; break; fi
+      if ssh -o ConnectTimeout=5 -o BatchMode=yes $a "exit 0" >/dev/null 2>&1; then found="$a"; break; fi
     done
     [ -n "$found" ] || { echo "echo 'cannot reach $node over SSH (tried: $alts)' >&2; exit 1"; return 1; }
     printf 'ROUTE_%s=%q\n' "${node//-/_}" "$found"
@@ -573,8 +580,10 @@ cmd_fleet() { load_fleet; fleet_report "" || true; }
 # scale-fleet: N nodes on every fleet machine, one mesh across them
 # -----------------------------------------------------------------------------
 # PowerShell on a Windows node. __PREFIX__, __N__, __URL__ and __SECRET__ are filled in per node.
+# Scale nodes carry the scale secret on their command line (their state directory is only
+# in their environment); the node's own daemon never does.
 WIN_SCALE_STOP='
-  Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*dialtone-scale*" } |
+  Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "dialtone.exe" -and $_.CommandLine -like "*Scale_Fleet_Mesh_Secret*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   Start-Sleep -Milliseconds 800
   Remove-Item -Recurse -Force (Join-Path $env:TEMP "dialtone-scale") -ErrorAction SilentlyContinue
@@ -743,13 +752,19 @@ for name, (machine, y) in b.items():
     f = lambda k, s="socket": y[s][k] - x[s][k]
     per.setdefault(machine, []).append((f("bytes_in") * 8 / secs / 1000, f("bytes_out") * 8 / secs / 1000,
         f("gossip_msgs_in", "gossip") / secs, y["gossip"]["neighbors"],
-        sum(1 for s in y.get("scores", []) if s.get("graylisted"))))
+        sum(1 for s in y.get("scores", []) if s.get("graylisted")),
+        f("gossip_bytes_in", "gossip") * 8 / secs / 1000,
+        f("data_recv", "gossip_wire") / max(1, f("gossip_msgs_in", "gossip")),
+        f("data_recv_bytes", "gossip_wire") * 8 / secs / 1000,
+        f("ctrl_recv_bytes", "gossip_wire") * 8 / secs / 1000))
 allrows = [r for rows in per.values() for r in rows]
 avg = lambda xs: sum(xs) / len(xs)
 for machine, rows in sorted(per.items()) + [("all", allrows)]:
     c = list(zip(*rows))
-    print("    %-8s %3d nodes: in %.1f / %.1f kbit/s (avg / max), out %.1f / %.1f, %.1f msgs/s, %.1f neighbors, %d graylisted"
-          % (machine, len(rows), avg(c[0]), max(c[0]), avg(c[1]), max(c[1]), avg(c[2]), avg(c[3]), sum(c[4])))
+    print("    %-8s %3d nodes: in %.1f / %.1f kbit/s (avg / max; gossip payload %.1f), out %.1f / %.1f, %.1f msgs/s, %.1f neighbors, %d graylisted"
+          % (machine, len(rows), avg(c[0]), max(c[0]), avg(c[5]), avg(c[1]), max(c[1]), avg(c[2]), avg(c[3]), sum(c[4])))
+    print("    %-8s            gossip wire: %.2f data frames per message delivered, data %.1f kbit/s, control %.1f kbit/s"
+          % ("", avg(c[6]), avg(c[7]), avg(c[8])))
 PY
   cleanup
 }
