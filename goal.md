@@ -71,8 +71,9 @@ and config field names) were accepted for a while after the rename and were remo
 
 ## Current Work
 
-1. **Next — candidates:** cut the remaining duplicate gossip frames (2 per message across machines: a Plumtree
-   tree that also weighs Rtt, or IDONTWANT as in GossipSub v1.2); reuse the Links connection for catch-ups; an
+1. **Next — candidates:** find the extra messages in some fleet runs (check for old beats coming round again;
+   a longer `message_id_retention` is the first thing to try); cut the remaining duplicate gossip frames (about 2 per
+   message across machines; IDONTWANT as in GossipSub v1.2); start Windows scale nodes without WMI; reuse the Links connection for catch-ups; an
    explicit signed `Deploy` message instead of inventory-driven auto-deploy; the API reading `watch` snapshots
    instead of locking node state.
 2. **Done — 2026-10-25: Scaling phase B.** Peer scores after GossipSub (delivered, invalid; failed fetches only
@@ -80,10 +81,12 @@ and config field names) were accepted for a while after the rename and were remo
    deploy, caught by the deploy gate). Scuttlebutt-style catch-up from one neighbor on joining and every 12 beats,
    with frames still signed by their authors; inventory fetches return the signed frame too. Devices and full
    probe reports are fetched for the HUD's focused node (`GET /api/details`) instead of gossiped.
-   `./dialtone.sh scale-fleet N` runs N nodes on every fleet machine as one mesh; it showed iroh-gossip's 80ms
-   graft timeout doubling traffic over relay links (5.35 data frames per message on the relayed machine), and a 1.5s graft
-   timeout took 60 nodes on three machines from 888 to 404 kbit/s per node. `GET /api/net` adds iroh-gossip's
-   data / control frame counts.
+   `./dialtone.sh scale-fleet N` runs N nodes on every fleet machine as one mesh: 60 nodes on three machines
+   converge in 30 to 50s and mostly run at about 420 kbit/s per node; some runs settle at about 850 kbit/s with
+   50% more messages delivered (open; suspected: old beats coming round after iroh-gossip forgets their ids). A longer Plumtree graft timeout looked like
+   a fix after one run each and made no difference over two more. `GET /api/net` adds iroh-gossip's data /
+   control frame counts and each peer's last fetch error. Defender flagged a Windows node's binary during a fleet
+   run (`Bearfoos.A!ml`, behaviour-based; the test starts nodes through WMI) and quarantined it.
 3. **Done — 2026-10-25: Gossip that scales (Phase A, after libp2p GossipSub).** Each node keeps 2 to 5 neighbors
    and joins three random known peers only when it has fewer than two, instead of joining every known peer every
    beat. Beats are a fixed ~1.2 KB (binary envelope v5, no seed lists, no per-peer probe results, no details); they

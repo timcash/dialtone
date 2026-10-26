@@ -885,20 +885,6 @@ pub fn beat_interval_for(nodes: usize) -> u64 {
     (nodes.div_ceil(10) as u64).clamp(BEAT_INTERVAL_SECS, MAX_BEAT_INTERVAL_SECS)
 }
 
-/// Plumtree timing for meshes whose links range from a LAN (under 1ms) to a relay (200ms
-/// and more). iroh-gossip's defaults graft after 80ms: on a slow link the eager copy then
-/// arrives after the graft, every such message travels twice, and the broadcast tree never
-/// settles. Beats need no sub-second recovery, so grafts wait longer: with 60 nodes on three
-/// machines (the cross-machine scale test) each node received 2.04 data frames per message
-/// instead of 2.78, and 404 kbit/s instead of 888.
-pub fn broadcast_config() -> iroh_gossip::proto::PlumtreeConfig {
-    iroh_gossip::proto::PlumtreeConfig {
-        graft_timeout_1: std::time::Duration::from_millis(1_500),
-        graft_timeout_2: std::time::Duration::from_millis(500),
-        ..Default::default()
-    }
-}
-
 /// How long a peer's beat stays fresh: three of the peer's own beat intervals.
 pub fn beat_fresh_secs(beat: &Beat) -> u64 {
     3 * beat.beat_interval_secs.max(BEAT_INTERVAL_SECS)
@@ -1548,6 +1534,8 @@ pub struct PeerScore {
     pub first_deliveries: f64,
     pub invalid: f64,
     pub fetch_failures: f64,
+    /// Why the latest failed fetch failed, until the failures decay away.
+    pub last_fetch_error: String,
 }
 
 impl PeerScore {
@@ -1575,10 +1563,12 @@ impl PeerScores {
         }
     }
 
-    /// A fetch to `peer` finished.
-    pub fn fetched(&mut self, peer: iroh::EndpointId, ok: bool) {
-        if !ok {
-            self.peers.entry(peer).or_default().fetch_failures += 1.0;
+    /// A fetch to `peer` finished, with `error` if it failed.
+    pub fn fetched(&mut self, peer: iroh::EndpointId, error: Option<&str>) {
+        if let Some(error) = error {
+            let s = self.peers.entry(peer).or_default();
+            s.fetch_failures += 1.0;
+            s.last_fetch_error = error.to_string();
         }
     }
 
@@ -1612,6 +1602,9 @@ impl PeerScores {
                     *c = 0.0;
                 }
             }
+            if s.fetch_failures == 0.0 {
+                s.last_fetch_error.clear();
+            }
             *s != PeerScore::default()
         });
     }
@@ -1629,6 +1622,7 @@ impl PeerScores {
                         "first_deliveries": (s.first_deliveries * 10.0).round() / 10.0,
                         "invalid": (s.invalid * 10.0).round() / 10.0,
                         "fetch_failures": (s.fetch_failures * 10.0).round() / 10.0,
+                        "last_fetch_error": s.last_fetch_error,
                         "graylisted": s.score() < GRAYLIST_SCORE,
                     })
                 })
@@ -2696,9 +2690,9 @@ mod tests {
         scores.delivered(bad, false);
         scores.delivered(bad, false);
         for _ in 0..4 {
-            scores.fetched(flaky, false);
+            scores.fetched(flaky, Some("connect timed out"));
         }
-        scores.fetched(good, true);
+        scores.fetched(good, None);
         assert_eq!(scores.score(&good), 20.0, "first deliveries are capped");
         assert!(!scores.graylisted(&good));
         assert!(scores.graylisted(&bad), "{}", scores.score(&bad));

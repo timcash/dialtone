@@ -542,13 +542,19 @@ PS
   cat /tmp/dialtone-fleet.txt
   [ -n "$passed" ] || fail "not every node passed its probe within 150s (FAIL lines above)"
   # The store, pulls (a fresh blob from each peer) and programs, from this node.
+  # Peers that just restarted can miss a pull or two, so the full probe gets three tries.
   say "Full probe on $LOCAL_NODE"
-  "$HOME/.dialtone/bin/dialtone" probe --all | python3 -c '
+  local full=""
+  for _ in 1 2 3; do
+    "$HOME/.dialtone/bin/dialtone" probe --all > /tmp/dialtone-probe.json && python3 -c '
 import sys, json
-p = json.load(sys.stdin)["probe"]
+p = json.load(open("/tmp/dialtone-probe.json"))["probe"]
 for c in p["checks"]:
     print("    %-4s %s %s" % (c["code"], "ok  " if c["ok"] else "FAIL", c.get("detail", "")))
-sys.exit(p["passed_count"] != p["total_count"])' || fail "the full probe on $LOCAL_NODE failed"
+sys.exit(p["passed_count"] != p["total_count"])' && { full=1; break; }
+    sleep 15
+  done
+  [ -n "$full" ] || fail "the full probe on $LOCAL_NODE failed three times"
   say "DEPLOYED: every node passed its probe"
 }
 
@@ -728,6 +734,11 @@ PY
   cat "$SCALE_ROOT/conv.txt"
   [ -n "$ok" ] || fail "the fleet mesh of $total nodes did not converge within about 4 minutes"
   echo "    converged: every node sees all $total in $(( $(date +%s) - started ))s"
+  # Joining costs extra (catch-ups, inventories, shorter beat intervals while the mesh
+  # looks small): measure the steady state after it.
+  local warmup=${SCALE_WARMUP:-60}
+  echo "    warming up ${warmup}s before measuring"
+  sleep "$warmup"
 
   scale_fleet_net "$SCALE_ROOT/net-start.txt"
   sleep "$secs"

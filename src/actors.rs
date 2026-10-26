@@ -277,6 +277,9 @@ async fn devices_actor(ctx: Ctx) {
 
 /// How often Links times the Rtt to each gossip neighbor.
 const LINKS_INTERVAL: Duration = Duration::from_secs(10);
+/// How long Links waits for a neighbor: a relayed link with a 200ms Rtt still stalls for
+/// seconds now and then (3s timeouts failed about one request in five across machines).
+const LINKS_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A neighbor that answers this many Rtt requests in a row without counting this node as
 /// its neighbor is joined again (see `links_actor`).
@@ -327,17 +330,17 @@ async fn links_actor(
         one_sided.retain(|id, _| neighbors.iter().any(|(n, _)| n == id));
         for (pid, name) in &neighbors {
             if !conns.contains_key(pid) {
-                match fetch::connect(&ctx.endpoint, *pid, Duration::from_secs(5)).await {
+                match fetch::connect(&ctx.endpoint, *pid, LINKS_TIMEOUT).await {
                     Ok(conn) => {
                         conns.insert(*pid, conn);
                     }
-                    Err(_) => {
-                        ctx.scores(|s| s.fetched(*pid, false));
+                    Err(err) => {
+                        ctx.scores(|s| s.fetched(*pid, Some(&err)));
                         continue;
                     }
                 }
             }
-            match fetch::rtt(&conns[pid], Duration::from_secs(3)).await {
+            match fetch::rtt(&conns[pid], LINKS_TIMEOUT).await {
                 Ok((ms, counts_us)) => {
                     let rounds = one_sided.entry(*pid).or_default();
                     *rounds = if counts_us { 0 } else { *rounds + 1 };
@@ -352,8 +355,8 @@ async fn links_actor(
                     };
                     rtt.insert(name.clone(), smoothed);
                 }
-                Err(_) => {
-                    ctx.scores(|s| s.fetched(*pid, false));
+                Err(err) => {
+                    ctx.scores(|s| s.fetched(*pid, Some(&err)));
                     conns.remove(pid);
                 }
             }
@@ -511,7 +514,7 @@ async fn sample_probe_blobs(ctx: &Ctx) -> HashMap<String, Result<String, String>
                     Ok(peer) => {
                         let result =
                             fetch::probe_blob(&ctx.endpoint, peer, Duration::from_secs(15)).await;
-                        ctx.scores(|s| s.fetched(peer, result.is_ok()));
+                        ctx.scores(|s| s.fetched(peer, result.as_ref().err().map(String::as_str)));
                         result
                     }
                     Err(_) => Err("invalid NodeId".to_string()),
@@ -1213,7 +1216,7 @@ impl Mesh {
         tokio::spawn(async move {
             let result =
                 fetch::catch_up(&ctx.endpoint, neighbor, have, Duration::from_secs(20)).await;
-            ctx.scores(|s| s.fetched(neighbor, result.is_ok()));
+            ctx.scores(|s| s.fetched(neighbor, result.as_ref().err().map(String::as_str)));
             let caught = result.unwrap_or_else(|err| {
                 eprintln!("[catch-up] {err}");
                 Default::default()
@@ -1494,7 +1497,7 @@ impl Mesh {
                 return;
             };
             let result = fetch::inventory(&ctx.endpoint, peer, Duration::from_secs(10)).await;
-            ctx.scores(|s| s.fetched(peer, result.is_ok()));
+            ctx.scores(|s| s.fetched(peer, result.as_ref().err().map(String::as_str)));
             match result {
                 Ok(frame) => {
                     let _ = fetched.send(Fetched {

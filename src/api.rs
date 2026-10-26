@@ -1157,7 +1157,7 @@ fn route_request(
                 std::time::Duration::from_secs(5),
             ));
             if let Ok(mut s) = scores.lock() {
-                s.fetched(peer, fetched.is_ok());
+                s.fetched(peer, fetched.as_ref().err().map(String::as_str));
             }
             match fetched {
                 Ok(details) => {

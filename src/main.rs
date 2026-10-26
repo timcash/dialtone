@@ -842,7 +842,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
 
     let gossip = Gossip::builder()
         .max_message_size(65_536)
-        .broadcast_config(dialtone::mesh::broadcast_config())
         .spawn(endpoint.clone());
     if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
         st.gossip_metrics = Some(gossip.metrics().clone());
