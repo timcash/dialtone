@@ -13,6 +13,6 @@
 FLEET.local.md
 goal.local.md
 *.local.sh
-deploy-fleet.local.sh
+*.local.env
 .env
 .env.*

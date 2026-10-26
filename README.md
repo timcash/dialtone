@@ -562,21 +562,31 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 ---
 
-## 10. Live Mesh Verification & Local CI
+## 10. Working on dialtone: `./dialtone.sh`
 
-`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API). Check a running node or run the whole local pipeline at any time:
+One script builds, tests and deploys. `cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API); the script adds live tests on top.
 
 ```bash
-# Verify the running local daemon's security posture, zero public directory exposure,
-# N-peer encrypted gossip convergence, and live QUIC blob transfer
-./dialtone mesh-test --expect-peers 3 --timeout 15s
-
-# Three real nodes on this machine: mesh, probe 5/5 with blob pulls between them, deploy and
-# removal across the mesh, and a stopped node caught by the others' probes (about 30s)
-./e2e.sh
-
-# Full local CI suite (zero-leak and domain-language gates, fmt, tests, release build, live node acceptance, e2e.sh)
-./ci.sh
+./dialtone.sh check     # lint, fmt, tests, release build, one-node test, three-node test (about 35s)
+./dialtone.sh lint      # leak gate (no host names / NodeIds in git) and domain language
+./dialtone.sh e2e       # three real nodes on this machine: mesh, probe 5/5 with blob pulls between
+                        # them, deploy and removal across the mesh, a stopped node caught (about 30s)
+./dialtone.sh deploy    # check, build, install on every node, wait until every probe passes 5/5
+./dialtone.sh deploy --skip-check   # ... without running check first
+./dialtone.sh fleet     # each node's latest probe in the live mesh
 ```
 
-**Build profiles.** `cargo build --release` is the everyday optimized build (no LTO, parallel and incremental codegen): `ci.sh`, GitHub CI and fleet deploys use it, and a one-file change rebuilds in about a second. Published binaries are built with `cargo build --profile dist` (size-optimized, fat LTO), which takes about a minute and only runs when a version is tagged.
+`deploy` and `fleet` read your fleet's hosts from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine:
+
+```bash
+FLEET_NODES="node-alpha node-beta node-gamma"   # every node; deploy waits for all of their probes
+LOCAL_NODE="node-alpha"                          # this machine (macOS, launchd)
+LOCAL_LAUNCHD="com.timcash.dialtone"
+WINDOWS_NODES="node-beta node-gamma"             # the first compiles the Windows binary
+SSH_node_beta="node-beta|-J node-gamma user@10.0.0.2"   # SSH alternatives; first that answers wins
+SSH_node_gamma="node-gamma"
+```
+
+To check a single running node by hand, `./dialtone mesh-test --expect-peers 3` verifies its security posture, mesh convergence and a live blob transfer.
+
+**Build profiles.** `cargo build --release` is the everyday optimized build (no LTO, parallel and incremental codegen): `dialtone.sh`, GitHub CI and fleet deploys use it, and a one-file change rebuilds in about a second. Published binaries are built with `cargo build --profile dist` (size-optimized, fat LTO), which takes about a minute and only runs when a version is tagged.

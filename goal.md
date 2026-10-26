@@ -3,7 +3,7 @@
 ## Domain Language
 
 Every concept has **one word**. Code, CLI, API, HUD, docs and commit messages use that word and nothing else.
-`ci.sh` fails the build if a banned synonym appears in `src/` (lines that must keep an old name for wire / CLI
+`./dialtone.sh lint` (part of `check`) fails if a banned synonym appears in `src/` (lines that must keep an old name for wire / CLI
 compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 | Word | Means | Code form | Never say |
@@ -69,23 +69,26 @@ and config field names) were accepted for a while after the rename and were remo
    inventory-driven auto-deploy; let iroh's address lookup find peers instead of gossiping all-peer seed lists and
    re-joining every 5s; Rtt from iroh connection paths instead of broadcast echoes; the API reading `watch`
    snapshots instead of locking node state.
-2. **Done — 2026-10-25: Self-testing mesh and removals.** Every node runs a Probe every 30s against the live mesh:
+2. **Done — 2026-10-25: One script.** `./dialtone.sh check | lint | e2e | deploy | fleet` replaced `ci.sh`, `e2e.sh`,
+   `domain-lint.sh` and the local fleet deploy / test scripts. Fleet hosts live in the uncommitted `fleet.local.env`;
+   `deploy` ends by waiting until every node's probe passes 5/5 on the new build.
+3. **Done — 2026-10-25: Self-testing mesh and removals.** Every node runs a Probe every 30s against the live mesh:
    it writes a fresh blob, pulls every peer's latest probe blob over QUIC (SHA-256 verified), checks beats both ways,
    mesh membership and the probe program; results travel in beats and show in the HUD. It immediately found that
    the downloader's 1s connect timeout broke pulls over relayed / high-Rtt paths (now 10s) and that mesh-deployed
    programs could not be removed (copies now follow their origin). Removed: the old-name compatibility layer,
    the fake A/B slot and KV checks, the Rust node placement the HUD duplicated. Also fixed: `dialtone hud` next to
    a running node rewrote its config, hung on the store lock and could reap its processes.
-3. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
-   (`dist` profile keeps it for tagged releases): a one-file change rebuilds in ~1.5s instead of ~52s, `ci.sh` and
+4. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
+   (`dist` profile keeps it for tagged releases): a one-file change rebuilds in ~1.5s instead of ~52s, `check` and
    fleet deploys reuse that build. Removed the in-process `self-test` command (`run_self_test`, the MemStore blob
    transfer and the gossip fixture in production code), which duplicated `cargo test`; GitHub CI no longer builds a
    second LTO binary just to run it, and `cargo test` builds one test binary instead of three.
-4. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
+5. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
    speakers, keyboards, pointers, displays, printers, storage and Bluetooth devices (no serials or IDs); they
    travel in the Inventory, appear in `GET /api/devices` and `/api/mesh`, and the HUD lists the focused node's
    devices with a 7th tour step, `DEV`.
-5. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
+6. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
    vendored three.js 0.179.1 and h3-js 4.4.0 (no CDN). The API parses requests with `httparse` and rejects
    `Transfer-Encoding`, ambiguous `Content-Length` and oversize heads. One persistent iroh-blobs `FsStore` replaces
    the SHA-256 file tree and the in-memory store: blobs are named by `sha256/<hex>` tags, GC removes untagged data,
@@ -93,14 +96,14 @@ and config field names) were accepted for a while after the rename and were remo
    `run_node` boots the node and starts six actors (`actors.rs`: Mesh, Stats, Supervisor, Links, Allowlist,
    Deploy) stopped by one `CancellationToken`. Gossip carries a typed `Message` (envelope v4: Beat, Summary, Echo,
    Inventory); processes and services travel only in inventories, sent on change.
-6. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
+7. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
    seeded node state (`dialtone hud` now serves live state); the deploy-plan, build-cache, build-decision, manifest,
    proof-validation, alert-ack, tiered-fetch, process-intent, install.sh, catalog, command-journal / rtcore UDP,
    cursor-job, key-lease, service-ref, systemd drop-in and peer-cache code; 22 API routes no caller used, including
    the one-frame `/ws` stub; the hand-written SHA-1 (now unneeded) and hex / base64 codecs (now the `hex` and
    `base64` crates, same accepted inputs). The self-test exercises only real behaviour. The HUD's non-working
    Init / Invite / Join actions became a panel of the CLI commands (the page carries no API token by design).
-7. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
+8. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
    **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
@@ -116,7 +119,7 @@ and config field names) were accepted for a while after the rename and were remo
 | F7 | **Node runtime & API** | 5-stage boot, six actors with one shutdown token, shared node state, `httparse` API on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `actors.rs`, `api.rs` |
 | F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, focused node's device list, 5-step tour with captions (mesh, blobs and pulls, process, beats, devices), blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
 | F12 | **Devices** | Per-OS listing of connected cameras, microphones, speakers, keyboards, pointers, displays, printers, storage, Bluetooth devices; gossiped in the Inventory | `devices.rs`, Devices actor |
-| F9 | **Verification** | `mesh-test`, `probe`, unit + live iroh tests, `ci.sh` (zero-leak gate, domain-language gate, fmt, tests, live acceptance), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
+| F9 | **Verification** | `mesh-test`, `probe`, unit + live iroh tests, `dialtone.sh check` (zero-leak gate, domain-language gate, fmt, tests, one-node and three-node tests), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
 | F10 | **Services & records** | Service refs, Services, key leases, policies, Event / Alert / Log / Kv records with cursor pagination, proof validation | `service.rs`, `record.rs` |
 | F11 | **CLI & fixtures** | Argument parsing, `help`, and the `*-fixture` preview commands | `main.rs` |
 
@@ -225,11 +228,11 @@ When a repository is public, any hardcoded operational defaults become public in
 ## 3. Architecture & Design Decisions
 
 ### Pillar A — Zero-Leak Public Repository & Automated CI Gate
-- **Synthetic Identifiers Only**: All source code (`src/*.rs`), unit tests, CLI fixtures, `ci.sh`, and `README.md` use generic synthetic node names (`node-alpha`, `node-beta`, `node-gamma`, `edge-1`, `edge-2`, `pendant-1`).
+- **Synthetic Identifiers Only**: All source code (`src/*.rs`), unit tests, CLI fixtures, `dialtone.sh`, and `README.md` use generic synthetic node names (`node-alpha`, `node-beta`, `node-gamma`, `edge-1`, `edge-2`, `pendant-1`).
 - **No Hardcoded Seed Keys in Source**: `default_seeds()` returns an empty list by default unless populated from the host's local `~/.dialtone/config.json` (`seeds`).
 - **Hardened `.gitignore`**: Explicitly ignore all local state, config, and secret patterns:
   - `/target`, `/bin`, `.dialtone/`, `.dialtone2/`, `*config.json`, `*mesh*.json`, `*.key`, `*.pem`, `*.secret`, `.env`, `.env.*`.
-- **Automated Leak Gate in `ci.sh`**: Step 0 of `ci.sh` scans all git-tracked files (`git ls-files`) and fails the build if any forbidden machine name or real `NodeId` appears anywhere in the repository.
+- **Automated Leak Gate in `dialtone.sh lint`**: it scans all git-tracked files (`git ls-files`) and fails the build if any forbidden machine name or real `NodeId` appears anywhere in the repository.
 
 ### Pillar B — Out-of-Band Host Provisioning over SSH / Tailnet (`~/.dialtone/config.json`)
 - **Host-Local State Directory**: All runtime identity and mesh membership config is stored in `~/.dialtone/` (`C:\Users\<user>\.dialtone\` on Windows), never inside any git checkout directory.
@@ -293,5 +296,5 @@ When a repository is public, any hardcoded operational defaults become public in
 - [x] **Step 3**: Replace all occurrences of real computer names across `src/`, `README.md`, and `ci.sh` with generic synthetic names (`node-alpha`, `node-beta`, `node-gamma`, `edge-1`, `edge-2`, `pendant-1`).
 - [x] **Step 4**: Remove `--secret-key` / `--secret` (old name `--password`) from generated OS service command-line arguments in [`src/deploy.rs`](src/deploy.rs) so channel keys are read exclusively from `~/.dialtone/config.json` (`0600`) and never appear in `ps aux`.
 - [x] **Step 5**: Add Bearer token authentication (`~/.dialtone/api-token`), bounded process concurrency, and `Host`/`Origin` header validation to [`src/http.rs`](src/http.rs) to block unauthenticated access, browser CSRF, and DNS rebinding against `127.0.0.1:8788`.
-- [x] **Step 6**: Harden `.gitignore` and add an automated git-tracked file and commit history leak scanner to [`ci.sh`](ci.sh).
+- [x] **Step 6**: Harden `.gitignore` and add an automated git-tracked file and commit history leak scanner to [`dialtone.sh`](dialtone.sh) (`lint`).
 - [x] **Step 7**: Provision `~/.dialtone/config.json` (`seeds` + `allowlist` + `derived_keys`) onto the production mesh hosts out-of-band over SSH/Tailnet and verify multi-node gossip sync with zero secrets or hostnames in git.
