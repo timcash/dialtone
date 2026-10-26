@@ -493,7 +493,13 @@ async fn sample_probe_blobs(ctx: &Ctx) -> HashMap<String, Result<String, String>
                 .collect()
         })
         .unwrap_or_default();
-    ctx.scores(|s| peers.retain(|id| id.parse().map(|pid| !s.graylisted(&pid)).unwrap_or(false)));
+    ctx.scores(|s| {
+        peers.retain(|id| {
+            id.parse()
+                .map(|pid| !s.avoid_fetching(&pid))
+                .unwrap_or(false)
+        })
+    });
     shuffle(&mut peers);
     peers.truncate(PULL_SAMPLE);
     let asks: Vec<_> = peers
@@ -1297,7 +1303,7 @@ impl Mesh {
             .scores(|s| {
                 self.receiver
                     .neighbors()
-                    .filter(|id| !s.graylisted(id))
+                    .filter(|id| !s.avoid_fetching(id))
                     .collect()
             })
             .unwrap_or_default();
@@ -1470,7 +1476,11 @@ impl Mesh {
         let Ok(peer) = beat.node_id.parse::<EndpointId>() else {
             return;
         };
-        if self.ctx.scores(|s| s.graylisted(&peer)).unwrap_or(false) {
+        if self
+            .ctx
+            .scores(|s| s.avoid_fetching(&peer))
+            .unwrap_or(false)
+        {
             return;
         }
         self.inventory_asked.insert(beat.node_id.clone(), now);

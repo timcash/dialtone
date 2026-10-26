@@ -885,6 +885,20 @@ pub fn beat_interval_for(nodes: usize) -> u64 {
     (nodes.div_ceil(10) as u64).clamp(BEAT_INTERVAL_SECS, MAX_BEAT_INTERVAL_SECS)
 }
 
+/// Plumtree timing for meshes whose links range from a LAN (under 1ms) to a relay (200ms
+/// and more). iroh-gossip's defaults graft after 80ms: on a slow link the eager copy then
+/// arrives after the graft, every such message travels twice, and the broadcast tree never
+/// settles. Beats need no sub-second recovery, so grafts wait longer: with 60 nodes on three
+/// machines (the cross-machine scale test) each node received 2.04 data frames per message
+/// instead of 2.78, and 404 kbit/s instead of 888.
+pub fn broadcast_config() -> iroh_gossip::proto::PlumtreeConfig {
+    iroh_gossip::proto::PlumtreeConfig {
+        graft_timeout_1: std::time::Duration::from_millis(1_500),
+        graft_timeout_2: std::time::Duration::from_millis(500),
+        ..Default::default()
+    }
+}
+
 /// How long a peer's beat stays fresh: three of the peer's own beat intervals.
 pub fn beat_fresh_secs(beat: &Beat) -> u64 {
     3 * beat.beat_interval_secs.max(BEAT_INTERVAL_SECS)
@@ -1514,17 +1528,21 @@ pub fn open_message(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Message, Str
     Ok(msg)
 }
 
-/// Below this score a peer is graylisted: Mesh ignores what it delivers, does not join it
-/// and does not fetch from it, until the score decays back up.
+/// Below this delivery score a peer is graylisted: Mesh ignores what it delivers, does not
+/// join it and does not fetch from it, until the score decays back up.
 pub const GRAYLIST_SCORE: f64 = -20.0;
+/// With this many recent failed fetches (decayed), Mesh fetches from other peers instead.
+/// Failing to answer is not misbehaving (a peer may be restarting), so it never graylists.
+pub const FETCH_AVOID_FAILURES: f64 = 3.0;
 /// Each beat tick, every counter keeps this share of its value.
 const SCORE_DECAY: f64 = 0.9;
 /// First deliveries count up to this many.
 const FIRST_DELIVERY_CAP: f64 = 20.0;
 
 /// One peer's behaviour, as in libp2p GossipSub's peer score: credit for messages it
-/// delivered first (P2), a squared penalty for invalid ones (P4), and a squared penalty
-/// for fetches to it that failed (a behaviour penalty, P7). Every counter decays.
+/// delivered first (P2) and a squared penalty for invalid ones (P4) make its delivery
+/// score, which decides the graylist; failed fetches to it are counted apart and only steer
+/// fetches elsewhere. Every counter decays.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct PeerScore {
     pub first_deliveries: f64,
@@ -1534,9 +1552,7 @@ pub struct PeerScore {
 
 impl PeerScore {
     pub fn score(&self) -> f64 {
-        self.first_deliveries.min(FIRST_DELIVERY_CAP)
-            - 10.0 * self.invalid * self.invalid
-            - 2.0 * self.fetch_failures * self.fetch_failures
+        self.first_deliveries.min(FIRST_DELIVERY_CAP) - 10.0 * self.invalid * self.invalid
     }
 }
 
@@ -1572,6 +1588,15 @@ impl PeerScores {
 
     pub fn graylisted(&self, peer: &iroh::EndpointId) -> bool {
         self.score(peer) < GRAYLIST_SCORE
+    }
+
+    /// Graylisted, or failing fetches lately: ask another peer.
+    pub fn avoid_fetching(&self, peer: &iroh::EndpointId) -> bool {
+        self.graylisted(peer)
+            || self
+                .peers
+                .get(peer)
+                .is_some_and(|s| s.fetch_failures >= FETCH_AVOID_FAILURES)
     }
 
     /// Decay every counter; forget peers whose counters all reached zero.
@@ -2677,12 +2702,14 @@ mod tests {
         assert_eq!(scores.score(&good), 20.0, "first deliveries are capped");
         assert!(!scores.graylisted(&good));
         assert!(scores.graylisted(&bad), "{}", scores.score(&bad));
-        assert!(scores.graylisted(&flaky), "{}", scores.score(&flaky));
+        // A peer that fails fetches (restarting, unreachable) is asked less, never graylisted.
+        assert!(!scores.graylisted(&flaky) && scores.avoid_fetching(&flaky));
+        assert!(scores.avoid_fetching(&bad) && !scores.avoid_fetching(&good));
         assert_eq!(scores.score(&iroh::SecretKey::generate().public()), 0.0);
         for _ in 0..15 {
             scores.decay();
         }
-        assert!(!scores.graylisted(&bad) && !scores.graylisted(&flaky));
+        assert!(!scores.graylisted(&bad) && !scores.avoid_fetching(&flaky));
         for _ in 0..100 {
             scores.decay();
         }

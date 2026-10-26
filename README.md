@@ -479,8 +479,12 @@ Gossip is routed the way [libp2p GossipSub](https://docs.libp2p.io/concepts/pubs
 - **Separate topics.** Beats go on the channel's beats topic; inventories are broadcast on its events topic when they change, so beats stay small and regular.
 - **No echo broadcasts.** Rtt is timed with an empty request over a fetch connection to each gossip neighbor (the Links actor), not from replies broadcast to the whole mesh.
 - **Beat interval grows with the mesh.** Every node hears every beat, so a node beats every `clamp(nodes / 10, 5, 60)` seconds: about 10 incoming beats per second per node at any size (5s up to 50 nodes, 30s at 300). Freshness checks use each peer's own interval.
+- **Peer scores.** As in GossipSub, each node scores its peers: credit for messages a neighbor delivered, a squared penalty for invalid frames it delivered. Below −20 a peer is graylisted: what it delivers is dropped, it is not joined, and the node joins other peers when it has fewer than two good neighbors. Failed fetches are counted apart: three recent ones make the node fetch from other peers for a while, never graylist (a restarting peer fails fetches without misbehaving). Every counter decays each beat. `GET /api/net` lists the scores.
+- **Catch-up (anti-entropy).** Every node keeps every node's latest sealed beat and inventory, signed by their authors. On its first link to the mesh, and every 12 beats, a node sends one neighbor a digest (each node's latest beat and inventory version) and gets back only the frames it lacks, as in Scuttlebutt. A node that joins learns the whole mesh from one neighbor instead of fetching each inventory from its author, and what gossip lost is repaired.
+- **Details on focus.** Devices and the full probe report (per-peer pulls and beats) are not gossiped. The HUD fetches them for the node it focuses (`GET /api/details?node_id=…`, which asks that node over `dialtone/fetch/1`).
+- **Plumtree timing for mixed links.** iroh-gossip grafts a missing message after 80ms; over a relay (200ms) the eager copy then arrives too, so every message travels twice and the broadcast tree never settles. dialtone waits 1.5s before grafting.
 
-`./dialtone.sh scale N [secs]` starts N nodes on this machine, each given 3 random seeds, and reports how long until every node sees all N and the traffic per node (`GET /api/net`: socket bytes from iroh's counters, gossip messages and neighbors). Measured on one Mac:
+`./dialtone.sh scale N [secs]` starts N nodes on this machine, each given 3 random seeds, and reports how long until every node sees all N and the traffic per node (`GET /api/net`: socket bytes from iroh's counters, gossip messages, neighbors, and iroh-gossip's own counts of data frames, duplicates included, and control messages). Measured on one Mac:
 
 | Nodes | Before | After |
 | ---: | :--- | :--- |
@@ -488,6 +492,8 @@ Gossip is routed the way [libp2p GossipSub](https://docs.libp2p.io/concepts/pubs
 | 30 | never converged (180s) | converged in 8s; 120 kbit/s per node |
 | 50 | — | converged in 19s; 200 kbit/s per node |
 | 100 | — | converged in 48s on one overloaded Mac |
+
+`./dialtone.sh scale-fleet N [secs]` does the same across machines: N throwaway nodes on every machine in `fleet.local.env`, one mesh, seeds anywhere in the fleet, links direct or through the relay. It reports traffic per machine and stops every scale node afterwards (the nodes' own daemons are left alone). With the three-machine fleet, 20 nodes on each (60 in all) converge in about 40s; each node then uses about 400 kbit/s in, of which 135 kbit/s is beats (2.04 data frames per message delivered, against 2.78 and 888 kbit/s with iroh-gossip's default Plumtree timing).
 
 ### Devices
 
@@ -499,7 +505,7 @@ Every node lists the devices connected to it — cameras, microphones, speakers,
 curl -s http://127.0.0.1:8788/api/devices | jq
 ```
 
-A running node lists its devices every 60 seconds and gossips them in its inventory when they change, so every node's devices appear in `GET /api/mesh` (`nodes[].devices`). The HUD lists the focused node's devices under the node table, and the tour's `DEV` step describes them. Device names (for example a Bluetooth headset named after its owner) are visible to every node in the mesh.
+A running node lists its devices every 60 seconds. They are not gossiped: a peer asks for them when its HUD focuses the node (`GET /api/details?node_id=…`), and the HUD lists them under the node table; the tour's `DEV` step describes them. Device names (for example a Bluetooth headset named after its owner) are visible to every allowlisted node that asks.
 
 ---
 
@@ -574,7 +580,8 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | `POST /api/processes/blob` | Stage a program blob (or ticket) and run / stop it as a process |
 | `POST /api/processes` | Same, and `{"name": ..., "desired_state": "removed"}` stops a process and forgets it (mesh-deployed copies follow) |
 | `POST /api/probe` | Run one probe now, `{"all": true}` for a full probe (`GET` returns the latest); nodes check the mesh every 30s |
-| `GET /api/net` | Traffic since boot: socket bytes in and out, connections, gossip messages, neighbors |
+| `GET /api/net` | Traffic since boot: socket bytes in and out, connections, gossip messages, neighbors, iroh-gossip data and control frames, and peer scores |
+| `GET /api/details?node_id=…` | A node's devices and full probe report, fetched from that node (kept 10s) |
 
 
 ---
@@ -607,6 +614,7 @@ One script builds, tests and deploys. `cargo test` covers each capability with r
                         # with blob pulls between them, deploy and removal across the mesh, a
                         # stopped node caught (about 30s)
 ./dialtone.sh scale 30  # 30 nodes on this machine: convergence time and traffic per node
+./dialtone.sh scale-fleet 20   # 20 nodes on every fleet machine as one mesh: traffic per machine
 ./dialtone.sh deploy    # check, build, install on every node, wait until every node's probe
                         # passes on the exact binary just installed, then a full probe here
 ./dialtone.sh deploy --skip-check   # ... without running check first
