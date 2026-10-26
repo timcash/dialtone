@@ -109,6 +109,7 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
     let (inventory_tx, inventory_rx) = mpsc::unbounded_channel();
     let (deploy_tx, deploy_rx) = mpsc::unbounded_channel();
     let (probe_tx, probe_rx) = mpsc::unbounded_channel();
+    let (rejoin_tx, rejoin_rx) = mpsc::unbounded_channel();
     ctx.with_state(|st| st.probe_tx = Some(probe_tx));
     let mesh = Mesh::new(
         ctx.clone(),
@@ -117,13 +118,14 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
         summary_rx,
         inventory_rx,
         deploy_tx,
+        rejoin_rx,
     );
     vec![
         tokio::spawn(mesh.run()),
         tokio::spawn(stats_actor(ctx.clone(), rtt_rx, summary_tx)),
         tokio::spawn(supervisor_actor(ctx.clone(), inventory_tx.clone())),
         tokio::spawn(devices_actor(ctx.clone(), inventory_tx)),
-        tokio::spawn(links_actor(ctx.clone(), rtt_tx)),
+        tokio::spawn(links_actor(ctx.clone(), rtt_tx, rejoin_tx)),
         tokio::spawn(allowlist_actor(ctx.clone())),
         tokio::spawn(probe_actor(ctx.clone(), probe_rx)),
         tokio::spawn(deploy_actor(ctx, deploy_rx)),
@@ -270,14 +272,28 @@ async fn devices_actor(ctx: Ctx, inventory_tx: mpsc::UnboundedSender<InventoryCh
 /// How often Links times the Rtt to each gossip neighbor.
 const LINKS_INTERVAL: Duration = Duration::from_secs(10);
 
+/// A neighbor that answers this many Rtt requests in a row without counting this node as
+/// its neighbor is joined again (see `links_actor`).
+const ONE_SIDED_ROUNDS: u32 = 2;
+
 /// Every `LINKS_INTERVAL`, time the Rtt to each gossip neighbor over a fetch connection kept open
 /// for it, and record how it is reached (direct IP, relay, tailnet). Only neighbors: the
 /// rest of the mesh is reached through them, and each node reports its own neighbors'
 /// Rtts in its beats, so the HUD's Rtt matrix still covers the mesh.
-async fn links_actor(ctx: Ctx, rtt_tx: watch::Sender<BTreeMap<String, f64>>) {
+///
+/// The answer also says whether the neighbor counts this node as its neighbor. iroh-gossip's
+/// HyParView can lose the one `Neighbor` reply that completes a link and never send it
+/// again, leaving this node with a neighbor that does not know it; a Join sent to that
+/// neighbor (`rejoin_tx`, to Mesh) completes the link on both sides.
+async fn links_actor(
+    ctx: Ctx,
+    rtt_tx: watch::Sender<BTreeMap<String, f64>>,
+    rejoin_tx: mpsc::UnboundedSender<EndpointId>,
+) {
     let mut tick = every(LINKS_INTERVAL);
     let mut conns: HashMap<EndpointId, iroh::endpoint::Connection> = HashMap::new();
     let mut rtt: BTreeMap<String, f64> = BTreeMap::new();
+    let mut one_sided: HashMap<EndpointId, u32> = HashMap::new();
     loop {
         tokio::select! {
             _ = ctx.cancel.cancelled() => break,
@@ -302,6 +318,7 @@ async fn links_actor(ctx: Ctx, rtt_tx: watch::Sender<BTreeMap<String, f64>>) {
             keep
         });
         rtt.retain(|name, _| neighbors.iter().any(|(_, n)| n == name));
+        one_sided.retain(|id, _| neighbors.iter().any(|(n, _)| n == id));
         for (pid, name) in &neighbors {
             if !conns.contains_key(pid) {
                 match fetch::connect(&ctx.endpoint, *pid, Duration::from_secs(5)).await {
@@ -312,7 +329,14 @@ async fn links_actor(ctx: Ctx, rtt_tx: watch::Sender<BTreeMap<String, f64>>) {
                 }
             }
             match fetch::rtt(&conns[pid], Duration::from_secs(3)).await {
-                Ok(ms) => {
+                Ok((ms, counts_us)) => {
+                    let rounds = one_sided.entry(*pid).or_default();
+                    *rounds = if counts_us { 0 } else { *rounds + 1 };
+                    if *rounds >= ONE_SIDED_ROUNDS {
+                        *rounds = 0;
+                        println!("[links] neighbor '{name}' does not count this node as its neighbor; joining it again");
+                        let _ = rejoin_tx.send(*pid);
+                    }
                     let smoothed = match rtt.get(name) {
                         Some(&prev) => ((prev * 0.6 + ms * 0.4) * 10.0).round() / 10.0,
                         None => ms,
@@ -665,6 +689,8 @@ struct Mesh {
     summary_rx: watch::Receiver<Option<StatsSummary>>,
     inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
     deploy_tx: mpsc::UnboundedSender<PeerPrograms>,
+    /// Neighbors that do not count this node as theirs (from Links), to join again.
+    rejoin_rx: mpsc::UnboundedReceiver<EndpointId>,
 }
 
 /// The next event on a topic, or never when not subscribed.
@@ -696,6 +722,7 @@ impl Mesh {
         summary_rx: watch::Receiver<Option<StatsSummary>>,
         inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
         deploy_tx: mpsc::UnboundedSender<PeerPrograms>,
+        rejoin_rx: mpsc::UnboundedReceiver<EndpointId>,
     ) -> Self {
         let (fetched_tx, fetched_rx) = mpsc::unbounded_channel();
         Mesh {
@@ -729,6 +756,7 @@ impl Mesh {
             summary_rx,
             inventory_rx,
             deploy_tx,
+            rejoin_rx,
         }
     }
 
@@ -750,6 +778,13 @@ impl Mesh {
                 Some(cmd) = self.control_rx.recv() => self.on_control(cmd).await,
                 Some(InventoryChanged) = self.inventory_rx.recv() => self.refresh_own_inventory(true).await,
                 Some(inventory) = self.fetched_rx.recv() => self.on_inventory(inventory),
+                Some(peer) = self.rejoin_rx.recv() => {
+                    let _ = tokio::time::timeout(
+                        Duration::from_millis(600),
+                        self.sender.join_peers(vec![peer]),
+                    )
+                    .await;
+                }
                 _ = beat_tick.tick() => {
                     self.on_beat_tick().await;
                     // Larger meshes beat less often (`beat_interval_for`).

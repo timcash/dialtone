@@ -7,7 +7,8 @@
 //!   announces an `inventory_version` the asker does not have;
 //! - `probe_blob` a fresh probe blob's ticket, for a full probe to pull (`probe.rs`);
 //! - `probe`      its latest probe report, with the per-peer results beats leave out;
-//! - `rtt`        nothing, to time the round trip to a gossip neighbor.
+//! - `rtt`        whether the asker is the answering node's gossip neighbor, timed for the
+//!   round trip (see the Links actor).
 //!
 //! One request per stream; a connection may carry many (the Links actor keeps one open per
 //! neighbor to time Rtts). The allowlist hook admits the connection, and the QUIC handshake
@@ -48,7 +49,7 @@ impl FetchHandler {
         FetchHandler { state }
     }
 
-    async fn answer(&self, request: &[u8]) -> Result<Vec<u8>, String> {
+    async fn answer(&self, asker: EndpointId, request: &[u8]) -> Result<Vec<u8>, String> {
         let request: Request =
             serde_json::from_slice(request).map_err(|e| format!("bad request: {e}"))?;
         let state = self
@@ -56,7 +57,10 @@ impl FetchHandler {
             .clone()
             .ok_or("this node has no state to share")?;
         let json = match request {
-            Request::Rtt => serde_json::json!({}),
+            Request::Rtt => {
+                let neighbor = lock(&state)?.gossip_neighbors.contains(&asker.to_string());
+                serde_json::json!({ "neighbor": neighbor })
+            }
             Request::Inventory => {
                 let inventory = lock(&state)?.inventory.clone();
                 serde_json::to_value(inventory.ok_or("no inventory yet")?)
@@ -105,12 +109,13 @@ fn share_probe_blob(state: &Arc<Mutex<NodeState>>) -> Result<String, String> {
 
 impl ProtocolHandler for FetchHandler {
     async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+        let asker = connection.remote_id();
         while let Ok((mut send, mut recv)) = connection.accept_bi().await {
             let request = recv
                 .read_to_end(MAX_REQUEST_BYTES)
                 .await
                 .map_err(AcceptError::from_err)?;
-            let body = match self.answer(&request).await {
+            let body = match self.answer(asker, &request).await {
                 Ok(body) => body,
                 Err(err) => {
                     serde_json::to_vec(&serde_json::json!({ "error": err })).unwrap_or_default()
@@ -162,11 +167,17 @@ pub async fn request(
         .map_err(|_| format!("{request:?} timed out"))?
 }
 
-/// Time one empty request on an open connection: the Rtt, in milliseconds.
-pub async fn rtt(conn: &Connection, timeout: Duration) -> Result<f64, String> {
+/// Time an `rtt` request on an open connection: the Rtt in milliseconds, and whether the
+/// peer counts this node as its gossip neighbor.
+pub async fn rtt(conn: &Connection, timeout: Duration) -> Result<(f64, bool), String> {
     let started = Instant::now();
-    request(conn, Request::Rtt, timeout).await?;
-    Ok((started.elapsed().as_secs_f64() * 10_000.0).round() / 10.0)
+    let answer = request(conn, Request::Rtt, timeout).await?;
+    let ms = (started.elapsed().as_secs_f64() * 10_000.0).round() / 10.0;
+    let neighbor = answer
+        .get("neighbor")
+        .and_then(|n| n.as_bool())
+        .unwrap_or(true);
+    Ok((ms, neighbor))
 }
 
 /// Connect, ask once, close.
