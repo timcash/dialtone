@@ -1285,9 +1285,6 @@ pub struct Inventory {
     pub processes: Vec<crate::service::ProcessSpec>,
     #[serde(default)]
     pub service_endpoints: Vec<Service>,
-    /// Cameras, microphones, keyboards and other devices connected to the node.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub devices: Vec<crate::devices::Device>,
     #[serde(default)]
     pub sent_unix_ms: u64,
 }
@@ -1517,6 +1514,180 @@ pub fn open_message(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Message, Str
     Ok(msg)
 }
 
+/// Below this score a peer is graylisted: Mesh ignores what it delivers, does not join it
+/// and does not fetch from it, until the score decays back up.
+pub const GRAYLIST_SCORE: f64 = -20.0;
+/// Each beat tick, every counter keeps this share of its value.
+const SCORE_DECAY: f64 = 0.9;
+/// First deliveries count up to this many.
+const FIRST_DELIVERY_CAP: f64 = 20.0;
+
+/// One peer's behaviour, as in libp2p GossipSub's peer score: credit for messages it
+/// delivered first (P2), a squared penalty for invalid ones (P4), and a squared penalty
+/// for fetches to it that failed (a behaviour penalty, P7). Every counter decays.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct PeerScore {
+    pub first_deliveries: f64,
+    pub invalid: f64,
+    pub fetch_failures: f64,
+}
+
+impl PeerScore {
+    pub fn score(&self) -> f64 {
+        self.first_deliveries.min(FIRST_DELIVERY_CAP)
+            - 10.0 * self.invalid * self.invalid
+            - 2.0 * self.fetch_failures * self.fetch_failures
+    }
+}
+
+/// Scores of the peers this node has dealt with, by NodeId. Shared by the Mesh, Links and
+/// Probe actors (who record) and the API (`GET /api/net`).
+#[derive(Clone, Debug, Default)]
+pub struct PeerScores {
+    peers: HashMap<iroh::EndpointId, PeerScore>,
+}
+
+impl PeerScores {
+    /// A neighbor delivered a gossip message: valid (it passed `open_message`, the allowlist
+    /// and the name check) or not.
+    pub fn delivered(&mut self, peer: iroh::EndpointId, valid: bool) {
+        let s = self.peers.entry(peer).or_default();
+        if valid {
+            s.first_deliveries += 1.0;
+        } else {
+            s.invalid += 1.0;
+        }
+    }
+
+    /// A fetch to `peer` finished.
+    pub fn fetched(&mut self, peer: iroh::EndpointId, ok: bool) {
+        if !ok {
+            self.peers.entry(peer).or_default().fetch_failures += 1.0;
+        }
+    }
+
+    pub fn score(&self, peer: &iroh::EndpointId) -> f64 {
+        self.peers.get(peer).map(PeerScore::score).unwrap_or(0.0)
+    }
+
+    pub fn graylisted(&self, peer: &iroh::EndpointId) -> bool {
+        self.score(peer) < GRAYLIST_SCORE
+    }
+
+    /// Decay every counter; forget peers whose counters all reached zero.
+    pub fn decay(&mut self) {
+        self.peers.retain(|_, s| {
+            for c in [
+                &mut s.first_deliveries,
+                &mut s.invalid,
+                &mut s.fetch_failures,
+            ] {
+                *c *= SCORE_DECAY;
+                if *c < 0.01 {
+                    *c = 0.0;
+                }
+            }
+            *s != PeerScore::default()
+        });
+    }
+
+    /// Every scored peer, lowest score first, for `GET /api/net`.
+    pub fn snapshot(&self) -> serde_json::Value {
+        let mut rows: Vec<_> = self.peers.iter().collect();
+        rows.sort_by(|a, b| a.1.score().total_cmp(&b.1.score()));
+        serde_json::Value::Array(
+            rows.into_iter()
+                .map(|(id, s)| {
+                    serde_json::json!({
+                        "node_id": id.to_string(),
+                        "score": (s.score() * 10.0).round() / 10.0,
+                        "first_deliveries": (s.first_deliveries * 10.0).round() / 10.0,
+                        "invalid": (s.invalid * 10.0).round() / 10.0,
+                        "fetch_failures": (s.fetch_failures * 10.0).round() / 10.0,
+                        "graylisted": s.score() < GRAYLIST_SCORE,
+                    })
+                })
+                .collect(),
+        )
+    }
+}
+
+/// The latest sealed beat and inventory of one node, exactly as its author signed them.
+#[derive(Clone, Debug, Default)]
+pub struct CachedFrames {
+    /// The beat frame, its `sent_unix_ms`, and when this node received it (unix seconds).
+    pub beat: Option<(Vec<u8>, u64, u64)>,
+    /// The inventory frame and its version.
+    pub inventory: Option<(Vec<u8>, u64)>,
+}
+
+/// Every node's latest sealed frames, this node's own included: what a neighbor serves to a
+/// node catching up (Scuttlebutt-style anti-entropy, `fetch.rs`). Frames stay signed by
+/// their authors, so the node catching up verifies them as if they came by gossip.
+#[derive(Clone, Debug, Default)]
+pub struct FrameCache {
+    pub nodes: HashMap<String, CachedFrames>,
+}
+
+/// What a node catching up already holds of one node: the `sent_unix_ms` of its latest
+/// beat (`u64::MAX` when that beat is fresh, so no newer one is sent) and its inventory
+/// version.
+pub type CatchUpHave = HashMap<String, [u64; 2]>;
+
+/// What a neighbor sends a node catching up: beat frames with their age in seconds, and
+/// inventory frames.
+pub type CatchUpDeltas<'a> = (Vec<(u64, &'a [u8])>, Vec<&'a [u8]>);
+
+impl FrameCache {
+    pub fn put_beat(&mut self, node_id: &str, frame: Vec<u8>, sent_ms: u64, rx_unix: u64) {
+        let entry = self.nodes.entry(node_id.to_string()).or_default();
+        if entry.beat.as_ref().is_none_or(|(_, ms, _)| sent_ms > *ms) {
+            entry.beat = Some((frame, sent_ms, rx_unix));
+        }
+    }
+
+    pub fn put_inventory(&mut self, node_id: &str, frame: Vec<u8>, version: u64) {
+        self.nodes.entry(node_id.to_string()).or_default().inventory = Some((frame, version));
+    }
+
+    /// Forget nodes that are no longer in the mesh.
+    pub fn retain(&mut self, live: &std::collections::HashSet<String>) {
+        self.nodes.retain(|id, _| live.contains(id));
+    }
+
+    /// What the asker lacks, given what it `have`s: beat frames newer than its own (with
+    /// their age in seconds) and inventory frames of another version. Beats older than
+    /// `max_age_secs` are left out; so is the asker itself.
+    pub fn deltas(
+        &self,
+        asker: &str,
+        have: &CatchUpHave,
+        now_unix: u64,
+        max_age_secs: u64,
+    ) -> CatchUpDeltas<'_> {
+        let mut beats = Vec::new();
+        let mut inventories = Vec::new();
+        for (id, frames) in &self.nodes {
+            if id == asker {
+                continue;
+            }
+            let [have_ms, have_version] = have.get(id).copied().unwrap_or([0, 0]);
+            if let Some((frame, ms, rx)) = &frames.beat {
+                let age = now_unix.saturating_sub(*rx);
+                if *ms > have_ms && age <= max_age_secs {
+                    beats.push((age, frame.as_slice()));
+                }
+            }
+            if let Some((frame, version)) = &frames.inventory {
+                if *version != have_version {
+                    inventories.push(frame.as_slice());
+                }
+            }
+        }
+        (beats, inventories)
+    }
+}
+
 /// Gossip traffic counters, kept by the Mesh actor and read by `GET /api/net`.
 #[derive(Debug, Default)]
 pub struct NetCounters {
@@ -1727,7 +1898,6 @@ pub fn merge_inventory(nodes: &mut [Beat], inventory: &Inventory) -> bool {
         Some(node) => {
             node.processes = inventory.processes.clone();
             node.service_endpoints = inventory.service_endpoints.clone();
-            node.devices = inventory.devices.clone();
             if let Some(d) = &inventory.details {
                 node.role = d.role.clone();
                 node.capabilities = d.capabilities.clone();
@@ -2346,7 +2516,6 @@ mod tests {
             details: None,
             processes,
             service_endpoints: Vec::new(),
-            devices: Vec::new(),
             sent_unix_ms: 0,
         });
         let Message::Inventory(opened) =
@@ -2425,12 +2594,6 @@ mod tests {
             }),
             processes: vec![spec],
             service_endpoints: Vec::new(),
-            devices: vec![crate::devices::Device {
-                kind: "camera".to_string(),
-                name: "Desk Cam".to_string(),
-                bus: "usb".to_string(),
-                detail: String::new(),
-            }],
             sent_unix_ms: 0,
         };
         assert!(Message::Inventory(inventory.clone())
@@ -2447,7 +2610,6 @@ mod tests {
         merge_beat(&mut nodes, next);
         assert_eq!(nodes[0].counter, 2);
         assert_eq!(nodes[0].processes.len(), 1);
-        assert_eq!(nodes[0].devices[0].name, "Desk Cam");
         // The details come from the inventory too: a wire beat leaves them out, and the
         // node's entry keeps them.
         let wire = beat.for_wire();
@@ -2465,15 +2627,20 @@ mod tests {
         assert_ne!(
             v1,
             Inventory {
-                devices: Vec::new(),
+                processes: Vec::new(),
                 ..inventory.clone()
             }
             .for_wire()
             .version
         );
-        // A beat never carries devices on the wire.
+        // A beat never carries devices on the wire (they are fetched with the details).
         let mut stuffed = beat.clone();
-        stuffed.devices = nodes[0].devices.clone();
+        stuffed.devices = vec![crate::devices::Device {
+            kind: "camera".to_string(),
+            name: "Desk Cam".to_string(),
+            bus: "usb".to_string(),
+            detail: String::new(),
+        }];
         let opened = open_message(
             &seal_message(&Message::Beat(stuffed), &keys, &alice).unwrap(),
             &keys,
@@ -2483,11 +2650,76 @@ mod tests {
         // An empty inventory clears it.
         let cleared = Inventory {
             processes: Vec::new(),
-            devices: Vec::new(),
             ..inventory
         };
         merge_inventory(&mut nodes, &cleared);
-        assert!(nodes[0].processes.is_empty() && nodes[0].devices.is_empty());
+        assert!(nodes[0].processes.is_empty());
+    }
+
+    /// GossipSub-style scores: invalid deliveries and failed fetches graylist a peer, and
+    /// decay lets it back in.
+    #[test]
+    fn peer_scores_graylist_bad_peers_and_decay() {
+        let good = iroh::SecretKey::generate().public();
+        let bad = iroh::SecretKey::generate().public();
+        let flaky = iroh::SecretKey::generate().public();
+        let mut scores = PeerScores::default();
+        for _ in 0..50 {
+            scores.delivered(good, true);
+        }
+        scores.delivered(bad, true);
+        scores.delivered(bad, false);
+        scores.delivered(bad, false);
+        for _ in 0..4 {
+            scores.fetched(flaky, false);
+        }
+        scores.fetched(good, true);
+        assert_eq!(scores.score(&good), 20.0, "first deliveries are capped");
+        assert!(!scores.graylisted(&good));
+        assert!(scores.graylisted(&bad), "{}", scores.score(&bad));
+        assert!(scores.graylisted(&flaky), "{}", scores.score(&flaky));
+        assert_eq!(scores.score(&iroh::SecretKey::generate().public()), 0.0);
+        for _ in 0..15 {
+            scores.decay();
+        }
+        assert!(!scores.graylisted(&bad) && !scores.graylisted(&flaky));
+        for _ in 0..100 {
+            scores.decay();
+        }
+        assert_eq!(scores.snapshot().as_array().map(Vec::len), Some(0));
+    }
+
+    /// A neighbor answers a catch-up digest with only what the asker lacks.
+    #[test]
+    fn catch_up_deltas_send_only_newer_beats_and_other_inventories() {
+        let mut cache = FrameCache::default();
+        cache.put_beat("a", b"beat-a".to_vec(), 2_000, 100);
+        cache.put_beat("a", b"older".to_vec(), 1_000, 90);
+        cache.put_inventory("a", b"inv-a".to_vec(), 7);
+        cache.put_beat("b", b"beat-b".to_vec(), 5_000, 100);
+        cache.put_beat("stale", b"beat-s".to_vec(), 5_000, 10);
+        cache.put_beat("asker", b"beat-asker".to_vec(), 9_000, 100);
+
+        // Knows nothing: every fresh beat and every inventory, not its own, not the stale.
+        let (beats, inventories) = cache.deltas("asker", &CatchUpHave::new(), 110, 60);
+        let mut got: Vec<&[u8]> = beats.iter().map(|(_, f)| *f).collect();
+        got.sort();
+        assert_eq!(got, vec![b"beat-a".as_slice(), b"beat-b".as_slice()]);
+        assert_eq!(inventories, vec![b"inv-a".as_slice()]);
+        assert!(beats.iter().all(|(age, _)| *age == 10));
+
+        // Holds a's latest beat and inventory, and b's beat is fresh: nothing to send.
+        let have = CatchUpHave::from([
+            ("a".to_string(), [2_000, 7]),
+            ("b".to_string(), [u64::MAX, 0]),
+        ]);
+        let (beats, inventories) = cache.deltas("asker", &have, 110, 60);
+        assert!(beats.is_empty() && inventories.is_empty());
+
+        let mut live = std::collections::HashSet::new();
+        live.insert("a".to_string());
+        cache.retain(&live);
+        assert_eq!(cache.nodes.len(), 1);
     }
 
     #[test]

@@ -32,9 +32,9 @@ use dialtone::mesh::{
     default_seeds, events_topic_id, is_valid_node_name, merge_beat, merge_inventory,
     monotonic_now_ms, node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
     observe_peer_remote_addrs, open_message, prune_stale_peers, seal_message, try_load_mesh_config,
-    Beat, ChannelKeys, Inventory, LiveAllowlist, MeshControlCommand, Message, NodeDetails,
-    ReplayGuard, SeedList, BEAT_INTERVAL_SECS, DEFAULT_PEER_TTL_SECS, SUMMARY_EVERY_N_BEATS,
-    SUMMARY_INTERVAL_SECS,
+    Beat, CatchUpHave, ChannelKeys, FrameCache, Inventory, LiveAllowlist, MeshControlCommand,
+    Message, NodeDetails, PeerScores, ReplayGuard, SeedList, BEAT_INTERVAL_SECS,
+    DEFAULT_PEER_TTL_SECS, SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{advertised_endpoint_addr, build_diagnostics, IrohTransportConfig};
 use dialtone::probe::{ProbeRequest, PULL_SAMPLE};
@@ -65,10 +65,19 @@ pub(crate) struct Ctx {
     pub allowlist: LiveAllowlist,
     pub state: Option<Arc<Mutex<NodeState>>>,
     pub net: Arc<dialtone::mesh::NetCounters>,
+    /// Every node's latest sealed frames, served to neighbors catching up.
+    pub frames: Arc<Mutex<FrameCache>>,
+    /// Peer scores (GossipSub-style).
+    pub scores: Arc<Mutex<PeerScores>>,
     pub cancel: CancellationToken,
 }
 
 impl Ctx {
+    /// Run `f` on the peer scores.
+    fn scores<R>(&self, f: impl FnOnce(&mut PeerScores) -> R) -> Option<R> {
+        Some(f(&mut *self.scores.lock().ok()?))
+    }
+
     /// Run `f` on the node state, if this node has one (the `node` action does not).
     fn with_state<R>(&self, f: impl FnOnce(&mut NodeState) -> R) -> Option<R> {
         let mut st = self.state.as_ref()?.lock().ok()?;
@@ -76,7 +85,7 @@ impl Ctx {
     }
 }
 
-/// Sent to Mesh when this node's inventory (processes, services, devices) changed.
+/// Sent to Mesh when this node's inventory (processes, services) changed.
 pub(crate) struct InventoryChanged;
 
 /// The programs a peer says it runs, sent by Mesh to Deploy for every admitted inventory.
@@ -110,7 +119,10 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
     let (deploy_tx, deploy_rx) = mpsc::unbounded_channel();
     let (probe_tx, probe_rx) = mpsc::unbounded_channel();
     let (rejoin_tx, rejoin_rx) = mpsc::unbounded_channel();
-    ctx.with_state(|st| st.probe_tx = Some(probe_tx));
+    ctx.with_state(|st| {
+        st.probe_tx = Some(probe_tx);
+        st.runtime = Some(tokio::runtime::Handle::current());
+    });
     let mesh = Mesh::new(
         ctx.clone(),
         start,
@@ -124,7 +136,7 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
         tokio::spawn(mesh.run()),
         tokio::spawn(stats_actor(ctx.clone(), rtt_rx, summary_tx)),
         tokio::spawn(supervisor_actor(ctx.clone(), inventory_tx.clone())),
-        tokio::spawn(devices_actor(ctx.clone(), inventory_tx)),
+        tokio::spawn(devices_actor(ctx.clone())),
         tokio::spawn(links_actor(ctx.clone(), rtt_tx, rejoin_tx)),
         tokio::spawn(allowlist_actor(ctx.clone())),
         tokio::spawn(probe_actor(ctx.clone(), probe_rx)),
@@ -232,8 +244,9 @@ async fn supervisor_actor(ctx: Ctx, inventory_tx: mpsc::UnboundedSender<Inventor
 /// How often the devices connected to the node are listed again.
 const DEVICES_INTERVAL: Duration = Duration::from_secs(60);
 
-/// List this node's devices now and every minute; tell Mesh when the list changes.
-async fn devices_actor(ctx: Ctx, inventory_tx: mpsc::UnboundedSender<InventoryChanged>) {
+/// List this node's devices now and every minute. They stay on the node: peers fetch them
+/// with its details when their HUD focuses it (`GET /api/details`).
+async fn devices_actor(ctx: Ctx) {
     let mut tick = every(DEVICES_INTERVAL);
     loop {
         tokio::select! {
@@ -249,19 +262,12 @@ async fn devices_actor(ctx: Ctx, inventory_tx: mpsc::UnboundedSender<InventoryCh
             }
             Err(_) => continue,
         };
-        let changed = ctx.with_state(|st| {
-            if st.devices == devices {
-                return false;
-            }
+        ctx.with_state(|st| {
             st.devices = devices.clone();
             if let Some(me) = st.self_entry_mut() {
                 me.devices = devices;
             }
-            true
         });
-        if changed == Some(true) {
-            let _ = inventory_tx.send(InventoryChanged);
-        }
     }
 }
 
@@ -325,7 +331,10 @@ async fn links_actor(
                     Ok(conn) => {
                         conns.insert(*pid, conn);
                     }
-                    Err(_) => continue,
+                    Err(_) => {
+                        ctx.scores(|s| s.fetched(*pid, false));
+                        continue;
+                    }
                 }
             }
             match fetch::rtt(&conns[pid], Duration::from_secs(3)).await {
@@ -344,6 +353,7 @@ async fn links_actor(
                     rtt.insert(name.clone(), smoothed);
                 }
                 Err(_) => {
+                    ctx.scores(|s| s.fetched(*pid, false));
                     conns.remove(pid);
                 }
             }
@@ -483,15 +493,21 @@ async fn sample_probe_blobs(ctx: &Ctx) -> HashMap<String, Result<String, String>
                 .collect()
         })
         .unwrap_or_default();
+    ctx.scores(|s| peers.retain(|id| id.parse().map(|pid| !s.graylisted(&pid)).unwrap_or(false)));
     shuffle(&mut peers);
     peers.truncate(PULL_SAMPLE);
     let asks: Vec<_> = peers
         .into_iter()
         .map(|id| {
-            let endpoint = ctx.endpoint.clone();
+            let ctx = ctx.clone();
             tokio::spawn(async move {
                 let result = match id.parse::<EndpointId>() {
-                    Ok(peer) => fetch::probe_blob(&endpoint, peer, Duration::from_secs(15)).await,
+                    Ok(peer) => {
+                        let result =
+                            fetch::probe_blob(&ctx.endpoint, peer, Duration::from_secs(15)).await;
+                        ctx.scores(|s| s.fetched(peer, result.is_ok()));
+                        result
+                    }
                     Err(_) => Err("invalid NodeId".to_string()),
                 };
                 (id, result)
@@ -652,6 +668,24 @@ const JOIN_SAMPLE: usize = 3;
 const FETCH_SLOTS: usize = 4;
 /// Ask a peer for its inventory again no sooner than this.
 const FETCH_RETRY: Duration = Duration::from_secs(10);
+/// Every this many beats, Mesh catches up from one neighbor (anti-entropy).
+const CATCH_UP_EVERY: u64 = 12;
+
+/// Frames fetched from peers, to be admitted like gossip: a peer's own inventory, or what
+/// a neighbor sent this node to catch up (beats with their age in seconds there).
+struct Fetched {
+    catch_up: bool,
+    beats: Vec<(u64, Vec<u8>)>,
+    inventories: Vec<Vec<u8>>,
+}
+
+/// Why `admit` dropped a frame.
+enum Rejected {
+    /// It did not open with the channel key, verify, pass the allowlist or name check.
+    Invalid,
+    /// This node's own, a replay, or older than one already admitted.
+    Ignored,
+}
 
 struct Mesh {
     ctx: Ctx,
@@ -681,9 +715,14 @@ struct Mesh {
     /// Peer NodeId -> when Mesh last asked it for its inventory (monotonic ms).
     inventory_asked: HashMap<String, u64>,
     fetch_slots: Arc<tokio::sync::Semaphore>,
-    fetched_tx: mpsc::UnboundedSender<Inventory>,
-    fetched_rx: mpsc::UnboundedReceiver<Inventory>,
+    fetched_tx: mpsc::UnboundedSender<Fetched>,
+    fetched_rx: mpsc::UnboundedReceiver<Fetched>,
     own_inventory_version: u64,
+    /// A catch-up is in flight.
+    catching_up: bool,
+    /// The first catch-up finished (or there was nobody to catch up from); until then,
+    /// beats announcing unknown inventories do not each start a fetch.
+    caught_up: bool,
     control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
     rtt_rx: watch::Receiver<BTreeMap<String, f64>>,
     summary_rx: watch::Receiver<Option<StatsSummary>>,
@@ -751,6 +790,8 @@ impl Mesh {
             fetched_tx,
             fetched_rx,
             own_inventory_version: 0,
+            catching_up: false,
+            caught_up: false,
             control_rx: start.control_rx,
             rtt_rx,
             summary_rx,
@@ -777,7 +818,7 @@ impl Mesh {
                 }
                 Some(cmd) = self.control_rx.recv() => self.on_control(cmd).await,
                 Some(InventoryChanged) = self.inventory_rx.recv() => self.refresh_own_inventory(true).await,
-                Some(inventory) = self.fetched_rx.recv() => self.on_inventory(inventory),
+                Some(fetched) = self.fetched_rx.recv() => self.on_fetched(fetched),
                 Some(peer) = self.rejoin_rx.recv() => {
                     let _ = tokio::time::timeout(
                         Duration::from_millis(600),
@@ -801,8 +842,11 @@ impl Mesh {
                 }
                 event = self.receiver.next(), if self.subscribed => {
                     let ended = match event {
-                        Some(Ok(GossipEvent::NeighborUp(_))) => {
+                        Some(Ok(GossipEvent::NeighborUp(peer))) => {
                             self.neighbors_changed();
+                            if !self.caught_up {
+                                self.catch_up(peer);
+                            }
                             None
                         }
                         Some(Ok(GossipEvent::NeighborDown(_))) => {
@@ -812,7 +856,7 @@ impl Mesh {
                         }
                         Some(Ok(GossipEvent::Received(msg))) => {
                             self.ctx.net.count_in(msg.content.len());
-                            self.on_received(&msg.content);
+                            self.on_received(&msg.content, msg.delivered_from);
                             None
                         }
                         Some(Ok(GossipEvent::Lagged)) => {
@@ -833,7 +877,7 @@ impl Mesh {
                 event = next_event(&mut self.events_receiver) => match event {
                     Some(Ok(GossipEvent::Received(msg))) => {
                         self.ctx.net.count_in(msg.content.len());
-                        self.on_received(&msg.content);
+                        self.on_received(&msg.content, msg.delivered_from);
                     }
                     Some(Ok(_)) => {}
                     // Joined again on the next beat tick.
@@ -890,12 +934,16 @@ impl Mesh {
     }
 
     /// The seeds plus up to `JOIN_SAMPLE` other known peers, chosen at random, leaving out
-    /// the current neighbors of `topic`.
+    /// the current neighbors of `topic` and graylisted peers.
     fn join_candidates(&self, neighbors: Option<&GossipReceiver>) -> Vec<EndpointId> {
         let own = self.ctx.endpoint.id();
-        let current: HashSet<EndpointId> = neighbors
+        let mut current: HashSet<EndpointId> = neighbors
             .map(|rx| rx.neighbors().collect())
             .unwrap_or_default();
+        self.ctx.scores(|s| {
+            current.extend(self.known_peer_addrs.keys().filter(|id| s.graylisted(id)));
+            current.extend(self.seed_ids.iter().filter(|id| s.graylisted(id)));
+        });
         let mut known: Vec<EndpointId> = self
             .known_peer_addrs
             .keys()
@@ -916,13 +964,20 @@ impl Mesh {
         out
     }
 
-    /// Below `MIN_NEIGHBORS` on a topic, join a few peers. HyParView keeps the active view
-    /// full from there; no node dials every other node.
+    /// Neighbors on a topic that are not graylisted.
+    fn good_neighbors(&self, rx: &GossipReceiver) -> usize {
+        self.ctx
+            .scores(|s| rx.neighbors().filter(|id| !s.graylisted(id)).count())
+            .unwrap_or(0)
+    }
+
+    /// Below `MIN_NEIGHBORS` good neighbors on a topic, join a few peers. HyParView keeps
+    /// the active view full from there; no node dials every other node.
     async fn keep_neighbors(&mut self) {
         if self.keys.is_none() {
             return;
         }
-        if self.subscribed && self.receiver.neighbors().count() < MIN_NEIGHBORS {
+        if self.subscribed && self.good_neighbors(&self.receiver) < MIN_NEIGHBORS {
             let peers = self.join_candidates(Some(&self.receiver));
             if !peers.is_empty() {
                 let _ =
@@ -934,7 +989,7 @@ impl Mesh {
             self.subscribe_events().await;
         }
         if let (Some(rx), Some(tx)) = (&self.events_receiver, &self.events_sender) {
-            if rx.neighbors().count() < MIN_NEIGHBORS {
+            if self.good_neighbors(rx) < MIN_NEIGHBORS {
                 let peers = self.join_candidates(Some(rx));
                 if !peers.is_empty() {
                     let _ = tokio::time::timeout(Duration::from_millis(600), tx.join_peers(peers))
@@ -1045,15 +1100,9 @@ impl Mesh {
 
     /// This node's inventory as the node state has it now, with its details.
     fn own_inventory(&self) -> Inventory {
-        let (processes, service_endpoints, devices) = self
+        let (processes, service_endpoints) = self
             .ctx
-            .with_state(|st| {
-                (
-                    st.processes.clone(),
-                    st.service_endpoints.clone(),
-                    st.devices.clone(),
-                )
-            })
+            .with_state(|st| (st.processes.clone(), st.service_endpoints.clone()))
             .unwrap_or_default();
         let adv = advertised_endpoint_addr(&self.ctx.endpoint.addr(), &self.ctx.transport);
         Inventory {
@@ -1073,33 +1122,49 @@ impl Mesh {
             }),
             processes,
             service_endpoints,
-            devices,
             sent_unix_ms: 0,
         }
     }
 
-    /// Rebuild this node's inventory for fetches; when it changed, broadcast it on the
-    /// events topic (if `broadcast`) and announce the new version in the next beat.
+    /// Rebuild this node's inventory; when it changed, seal it (the frame peers fetch and
+    /// neighbors relay), broadcast it on the events topic (if `broadcast`) and announce the
+    /// new version in the next beat.
     async fn refresh_own_inventory(&mut self, broadcast: bool) {
         let inventory = self.own_inventory().for_wire();
-        let changed = inventory.version != self.own_inventory_version;
+        if inventory.version == self.own_inventory_version {
+            return;
+        }
+        let Some((wire, _)) = self.seal(&Message::Inventory(inventory.clone())) else {
+            return;
+        };
         self.own_inventory_version = inventory.version;
-        self.ctx
-            .with_state(|st| st.inventory = Some(inventory.clone()));
-        if changed && broadcast {
-            self.broadcast_event(&Message::Inventory(inventory)).await;
+        if let Ok(mut frames) = self.ctx.frames.lock() {
+            frames.put_inventory(&self.ctx.node_id, wire.clone(), inventory.version);
+        }
+        if broadcast {
+            if let Some(tx) = &self.events_sender {
+                self.ctx.net.count_out(wire.len());
+                let _ = tokio::time::timeout(Duration::from_millis(600), tx.broadcast(wire.into()))
+                    .await;
+            }
         }
     }
 
-    fn seal(&self, msg: &Message) -> Option<Vec<u8>> {
+    /// Seal a message; returns the frame and the `sent_unix_ms` stamped in it.
+    fn seal(&self, msg: &Message) -> Option<(Vec<u8>, u64)> {
         let keys = self.keys.as_ref()?;
         let wire = seal_message(msg, keys, &self.node_key).ok()?;
-        self.ctx.net.count_out(wire.len());
-        Some(wire)
+        let sent_ms = open_message(&wire, keys).ok()?.sent_unix_ms();
+        Some((wire, sent_ms))
     }
 
+    /// Broadcast a beat on the beats topic and keep its frame for neighbors catching up.
     async fn broadcast(&mut self, msg: &Message) {
-        if let Some(wire) = self.seal(msg) {
+        if let Some((wire, sent_ms)) = self.seal(msg) {
+            if let Ok(mut frames) = self.ctx.frames.lock() {
+                frames.put_beat(&self.ctx.node_id, wire.clone(), sent_ms, now_unix());
+            }
+            self.ctx.net.count_out(wire.len());
             let _ = tokio::time::timeout(
                 Duration::from_millis(600),
                 self.sender.broadcast(wire.into()),
@@ -1108,13 +1173,97 @@ impl Mesh {
         }
     }
 
-    async fn broadcast_event(&mut self, msg: &Message) {
-        if self.events_sender.is_none() {
+    /// Ask `neighbor` for every beat and inventory this node lacks (Scuttlebutt-style
+    /// anti-entropy). The digest names, for each node this node knows, its latest beat (or
+    /// that the beat is fresh) and its inventory version; the neighbor answers with the
+    /// frames that are newer or different. Run on the first link to the mesh, then every
+    /// `CATCH_UP_EVERY` beats, it repairs what gossip lost, and a node that joins gets the
+    /// whole mesh from one neighbor instead of fetching every inventory from its author.
+    fn catch_up(&mut self, neighbor: EndpointId) {
+        if self.catching_up || self.keys.is_none() {
             return;
         }
-        if let (Some(wire), Some(tx)) = (self.seal(msg), &self.events_sender) {
-            let _ =
-                tokio::time::timeout(Duration::from_millis(600), tx.broadcast(wire.into())).await;
+        let now = now_unix();
+        let own = self.ctx.node_id.clone();
+        let mut have: CatchUpHave = self
+            .ctx
+            .with_state(|st| {
+                st.nodes
+                    .iter()
+                    .filter(|n| n.node_id != own)
+                    .map(|n| {
+                        let fresh = now.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n);
+                        let beat = if fresh { u64::MAX } else { n.sent_unix_ms };
+                        (n.node_id.clone(), [beat, 0])
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (id, inventory) in &self.inventories {
+            have.entry(id.clone()).or_insert([0, 0])[1] = inventory.version;
+        }
+        self.catching_up = true;
+        let (ctx, fetched) = (self.ctx.clone(), self.fetched_tx.clone());
+        tokio::spawn(async move {
+            let result =
+                fetch::catch_up(&ctx.endpoint, neighbor, have, Duration::from_secs(20)).await;
+            ctx.scores(|s| s.fetched(neighbor, result.is_ok()));
+            let caught = result.unwrap_or_else(|err| {
+                eprintln!("[catch-up] {err}");
+                Default::default()
+            });
+            let _ = fetched.send(Fetched {
+                catch_up: true,
+                beats: caught.beats,
+                inventories: caught.inventories,
+            });
+        });
+    }
+
+    /// Admit fetched frames like gossip: beats first (so inventories find their node), then
+    /// inventories.
+    fn on_fetched(&mut self, fetched: Fetched) {
+        if fetched.catch_up {
+            self.catching_up = false;
+            self.caught_up = true;
+            if !fetched.beats.is_empty() || !fetched.inventories.is_empty() {
+                println!(
+                    "[catch-up] {} beat(s) and {} inventory frame(s) from a neighbor",
+                    fetched.beats.len(),
+                    fetched.inventories.len()
+                );
+            }
+        }
+        let now = now_unix();
+        for (age, frame) in fetched.beats {
+            if let Ok(msg) = self.admit(&frame, true) {
+                let received = now.saturating_sub(age);
+                self.keep_frame(&msg, frame, received);
+                if let Some(mut beat) = msg.into_beat() {
+                    self.learn_addresses(&beat);
+                    beat.updated_at_unix = received;
+                    self.merge_peer_beat(beat);
+                }
+            }
+        }
+        for frame in fetched.inventories {
+            if let Ok(msg) = self.admit(&frame, true) {
+                self.keep_frame(&msg, frame, now);
+                if let Message::Inventory(inventory) = msg {
+                    self.on_inventory(inventory);
+                }
+            }
+        }
+    }
+
+    /// Keep an admitted frame for neighbors catching up.
+    fn keep_frame(&self, msg: &Message, frame: Vec<u8>, received_unix: u64) {
+        let Ok(mut frames) = self.ctx.frames.lock() else {
+            return;
+        };
+        match msg {
+            Message::Inventory(i) => frames.put_inventory(&i.node_id, frame, i.version),
+            _ => frames.put_beat(msg.node_id(), frame, msg.sent_unix_ms(), received_unix),
         }
     }
 
@@ -1133,10 +1282,33 @@ impl Mesh {
             if pruned > 0 {
                 self.inventories.retain(|id, _| live_ids.contains(id));
                 self.inventory_asked.retain(|id, _| live_ids.contains(id));
+                if let Ok(mut frames) = self.ctx.frames.lock() {
+                    frames.retain(&live_ids);
+                }
                 println!("[mesh] pruned {pruned} peer(s) silent for over {ttl}s");
             }
         }
+        self.ctx.scores(PeerScores::decay);
         self.keep_neighbors().await;
+        // Catch up from a random good neighbor now and then; with no neighbor after a few
+        // beats, stop waiting for the first catch-up.
+        let mut neighbors: Vec<EndpointId> = self
+            .ctx
+            .scores(|s| {
+                self.receiver
+                    .neighbors()
+                    .filter(|id| !s.graylisted(id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        shuffle(&mut neighbors);
+        match neighbors.first() {
+            Some(&n) if !self.caught_up || self.counter.is_multiple_of(CATCH_UP_EVERY) => {
+                self.catch_up(n)
+            }
+            None if self.counter >= 3 => self.caught_up = true,
+            _ => {}
+        }
 
         let counter = self.counter;
         let is_summary = counter <= 2 || counter.is_multiple_of(SUMMARY_EVERY_N_BEATS);
@@ -1203,9 +1375,11 @@ impl Mesh {
     }
 
     /// Admit a message only if it opens with the channel key, its signature matches a
-    /// listed node, its name is valid and it is not a replay.
-    fn admit(&mut self, content: &[u8]) -> Option<Message> {
-        let keys = self.keys.as_ref()?;
+    /// listed node, its name is valid and it is not a replay. A `fetched` frame skips the
+    /// replay window (a relayed inventory can be hours old) but must still be newer than
+    /// anything admitted from its author.
+    fn admit(&mut self, content: &[u8], fetched: bool) -> Result<Message, Rejected> {
+        let keys = self.keys.as_ref().ok_or(Rejected::Ignored)?;
         let msg = match open_message(content, keys) {
             Ok(msg) => msg,
             Err(reason) => {
@@ -1213,42 +1387,49 @@ impl Mesh {
                     "[gossip-auth-reject] dropped gossip payload on channel '{}': {}",
                     self.channel, reason
                 );
-                return None;
+                return Err(Rejected::Invalid);
             }
         };
         // open_message verified the signature, so msg.node_id() is the real sender.
         let node_id = msg.node_id().to_string();
         if node_id == self.ctx.node_id {
-            return None;
+            return Err(Rejected::Ignored);
         }
         if !self.ctx.allowlist.contains_str(&node_id) {
             eprintln!(
                 "[gossip-allowlist-reject] dropped message from unlisted node_id={node_id} on channel '{}' (run 'dialtone allowlist add {node_id}' to authorize)",
                 self.channel
             );
-            return None;
+            return Err(Rejected::Invalid);
         }
         if !is_valid_node_name(msg.node()) {
             eprintln!(
                 "[gossip-auth-reject] dropped message from node_id={node_id} with an invalid node name"
             );
-            return None;
+            return Err(Rejected::Invalid);
         }
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        let now_ms = if fetched {
+            msg.sent_unix_ms()
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        };
         if let Err(reason) = self
             .replay_guard
             .admit(&msg.replay_key(), msg.sent_unix_ms(), now_ms)
         {
-            eprintln!(
-                "[gossip-replay-reject] dropped message from node={} node_id={node_id}: {reason}",
-                msg.node()
-            );
-            return None;
+            // A fetched frame this node already has is expected; a gossip replay is not.
+            if !fetched {
+                eprintln!(
+                    "[gossip-replay-reject] dropped message from node={} node_id={node_id}: {reason}",
+                    msg.node()
+                );
+            }
+            return Err(Rejected::Ignored);
         }
-        Some(msg)
+        Ok(msg)
     }
 
     /// Learn the addresses a beat advertises, for fetches and joins.
@@ -1273,7 +1454,8 @@ impl Mesh {
     /// Fetch a peer's inventory when its beat announces a version this node does not have
     /// (it missed the broadcast, or joined after it).
     fn want_inventory(&mut self, beat: &Beat) {
-        if beat.inventory_version == 0
+        if !self.caught_up
+            || beat.inventory_version == 0
             || self.inventories.get(&beat.node_id).map(|i| i.version)
                 == Some(beat.inventory_version)
         {
@@ -1288,9 +1470,12 @@ impl Mesh {
         let Ok(peer) = beat.node_id.parse::<EndpointId>() else {
             return;
         };
+        if self.ctx.scores(|s| s.graylisted(&peer)).unwrap_or(false) {
+            return;
+        }
         self.inventory_asked.insert(beat.node_id.clone(), now);
-        let (endpoint, slots, fetched) = (
-            self.ctx.endpoint.clone(),
+        let (ctx, slots, fetched) = (
+            self.ctx.clone(),
             self.fetch_slots.clone(),
             self.fetched_tx.clone(),
         );
@@ -1298,19 +1483,41 @@ impl Mesh {
             let Ok(_slot) = slots.acquire_owned().await else {
                 return;
             };
-            match fetch::inventory(&endpoint, peer, Duration::from_secs(10)).await {
-                Ok(inventory) => {
-                    let _ = fetched.send(inventory);
+            let result = fetch::inventory(&ctx.endpoint, peer, Duration::from_secs(10)).await;
+            ctx.scores(|s| s.fetched(peer, result.is_ok()));
+            match result {
+                Ok(frame) => {
+                    let _ = fetched.send(Fetched {
+                        catch_up: false,
+                        beats: Vec::new(),
+                        inventories: vec![frame],
+                    });
                 }
                 Err(err) => eprintln!("[fetch] inventory: {err}"),
             }
         });
     }
 
-    fn on_received(&mut self, content: &[u8]) {
-        let Some(msg) = self.admit(content) else {
+    /// A gossip message `delivered_from` a neighbor: dropped when that neighbor is
+    /// graylisted (GossipSub's graylist), otherwise admitted, scored and kept.
+    fn on_received(&mut self, content: &[u8], delivered_from: EndpointId) {
+        if self
+            .ctx
+            .scores(|s| s.graylisted(&delivered_from))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let admitted = self.admit(content, false);
+        match &admitted {
+            Ok(_) => self.ctx.scores(|s| s.delivered(delivered_from, true)),
+            Err(Rejected::Invalid) => self.ctx.scores(|s| s.delivered(delivered_from, false)),
+            Err(Rejected::Ignored) => None,
+        };
+        let Ok(msg) = admitted else {
             return;
         };
+        self.keep_frame(&msg, content.to_vec(), now_unix());
         match msg {
             Message::Inventory(inventory) => self.on_inventory(inventory),
             beat => {
@@ -1342,6 +1549,11 @@ impl Mesh {
         // Stamp with our clock once admitted, so clock skew between hosts cannot cause
         // early TTL pruning.
         beat.updated_at_unix = now_unix();
+        self.merge_peer_beat(beat);
+    }
+
+    /// Merge an admitted peer beat into the node state (with its inventory, the first time).
+    fn merge_peer_beat(&mut self, beat: Beat) {
         let peer = beat.node.clone();
         let inventory = self.inventories.get(&beat.node_id).cloned();
         self.ctx.with_state(|st| {

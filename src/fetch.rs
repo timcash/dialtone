@@ -1,18 +1,20 @@
 //! Fetch: ask one node for one thing, over QUIC (ALPN `dialtone/fetch/1`).
 //!
 //! Gossip carries only small, fixed-size announcements that every node needs. Anything
-//! larger, or wanted by only some nodes, is fetched from the node itself:
+//! larger, or wanted by only some nodes, is fetched:
 //!
-//! - `inventory`  its programs, services, devices and details, when one of its beats
-//!   announces an `inventory_version` the asker does not have;
+//! - `inventory`  the node's own inventory, as the signed frame it broadcasts, when one of
+//!   its beats announces an `inventory_version` the asker does not have;
+//! - `catch_up`   from a neighbor, every beat and inventory frame the asker lacks, given a
+//!   digest of what it has (Scuttlebutt-style anti-entropy; see the Mesh actor);
+//! - `details`    the node's devices and full probe report, for the HUD's focused node;
 //! - `probe_blob` a fresh probe blob's ticket, for a full probe to pull (`probe.rs`);
-//! - `probe`      its latest probe report, with the per-peer results beats leave out;
 //! - `rtt`        whether the asker is the answering node's gossip neighbor, timed for the
 //!   round trip (see the Links actor).
 //!
 //! One request per stream; a connection may carry many (the Links actor keeps one open per
-//! neighbor to time Rtts). The allowlist hook admits the connection, and the QUIC handshake
-//! proves which node answers, so answers need no signature.
+//! neighbor to time Rtts). The allowlist hook admits the connection and the QUIC handshake
+//! proves which node answers; frames relayed for other nodes stay signed by their authors.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -23,30 +25,53 @@ use iroh::{Endpoint, EndpointId};
 use serde::{Deserialize, Serialize};
 
 use crate::api::NodeState;
-use crate::mesh::{Inventory, ProbeReport};
+use crate::mesh::{now_unix, CatchUpHave, DEFAULT_PEER_TTL_SECS};
 
 pub const ALPN: &[u8] = b"dialtone/fetch/1";
-const MAX_REQUEST_BYTES: usize = 1024;
-const MAX_ANSWER_BYTES: usize = 4 << 20;
+/// A catch-up digest names every node the asker knows (about 110 bytes each).
+const MAX_REQUEST_BYTES: usize = 1 << 20;
+const MAX_ANSWER_BYTES: usize = 16 << 20;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "get", rename_all = "snake_case")]
 pub enum Request {
     Rtt,
     Inventory,
+    CatchUp { have: CatchUpHave },
+    Details,
     ProbeBlob,
-    Probe,
+}
+
+impl Request {
+    fn name(&self) -> &'static str {
+        match self {
+            Request::Rtt => "rtt",
+            Request::Inventory => "inventory",
+            Request::CatchUp { .. } => "catch_up",
+            Request::Details => "details",
+            Request::ProbeBlob => "probe_blob",
+        }
+    }
+}
+
+/// What a `catch_up` brings back: sealed frames, each beat with its age in seconds at the
+/// answering node.
+#[derive(Debug, Default)]
+pub struct CatchUp {
+    pub beats: Vec<(u64, Vec<u8>)>,
+    pub inventories: Vec<Vec<u8>>,
 }
 
 /// Answers fetches from the node state.
 #[derive(Clone, Debug)]
 pub struct FetchHandler {
     state: Option<Arc<Mutex<NodeState>>>,
+    node_id: String,
 }
 
 impl FetchHandler {
-    pub fn new(state: Option<Arc<Mutex<NodeState>>>) -> Self {
-        FetchHandler { state }
+    pub fn new(state: Option<Arc<Mutex<NodeState>>>, node_id: String) -> Self {
+        FetchHandler { state, node_id }
     }
 
     async fn answer(&self, asker: EndpointId, request: &[u8]) -> Result<Vec<u8>, String> {
@@ -62,13 +87,38 @@ impl FetchHandler {
                 serde_json::json!({ "neighbor": neighbor })
             }
             Request::Inventory => {
-                let inventory = lock(&state)?.inventory.clone();
-                serde_json::to_value(inventory.ok_or("no inventory yet")?)
-                    .map_err(|e| e.to_string())?
+                let frames = lock(&state)?.frames.clone();
+                let frames = frames.lock().map_err(|_| "frames poisoned".to_string())?;
+                let (frame, _) = frames
+                    .nodes
+                    .get(&self.node_id)
+                    .and_then(|f| f.inventory.as_ref())
+                    .ok_or("no inventory yet")?;
+                serde_json::json!({ "frame": crate::base64url_encode(frame) })
             }
-            Request::Probe => {
-                let probe = lock(&state)?.probe.clone();
-                serde_json::to_value(probe.ok_or("no probe yet")?).map_err(|e| e.to_string())?
+            Request::CatchUp { have } => {
+                let frames = lock(&state)?.frames.clone();
+                let frames = frames.lock().map_err(|_| "frames poisoned".to_string())?;
+                let (beats, inventories) =
+                    frames.deltas(&asker.to_string(), &have, now_unix(), DEFAULT_PEER_TTL_SECS);
+                serde_json::json!({
+                    "beats": beats
+                        .iter()
+                        .map(|(age, f)| serde_json::json!({ "age_secs": age, "frame": crate::base64url_encode(f) }))
+                        .collect::<Vec<_>>(),
+                    "inventories": inventories
+                        .iter()
+                        .map(|f| crate::base64url_encode(f))
+                        .collect::<Vec<_>>(),
+                })
+            }
+            Request::Details => {
+                let st = lock(&state)?;
+                serde_json::json!({
+                    "node_id": self.node_id,
+                    "devices": st.devices,
+                    "probe": st.probe,
+                })
             }
             Request::ProbeBlob => {
                 // Writing to the store blocks; keep it off the async runtime.
@@ -162,9 +212,10 @@ pub async fn request(
             None => Ok(value),
         }
     };
+    let name = request.name();
     tokio::time::timeout(timeout, exchange)
         .await
-        .map_err(|_| format!("{request:?} timed out"))?
+        .map_err(|_| format!("{name} timed out"))?
 }
 
 /// Time an `rtt` request on an open connection: the Rtt in milliseconds, and whether the
@@ -193,22 +244,64 @@ async fn fetch_once(
     answer
 }
 
-/// Fetch `peer`'s inventory; refuses one that names another node.
+/// Fetch `peer`'s inventory: the sealed frame it broadcasts, to be opened like a gossip
+/// message (which checks its author's signature).
 pub async fn inventory(
     endpoint: &Endpoint,
     peer: EndpointId,
     timeout: Duration,
-) -> Result<Inventory, String> {
+) -> Result<Vec<u8>, String> {
     let value = fetch_once(endpoint, peer, Request::Inventory, timeout).await?;
-    let inventory: Inventory = serde_json::from_value(value).map_err(|e| e.to_string())?;
-    if inventory.node_id != peer.to_string() {
-        return Err(format!(
-            "{} answered with the inventory of {}",
-            peer.fmt_short(),
-            inventory.node_id
-        ));
+    let frame = value
+        .get("frame")
+        .and_then(|f| f.as_str())
+        .ok_or("answer has no frame")?;
+    crate::base64_decode(frame)
+}
+
+/// Ask a neighbor for every frame this node lacks, given what it `have`s.
+pub async fn catch_up(
+    endpoint: &Endpoint,
+    peer: EndpointId,
+    have: CatchUpHave,
+    timeout: Duration,
+) -> Result<CatchUp, String> {
+    let value = fetch_once(endpoint, peer, Request::CatchUp { have }, timeout).await?;
+    let mut out = CatchUp::default();
+    for beat in value
+        .get("beats")
+        .and_then(|b| b.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let age = beat.get("age_secs").and_then(|a| a.as_u64()).unwrap_or(0);
+        if let Some(frame) = beat.get("frame").and_then(|f| f.as_str()) {
+            out.beats.push((age, crate::base64_decode(frame)?));
+        }
     }
-    Ok(inventory)
+    for frame in value
+        .get("inventories")
+        .and_then(|i| i.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f.as_str())
+    {
+        out.inventories.push(crate::base64_decode(frame)?);
+    }
+    Ok(out)
+}
+
+/// Fetch `peer`'s devices and full probe report; refuses an answer naming another node.
+pub async fn details(
+    endpoint: &Endpoint,
+    peer: EndpointId,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    let value = fetch_once(endpoint, peer, Request::Details, timeout).await?;
+    if value.get("node_id").and_then(|n| n.as_str()) != Some(peer.to_string().as_str()) {
+        return Err(format!("{} answered for another node", peer.fmt_short()));
+    }
+    Ok(value)
 }
 
 /// Ask `peer` for a fresh probe blob; returns its ticket.
@@ -223,14 +316,4 @@ pub async fn probe_blob(
         .and_then(|t| t.as_str())
         .map(str::to_string)
         .ok_or_else(|| "answer has no ticket".to_string())
-}
-
-/// Fetch `peer`'s latest probe report.
-pub async fn probe(
-    endpoint: &Endpoint,
-    peer: EndpointId,
-    timeout: Duration,
-) -> Result<ProbeReport, String> {
-    let value = fetch_once(endpoint, peer, Request::Probe, timeout).await?;
-    serde_json::from_value(value).map_err(|e| e.to_string())
 }

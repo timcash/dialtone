@@ -7,6 +7,8 @@
 #   ./dialtone.sh scale [N] [secs] N nodes on this machine (default 20): gossip convergence and
 #                                    bytes per node over secs (default 30); fails above
 #                                    SCALE_BUDGET_KBPS (kbit/s in or out per node) when set
+#   ./dialtone.sh scale-fleet [N] [secs]  N nodes on every fleet machine (default 10), one mesh
+#                                    across them: convergence and bytes per node per machine
 #   ./dialtone.sh deploy [opts]    build, install on every node, wait for every probe to pass
 #                                    --skip-check   do not run `check` first
 #                                    --release      every node downloads the latest GitHub release (SHA-256 checked)
@@ -230,6 +232,15 @@ sys.exit(not (p["passed_count"] == p["total_count"] == 6 and sum(x["ok"] for x i
   for i in 0 1 2; do until_ok 60 "${names[$i]} gossip probe 3/3" gossip_passes "$i"; done
   for i in 0 1 2; do until_ok 60 "${names[$i]} full probe 6/6 with 2 pulls" full_passes "$i"; done
   echo "    2. Probe: gossip checks 3/3 on every node; full probe 6/6, each pulled a fresh blob from both peers"
+  get 0 "/api/details?node_id=${ids[1]}" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+assert d["node_id"] == sys.argv[1] and d["probe"]["checks"] and isinstance(d["devices"], list), d' "${ids[1]}"
+  get 0 /api/net | python3 -c '
+import sys, json
+s = json.load(sys.stdin)["scores"]
+assert s and not any(x["graylisted"] for x in s), s'
+  echo "    Details: a fetched b's devices and probe from b; a scores its peers, none graylisted"
 
   local program
   program=$(printf ':; while true; do sleep 5; done; exit 0;\r\n@echo off\r\nREM e2e %s\r\n:loop\r\nping -n 6 127.0.0.1 >NUL\r\ngoto loop\r\n' "$root" | base64 | tr -d '\n')
@@ -558,11 +569,198 @@ sys.exit(0 if ok else 1)' "${1:-}" "$FLEET_NODES"
 
 cmd_fleet() { load_fleet; fleet_report "" || true; }
 
+# -----------------------------------------------------------------------------
+# scale-fleet: N nodes on every fleet machine, one mesh across them
+# -----------------------------------------------------------------------------
+# PowerShell on a Windows node. __PREFIX__, __N__, __URL__ and __SECRET__ are filled in per node.
+WIN_SCALE_STOP='
+  Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*dialtone-scale*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Milliseconds 800
+  Remove-Item -Recurse -Force (Join-Path $env:TEMP "dialtone-scale") -ErrorAction SilentlyContinue
+'
+WIN_SCALE_IDS='
+  $root = Join-Path $env:TEMP "dialtone-scale"; $exe = "$env:USERPROFILE\.dialtone\bin\dialtone.exe"
+  1..__N__ | ForEach-Object {
+    $dir = Join-Path $root "s$_"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $env:DIALTONE_STATE_DIR = $dir
+    $st = (& $exe status --node "__PREFIX__-s$_" | Out-String) | ConvertFrom-Json
+    Write-Output ("NODE __PREFIX__-s$_ " + $st.diagnostics.node_id + " " + $st.diagnostics.bound_non_tailnet_ipv4 + " " + $_)
+  }
+'
+# Configs come from scale-configs.json (copied over first); nodes start through WMI so they
+# outlive this SSH session.
+WIN_SCALE_START='
+  $root = Join-Path $env:TEMP "dialtone-scale"; $exe = "$env:USERPROFILE\.dialtone\bin\dialtone.exe"
+  $configs = Get-Content -Raw "$env:USERPROFILE\.dialtone\scale-configs.json" | ConvertFrom-Json
+  1..__N__ | ForEach-Object {
+    $dir = Join-Path $root "s$_"
+    [IO.File]::WriteAllText((Join-Path $dir "config.json"), $configs."s$_")
+    $line = "cmd.exe /c set DIALTONE_STATE_DIR=$dir&& `"$exe`" up --node __PREFIX__-s$_ --listen 127.0.0.1:$(21000 + $_) --quic-port $(20000 + $_) --relay-url __URL__ --secret __SECRET__ > `"$dir\node.log`" 2>&1"
+    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $line } | Out-Null
+  }
+'
+WIN_SCALE_NET='
+  1..__N__ | ForEach-Object {
+    try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 "http://127.0.0.1:$(21000 + $_)/api/net").Content } catch { "{}" }
+  }
+'
+
+scale_fleet_stop() {
+  local node
+  kill ${SCALE_PIDS:-} 2>/dev/null || true; sleep 2; kill -9 ${SCALE_PIDS:-} 2>/dev/null || true
+  wait 2>/dev/null || true
+  [ -n "${SCALE_ROOT:-}" ] && rm -rf "$SCALE_ROOT"
+  for node in $WINDOWS_NODES; do win "$node" "$WIN_SCALE_STOP" >/dev/null 2>&1 || true; done
+}
+
+# scale_fleet_net <file>: every node's /api/net, one JSON line per node, "<machine> <json>".
+scale_fleet_net() {
+  local k node
+  {
+    for k in $(seq 1 "$SCALE_N"); do
+      printf '%s ' "$LOCAL_NODE"; curl -fsS -m 5 "http://127.0.0.1:$((21000 + k))/api/net" 2>/dev/null || printf '{}'; echo
+    done
+    for node in $WINDOWS_NODES; do
+      win "$node" "${WIN_SCALE_NET//__N__/$SCALE_N}" 2>/dev/null | tr -d '\r' | sed "/^$/d; s/^/$node /"
+    done
+  } > "$1"
+}
+
+cmd_scale_fleet() {
+  local n=${1:-10} secs=${2:-60} node k
+  local url="${SCALE_RELAY_URL:-https://usw1-1.relay.n0.iroh.link./}"
+  local secret="dt-Scale_Fleet_Mesh_Secret_2026!"
+  load_fleet
+  [ -x "$BIN" ] || build
+  say "Fleet scale test: $n nodes on each of: $FLEET_NODES (relay $url), measuring for ${secs}s"
+  eval "$(pick_routes)"
+  SCALE_N=$n SCALE_PIDS="" SCALE_ROOT=$(mktemp -d /tmp/dialtone-scale-XXXXXX)
+  CLEANUP="scale_fleet_stop"
+  pkill -9 -f -- "--secret $secret" 2>/dev/null || true
+  for node in $WINDOWS_NODES; do win "$node" "$WIN_SCALE_STOP" >/dev/null 2>&1 || true; done
+
+  # Identities on every machine: "NODE <name> <node_id> <ip> <index>" lines.
+  local ids="$SCALE_ROOT/ids.txt" ip
+  : > "$ids"
+  for k in $(seq 1 "$n"); do
+    mkdir -p "$SCALE_ROOT/s$k"
+    DIALTONE_STATE_DIR="$SCALE_ROOT/s$k" "$BIN" status --node "$LOCAL_NODE-s$k" > "$SCALE_ROOT/s$k.status" &
+  done
+  wait
+  for k in $(seq 1 "$n"); do
+    python3 -c 'import sys,json; d=json.load(open(sys.argv[1]))["diagnostics"]; print("NODE", sys.argv[2], d["node_id"], d["bound_non_tailnet_ipv4"] or "127.0.0.1", sys.argv[3], sys.argv[4])' \
+      "$SCALE_ROOT/s$k.status" "$LOCAL_NODE-s$k" "$k" "$LOCAL_NODE" >> "$ids"
+  done
+  for node in $WINDOWS_NODES; do
+    local script="${WIN_SCALE_IDS//__PREFIX__/$node}"
+    win "$node" "${script//__N__/$n}" | tr -d '\r' | grep '^NODE ' | sed "s/\$/ $node/" >> "$ids"
+  done
+  local total; total=$(grep -c '^NODE ' "$ids")
+  [ "$total" -eq $((n * $(echo $FLEET_NODES | wc -w))) ] || fail "expected $((n * $(echo $FLEET_NODES | wc -w))) identities, got $total"
+
+  # Configs: everyone allowlists everyone; 3 random seeds anywhere in the fleet, reached
+  # directly (LAN address) or through the relay.
+  python3 - "$SCALE_ROOT" "$ids" "$url" <<'PY'
+import json, random, sys
+root, ids_file, url = sys.argv[1:4]
+nodes = [l.split() for l in open(ids_file) if l.startswith("NODE ")]  # NODE name id ip index machine
+random.seed(len(nodes))
+by_machine = {}
+for _, name, nid, ip, idx, machine in nodes:
+    others = [o for o in nodes if o[2] != nid]
+    seeds = random.sample(others, min(3, len(others)))
+    cfg = {
+        "allowlist": [o[2] for o in others],
+        "seeds": [{"node_id": o[2], "relay_url": url, "ip_addrs": [f"{o[3]}:{20000 + int(o[4])}"]} for o in seeds],
+    }
+    by_machine.setdefault(machine, {})[f"s{idx}"] = json.dumps(cfg)
+for machine, cfgs in by_machine.items():
+    json.dump(cfgs, open(f"{root}/configs-{machine}.json", "w"))
+PY
+  python3 -c 'import json,sys; [open(f"{sys.argv[1]}/{k}/config.json","w").write(v) for k,v in json.load(open(sys.argv[2])).items()]' \
+    "$SCALE_ROOT" "$SCALE_ROOT/configs-$LOCAL_NODE.json"
+  for node in $WINDOWS_NODES; do
+    copy_to "$node" "$SCALE_ROOT/configs-$node.json" ".dialtone/scale-configs.json"
+  done
+
+  # Start every node.
+  for k in $(seq 1 "$n"); do
+    DIALTONE_STATE_DIR="$SCALE_ROOT/s$k" "$BIN" up --node "$LOCAL_NODE-s$k" --listen "127.0.0.1:$((21000 + k))" \
+      --quic-port "$((20000 + k))" --relay-url "$url" --secret "$secret" > "$SCALE_ROOT/s$k.log" 2>&1 &
+    SCALE_PIDS="$SCALE_PIDS $!"
+  done
+  for node in $WINDOWS_NODES; do
+    local script="${WIN_SCALE_START//__PREFIX__/$node}"
+    script="${script//__N__/$n}"
+    script="${script//__URL__/$url}"
+    win "$node" "${script//__SECRET__/$secret}" > /dev/null
+  done
+  echo "    started $total nodes"
+
+  # Convergence: every node lists every node.
+  local started; started=$(date +%s)
+  local snap="$SCALE_ROOT/net.txt"
+  fleet_converged() {
+    scale_fleet_net "$snap"
+    python3 - "$snap" "$total" <<'PY'
+import json, sys
+rows = [l.split(" ", 1) for l in open(sys.argv[1]) if l.strip()]
+known = [json.loads(j).get("nodes_known", 0) for _, j in rows]
+print("    %d/%d nodes answer, nodes known: min %d, max %d" % (sum(1 for k in known if k), int(sys.argv[2]), min(known or [0]), max(known or [0])))
+sys.exit(not (len(known) == int(sys.argv[2]) and min(known) >= int(sys.argv[2])))
+PY
+  }
+  local ok=""
+  for _ in $(seq 1 30); do
+    fleet_converged > "$SCALE_ROOT/conv.txt" && { ok=1; break; }
+    sleep 5
+  done
+  cat "$SCALE_ROOT/conv.txt"
+  [ -n "$ok" ] || fail "the fleet mesh of $total nodes did not converge within about 4 minutes"
+  echo "    converged: every node sees all $total in $(( $(date +%s) - started ))s"
+
+  scale_fleet_net "$SCALE_ROOT/net-start.txt"
+  sleep "$secs"
+  scale_fleet_net "$SCALE_ROOT/net-end.txt"
+  python3 - "$SCALE_ROOT" "$secs" <<'PY'
+import json, sys
+root, secs = sys.argv[1], float(sys.argv[2])
+def load(p):
+    out = {}
+    for i, l in enumerate(open(p)):
+        if l.strip():
+            machine, js = l.rstrip("\n").split(" ", 1)
+            d = json.loads(js)
+            if d.get("node"):
+                out[d["node"]] = (machine, d)
+    return out
+a, b = load(f"{root}/net-start.txt"), load(f"{root}/net-end.txt")
+per = {}
+for name, (machine, y) in b.items():
+    if name not in a: continue
+    x = a[name][1]
+    f = lambda k, s="socket": y[s][k] - x[s][k]
+    per.setdefault(machine, []).append((f("bytes_in") * 8 / secs / 1000, f("bytes_out") * 8 / secs / 1000,
+        f("gossip_msgs_in", "gossip") / secs, y["gossip"]["neighbors"],
+        sum(1 for s in y.get("scores", []) if s.get("graylisted"))))
+allrows = [r for rows in per.values() for r in rows]
+avg = lambda xs: sum(xs) / len(xs)
+for machine, rows in sorted(per.items()) + [("all", allrows)]:
+    c = list(zip(*rows))
+    print("    %-8s %3d nodes: in %.1f / %.1f kbit/s (avg / max), out %.1f / %.1f, %.1f msgs/s, %.1f neighbors, %d graylisted"
+          % (machine, len(rows), avg(c[0]), max(c[0]), avg(c[1]), max(c[1]), avg(c[2]), avg(c[3]), sum(c[4])))
+PY
+  cleanup
+}
+
+
 case "${1:-help}" in
   check) cmd_check ;;
   lint) cmd_lint ;;
   e2e) cmd_e2e ;;
   scale) shift; cmd_scale "$@" ;;
+  scale-fleet) shift; cmd_scale_fleet "$@" ;;
   deploy) shift; cmd_deploy "$@" ;;
   fleet) cmd_fleet ;;
   help|-h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;

@@ -1802,7 +1802,7 @@ const TOUR_STEPS = [
   { idx: 4, code: "DEV", ring: 3, rowKey: "DEV", title: "CONNECTED DEVICES" }
 ];
 
-// Devices a node reports in its inventory, as short codes for the top overlay.
+// Devices connected to the focused node (from its details), as short codes for the overlay.
 const DEVICE_CODES = {
   camera: "CAM", microphone: "MIC", speaker: "SPK", keyboard: "KBD", pointer: "PTR", display: "DSP",
   printer: "PRN", storage: "STO", bluetooth: "BT", gamepad: "PAD", other: "DEV"
@@ -1968,7 +1968,7 @@ function renderTopShellStats() {
   if (!nodes.length) return;
 
   const idx = Math.max(0, nodes.findIndex(n => n.node === selectedNode));
-  const target = nodes[idx] || nodes[0];
+  const target = withDetails(nodes[idx] || nodes[0]);
   const health = classifyNodeHealth(target);
 
   const termEl = document.getElementById("terminal-overlay");
@@ -2814,6 +2814,34 @@ function renderFrame(nowMs) {
   requestAnimationFrame(renderFrame);
 }
 
+// The focused node's devices and full probe (with per-peer results) are fetched when it is
+// focused (`/api/details`, which asks the node itself), not gossiped to every node.
+const nodeDetails = new Map(); // node_id -> { at, pending, devices, probe }
+const DETAILS_REFRESH_MS = 10000;
+
+async function refreshFocusDetails() {
+  const node = (meshState.nodes || []).find(n => n.node === selectedNode);
+  if (!node || !node.node_id) return;
+  const known = nodeDetails.get(node.node_id) || { at: -Infinity };
+  if (known.pending || performance.now() - known.at < DETAILS_REFRESH_MS) return;
+  nodeDetails.set(node.node_id, { ...known, pending: true });
+  let fetched = {};
+  try {
+    const resp = await fetch(`/api/details?node_id=${encodeURIComponent(node.node_id)}`, { cache: "no-store" });
+    if (resp.ok) fetched = scrubStrings(await resp.json());
+  } catch (_) {}
+  nodeDetails.set(node.node_id, { ...known, ...fetched, pending: false, at: performance.now() });
+  renderTopShellStats();
+}
+
+// A node with its fetched details laid over what gossip brought; the newer probe wins.
+function withDetails(node) {
+  const d = node && nodeDetails.get(node.node_id);
+  if (!d) return node;
+  const probe = d.probe && (!node.probe || (d.probe.cycle || 0) >= (node.probe.cycle || 0)) ? d.probe : node.probe;
+  return { ...node, devices: Array.isArray(d.devices) ? d.devices : node.devices, probe };
+}
+
 async function pollGossipState() {
   try {
     const resp = await fetch("/api/mesh", { cache: "no-store" });
@@ -2830,6 +2858,7 @@ async function pollGossipState() {
       }
     }
     detectNodeFxEvents(meshState.nodes || []);
+    refreshFocusDetails();
   } catch (_) {}
 }
 

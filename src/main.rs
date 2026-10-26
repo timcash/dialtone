@@ -849,7 +849,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         .accept(iroh_blobs::ALPN, blobs_proto)
         .accept(
             dialtone::fetch::ALPN,
-            dialtone::fetch::FetchHandler::new(shared_state.clone()),
+            dialtone::fetch::FetchHandler::new(shared_state.clone(), node_id.clone()),
         )
         .spawn();
 
@@ -1126,6 +1126,14 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         net: shared_state
             .as_ref()
             .and_then(|s| s.lock().ok().map(|st| st.net.clone()))
+            .unwrap_or_default(),
+        frames: shared_state
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|st| st.frames.clone()))
+            .unwrap_or_default(),
+        scores: shared_state
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|st| st.scores.clone()))
             .unwrap_or_default(),
         cancel: cancel.clone(),
     };

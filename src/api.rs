@@ -30,6 +30,8 @@ use crate::supervisor::{ensure_probe_program, stage_program, Supervisor, PROBE_P
 pub const MAX_HTTP_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_CONCURRENT_HTTP_CONNECTIONS: usize = 32;
 pub const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long `GET /api/details` keeps what it fetched from a peer.
+const DETAILS_TTL_SECS: u64 = 10;
 
 pub fn default_api_token_path() -> PathBuf {
     default_state_dir().join("api-token")
@@ -181,10 +183,19 @@ pub struct NodeState {
     /// Gossip traffic counters (see `GET /api/net`).
     #[serde(skip)]
     pub net: Arc<crate::mesh::NetCounters>,
-    /// This node's inventory as it leaves the node (`Inventory::for_wire`), served to
+    /// Every node's latest sealed beat and inventory, this node's own included, served to
     /// fetches (`fetch.rs`). Kept by the Mesh actor.
     #[serde(skip)]
-    pub inventory: Option<crate::mesh::Inventory>,
+    pub frames: Arc<Mutex<crate::mesh::FrameCache>>,
+    /// Peer scores (GossipSub-style), kept by the Mesh, Links and Probe actors.
+    #[serde(skip)]
+    pub scores: Arc<Mutex<crate::mesh::PeerScores>>,
+    /// The node's async runtime, for API routes that fetch from a peer (`/api/details`).
+    #[serde(skip)]
+    pub runtime: Option<tokio::runtime::Handle>,
+    /// Details fetched from peers for the HUD, by NodeId, with when they were fetched.
+    #[serde(skip)]
+    pub details_cache: HashMap<String, (Value, u64)>,
     /// NodeIds of this node's gossip neighbors on the beats topic. Kept by the Mesh actor.
     #[serde(default)]
     pub gossip_neighbors: Vec<String>,
@@ -615,7 +626,10 @@ impl NodeState {
             probe: None,
             probe_blobs: Vec::new(),
             net: Arc::default(),
-            inventory: None,
+            frames: Arc::default(),
+            scores: Arc::default(),
+            runtime: None,
+            details_cache: HashMap::new(),
             gossip_neighbors: Vec::new(),
             probe_tx: None,
         };
@@ -1088,8 +1102,56 @@ fn route_request(
                 "nodes_known": st.nodes.len(),
                 "socket": socket,
                 "gossip": st.net.snapshot(),
+                "scores": st.scores.lock().map(|s| s.snapshot()).unwrap_or_default(),
             });
             write_json(&mut stream, 200, &body)
+        }
+        ("GET", "/api/details") => {
+            // The focused node's devices and full probe: this node's own, or fetched from the
+            // peer and kept for `DETAILS_TTL_SECS` (the HUD asks every few seconds).
+            let node_id = query.get("node_id").cloned().unwrap_or_default();
+            let own = st.iroh_runtime.node_id.clone();
+            if node_id.is_empty() || node_id == own {
+                let body = json!({ "node_id": own, "devices": st.devices, "probe": st.probe });
+                return write_json(&mut stream, 200, &body);
+            }
+            let now = now_unix();
+            if let Some((cached, at)) = st.details_cache.get(&node_id) {
+                if now.saturating_sub(*at) < DETAILS_TTL_SECS {
+                    return write_json(&mut stream, 200, cached);
+                }
+            }
+            let Ok(peer) = node_id.parse::<iroh::EndpointId>() else {
+                return write_json(&mut stream, 400, &json!({ "error": "invalid node_id" }));
+            };
+            if !st.nodes.iter().any(|n| n.node_id == node_id) {
+                return write_json(&mut stream, 404, &json!({ "error": "not in the mesh" }));
+            }
+            let (Some(runtime), Some(endpoint)) = (
+                st.runtime.clone(),
+                st.store.as_ref().map(|s| s.endpoint.clone()),
+            ) else {
+                return write_json(&mut stream, 503, &json!({ "error": "node not running" }));
+            };
+            let scores = st.scores.clone();
+            drop(st);
+            let fetched = runtime.block_on(crate::fetch::details(
+                &endpoint,
+                peer,
+                std::time::Duration::from_secs(5),
+            ));
+            if let Ok(mut s) = scores.lock() {
+                s.fetched(peer, fetched.is_ok());
+            }
+            match fetched {
+                Ok(details) => {
+                    if let Ok(mut st) = state.lock() {
+                        st.details_cache.insert(node_id, (details.clone(), now));
+                    }
+                    write_json(&mut stream, 200, &details)
+                }
+                Err(err) => write_json(&mut stream, 502, &json!({ "error": err })),
+            }
         }
         ("GET", "/api/devices") => {
             let body = json!({ "node": st.node, "devices": st.devices });
