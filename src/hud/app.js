@@ -2010,10 +2010,11 @@ function renderTopShellStats() {
   let totalHbs = 0;
   let directPaths = 0;
   let relayPaths = 0;
-    // The probe's five checks (probe.rs), counted over every node that has reported one.
+  // The probe's checks (probe.rs), counted over every node that has reported one: MSH, NBR
+  // and BEAT every 30s; STO, PUL and PRC after a full probe (`dialtone probe --all`).
   let probePassTotal = 0;
   let probeCheckTotal = 0;
-  const capOk = { MSH: 0, STO: 0, PUL: 0, BEAT: 0, PRC: 0 };
+  const capOk = { MSH: 0, NBR: 0, BEAT: 0, STO: 0, PUL: 0, PRC: 0 };
   const pullMs = [];
   const allRtts = [];
   const allJitters = [];
@@ -2107,7 +2108,7 @@ function renderTopShellStats() {
   const overallRows = [
     `${rowMark("MSH")}${rowLbl("MSH", "MSH")} ${asciiBar(meshHealthPct, 101, 101, 18)} <span class="${mshCls}">${padL(meshHealthPct.toFixed(0) + "%", 7)}</span>   ${kvCell("NDS", `${nodes.length}/${expectedPeers}`, "hi", stepMeta.code === "MSH")}   ${kvCell("LNK", `${activeLinks}/${expectedLinks}`, "hi", stepMeta.code === "MSH")}   ${kvCell("PTH", `${directPaths}D/${relayPaths}R`)}   ${kvCell("BTS", "#" + totalHbs)}   ${kvCell("DIG", String(blobKeys), "hi", stepMeta.code === "BLB")}`,
     `${rowMark("NET")}${rowLbl("NET", "NET")} ${asciiBar(rttBarPct, 75, 95, 18)} <span class="${valCls(avgRtt, 180, 260)}">${padL(avgRtt.toFixed(1) + "ms", 7)}</span>   ${kvCell("RX", sumRxKb.toFixed(0) + "K/s", "hi", stepMeta.code === "NET")}   ${kvCell("TX", sumTxKb.toFixed(0) + "K/s", "hi", stepMeta.code === "NET")}   ${kvCell("MIN", minRtt.toFixed(1) + "ms")}   ${kvCell("MAX", maxRtt.toFixed(1) + "ms")}   ${kvCell("JIT", "±" + avgJitter.toFixed(1) + "ms")}`,
-    `${rowMark("PRB")}${rowLbl("PRB", "PRB")} ${asciiBar(probePct, 101, 101, 18)} <span class="${probeCls}">${padL(`${probePassTotal}/${probeCheckTotal}`, 7)}</span>   ${kvCell("MSH", capFmt(capOk.MSH), capCls(capOk.MSH), stepMeta.code === "MSH")}   ${kvCell("STO", capFmt(capOk.STO), capCls(capOk.STO), stepMeta.code === "BLB")}   ${kvCell("PUL", capFmt(capOk.PUL), capCls(capOk.PUL), stepMeta.code === "BLB")}   ${kvCell("BEAT", capFmt(capOk.BEAT), capCls(capOk.BEAT), stepMeta.code === "NET")}   ${kvCell("PRC", capFmt(capOk.PRC), capCls(capOk.PRC), stepMeta.code === "PRC")}`,
+    `${rowMark("PRB")}${rowLbl("PRB", "PRB")} ${asciiBar(probePct, 101, 101, 18)} <span class="${probeCls}">${padL(`${probePassTotal}/${probeCheckTotal}`, 7)}</span>   ${kvCell("MSH", capFmt(capOk.MSH), capCls(capOk.MSH), stepMeta.code === "MSH")}   ${kvCell("NBR", capFmt(capOk.NBR), capCls(capOk.NBR), stepMeta.code === "NET")}   ${kvCell("BEAT", capFmt(capOk.BEAT), capCls(capOk.BEAT), stepMeta.code === "NET")}   ${kvCell("PUL", capFmt(capOk.PUL), capCls(capOk.PUL), stepMeta.code === "BLB")}   ${kvCell("PRC", capFmt(capOk.PRC), capCls(capOk.PRC), stepMeta.code === "PRC")}`,
     `${rowMark("CPU")}${rowLbl("CPU", "CPU")} ${asciiBar(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT, 18)} <span class="${valCls(cpuVal, WARN_CPU_PCT, ERROR_CPU_PCT)}">${padL(cpuVal.toFixed(1) + "%", 7)}</span>   ${kvCell("AVG", cpuAvg.toFixed(1) + "%")}   ${kvCell("STD", "±" + cpuStd.toFixed(1) + "%")}   ${kvCell("MAX", cpuMax.toFixed(1) + "%")}   ${kvCell("COR", String(totalCores))}   ${kvCell("STO", fmtBytesShort(blobBytes), "hi", stepMeta.code === "BLB")}`,
     `${rowMark("MEM")}${rowLbl("MEM", "MEM")} ${asciiBar(memVal, WARN_MEM_PCT, ERROR_MEM_PCT, 18)} <span class="${valCls(memVal, WARN_MEM_PCT, ERROR_MEM_PCT)}">${padL(memVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumMemUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumMemTot) + "G")}   ${kvCell("STD", "±" + memStd.toFixed(1) + "%")}   ${kvCell("PUL", (pullMs.length ? (pullMs.reduce((a, b) => a + b, 0) / pullMs.length).toFixed(0) : "-") + "ms", "hi", stepMeta.code === "BLB")}   ${kvCell("FET", String(blobFetches))}`,
     `${rowMark("DSK")}${rowLbl("DSK", "DSK")} ${asciiBar(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT, 18)} <span class="${valCls(dskVal, WARN_DISK_PCT, ERROR_DISK_PCT)}">${padL(dskVal.toFixed(1) + "%", 7)}</span>   ${kvCell("USE", fmtGiB(sumDskUsed) + "G")}   ${kvCell("TOT", fmtGiB(sumDskTot) + "G")}   ${kvCell("THR", thrashScore.toFixed(0), thrashScore > 0 ? "err" : "hi")}   ${kvCell("PRB", `#${targetCycle}`, "hi")}   ${kvCell("PCS", `${totalJobs}/${nodes.length}`, "hi", stepMeta.code === "PRC")}`
@@ -2251,11 +2252,11 @@ function renderTourClosedCaptions(ctx) {
 
   const peerRttEntries = Object.entries(target.peer_rtt_ms || {})
     .map(([peer, ms]) => `${peer}=${Number(ms).toFixed(1)}ms`)
-    .join(", ") || "probing peers...";
+    .join(", ") || "timing neighbor Rtts...";
 
     const cycleNum = tprobe.cycle || 0;
   const passCnt = tprobe.passed_count ?? 0;
-  const totCnt = tprobe.total_count ?? 5;
+  const totCnt = tprobe.total_count ?? 3;
 
   const stepPills = TOUR_STEPS.map(s => {
     const isAct = s.idx === stepMeta.idx;
@@ -2280,23 +2281,28 @@ function renderTourClosedCaptions(ctx) {
       const pulls = Array.isArray(tprobe.pulls) ? tprobe.pulls : [];
       const pullText = pulls.length
         ? pulls.map(p => `<span class="hi">${p.peer}</span> ${okMark(p.ok)} ${Number(p.ms).toFixed(0)}ms`).join(", ")
-        : `<span class="dim">no peer blobs yet</span>`;
+        : `<span class="dim">no full probe yet (dialtone probe --all)</span>`;
       line1 = `<span class="focus">[2/${TOUR_STEPS.length} BLOB STORE &amp; PULLS]</span> Probe #${cycleNum} on <span class="hi">${target.node}</span> wrote a fresh blob and read it back ${checkMark(sto)} ${sto && sto.ms != null ? `in <span class="hi">${Number(sto.ms).toFixed(0)}ms</span>` : ""} (<span class="hi">${blobKeys} blobs</span>, <span class="hi">${fmtBytesShort(blobBytes)}</span> in the store).`;
-      line2 = `Pulled each peer's probe blob over QUIC and verified its SHA-256 ${checkMark(probeCheck("PUL"))}: ${pullText}.`;
+      line2 = `A full probe pulls a fresh blob from up to 3 sampled peers over QUIC and verifies its SHA-256 ${checkMark(probeCheck("PUL"))}: ${pullText}.`;
     }
       break;
     case 2: // PRC: Process Load & Exec from Blob Store
       line1 = `<span class="focus">[3/${TOUR_STEPS.length} PROCESS LOAD &amp; EXEC]</span> Loaded verified executable from SHA-256 blob store (<span class="hi">sha256:${shortSha}</span>) &rarr; staged to <span class="hi">${stagedPath}</span>.`;
-            line2 = `Supervisor runs <span class="focus">${programName}</span> (<span class="hi">PID ${processPid}</span>) from its blob ${checkMark(probeCheck("PRC"))}; the node probes itself every 30s (probe <span class="hi">${passCnt}/${totCnt}</span>).`;
+            line2 = `Supervisor runs <span class="focus">${programName}</span> (<span class="hi">PID ${processPid}</span>) from its blob ${checkMark(probeCheck("PRC"))}; the node checks the mesh every 30s and runs full probes on request (probe <span class="hi">${passCnt}/${totCnt}</span>).`;
       break;
     case 3: // NET: QUIC Transport & RTT Matrix
           {
+      // Per-peer results stay on the node that ran the probe (beats leave them out), so a
+      // peer's HUD shows the check's summary instead.
       const beats = Array.isArray(tprobe.beats) ? tprobe.beats : [];
-      const beatText = beats.length
-        ? beats.map(b => `<span class="hi">${b.peer}</span> ${okMark(b.ok)} ${b.age_secs}s${b.hears_us ? "" : " (does not hear us)"}`).join(", ")
-        : `<span class="dim">no peers yet</span>`;
-      line1 = `<span class="focus">[4/${TOUR_STEPS.length} BEATS &amp; RTT]</span> Beats both ways ${checkMark(probeCheck("BEAT"))}: ${beatText}.`;
-      line2 = `Live peer latencies from <span class="hi">${target.node}</span>: <span class="focus">${peerRttEntries}</span> (mesh avg <span class="hi">${avgRtt.toFixed(1)}ms ±${avgJitter.toFixed(1)}ms</span>).`;
+      const shown = beats.slice(0, 6);
+      const beatText = shown.length
+        ? shown.map(b => `<span class="hi">${b.peer}</span> ${okMark(b.ok)} ${b.age_secs}s${b.hears_all ? "" : " (does not hear all)"}`).join(", ")
+          + (beats.length > shown.length ? ` and ${beats.length - shown.length} more` : "")
+        : `<span class="hi">${(probeCheck("BEAT") || {}).detail || "every peer beating"}</span>`;
+      const nbr = probeCheck("NBR");
+      line1 = `<span class="focus">[4/${TOUR_STEPS.length} BEATS &amp; RTT]</span> Beats both ways ${checkMark(probeCheck("BEAT"))}: ${beatText}; gossip neighbors ${checkMark(nbr)} <span class="hi">${Object.keys(target.peer_rtt_ms || {}).length}</span>.`;
+      line2 = `Rtt from <span class="hi">${target.node}</span> to its gossip neighbors: <span class="focus">${peerRttEntries}</span> (mesh avg <span class="hi">${avgRtt.toFixed(1)}ms ±${avgJitter.toFixed(1)}ms</span>).`;
     }
       break;
     case 4: { // DEV: devices connected to the node, from its inventory

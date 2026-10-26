@@ -19,7 +19,8 @@ actions:
   blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket
   invite [--ttl 15m]       Mint a signed, expiring, single-use invite
   daemon [install|status]  Install or inspect the daemon that starts the node at login
-  probe                    Run one probe now (MSH, STO, PUL, BEAT, PRC; nodes also probe every 30s)
+  probe [--all]            Run one probe now: the gossip checks (MSH, NBR, BEAT; nodes run them
+                           every 30s), and with --all the store, pulls and programs (STO, PUL, PRC)
   devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)
   mesh-test                Check the running node's security, mesh convergence and blob transfer
   hud                      Serve the HUD and API only (no mesh)
@@ -55,6 +56,7 @@ flags:
   --relay-url <url>        Custom Iroh relay URL (repeatable)
   --os <macos|linux|windows> Target OS for service unit generation
   --once                   Run one cycle and exit
+  --all                    'dialtone probe': also test the store, pulls and programs
 ```
 
 HUD keys (at http://127.0.0.1:8788):
@@ -165,7 +167,7 @@ Running `./dialtone` (with no arguments, or `./dialtone up`) boots 5 subsystems 
 
 Open **`http://127.0.0.1:8788`** to access the embedded tactical HUD:
 
-- **Terminal `top` table**: mesh-wide rows (`MSH`, `NET`, `PRB`, `CPU`, `MEM`, `DSK`), where `PRB` counts each probe check passing across nodes (`MSH` `STO` `PUL` `BEAT` `PRC`), then one row per node (`NODE`, `ARCH`, `CPU`, `MEM`, `DSK`, `IP/PATH`, `RX/TX`, `LNK`, `RTT`, `JIT`, `PROC`, `PRB`), then the focused node's devices.
+- **Terminal `top` table**: mesh-wide rows (`MSH`, `NET`, `PRB`, `CPU`, `MEM`, `DSK`), where `PRB` counts each probe check passing across nodes (`MSH` `NBR` `BEAT` `PUL` `PRC`), then one row per node (`NODE`, `ARCH`, `CPU`, `MEM`, `DSK`, `IP/PATH`, `RX/TX`, `LNK`, `RTT`, `JIT`, `PROC`, `PRB`), then the focused node's devices.
 - **Threshold colours**: values stay greyscale when nominal, turn amber at the warning level and red at the error level (CPU 75% / 92%, memory 78% / 92%, disk 82% / 94%).
 - **Tour**: visits every node and steps through `MSH` (mesh), `BLB` (store and blob pulls), `PRC` (probe program), `NET` (beats and Rtt) and `DEV` (devices); the closed captions narrate that node's latest probe.
 - **Interactive 3D Mesh Topology**: Drag to orbit, scroll to zoom, or click any peer node to inspect its live QUIC links and metadata.
@@ -264,7 +266,7 @@ If you are provisioning 2, 3, or more hosts via a setup script or SSH, you can p
 
 ### Step 4 — Verify Mesh Convergence
 
-Within a few seconds of starting, verify that all nodes are exchanging encrypted messages (`dialtone.iroh.envelope.v4`) and incrementing their beat `counter`. All nodes must run the same envelope version, so upgrade a mesh together:
+Within a few seconds of starting, verify that all nodes are exchanging encrypted messages (`dialtone.iroh.envelope.v5`) and incrementing their beat `counter`. All nodes must run the same envelope version, so upgrade a mesh together:
 
 ```bash
 # Check discovered peers and beat counters via the local HTTP API
@@ -283,7 +285,7 @@ Or open **`http://127.0.0.1:8788`** in your browser to view the live 3D topology
 **How the mesh is protected**
 
 - **Allowlist at the handshake.** Every QUIC connection (gossip and blobs, in and out) is closed right after the TLS handshake unless the remote NodeId is on the allowlist. `dialtone allowlist add/remove` edits `~/.dialtone/config.json`; a running node picks the change up within 5 seconds, no restart.
-- **Signed messages.** Nodes gossip four typed messages: a **Beat** every 5 seconds (liveness, stats, Rtt echoes), a **Summary** every 30 seconds, an **Echo** in reply to an Rtt probe, and an **Inventory** (the node's processes, services and devices) when it changes, when a neighbor joins and with every summary. Each message is signed with the sender's Key and encrypted with the channel keys. A node drops messages whose signature does not match the NodeId they claim, messages from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
+- **Signed messages.** Nodes gossip three typed messages (see [Scaling the mesh](#scaling-the-mesh)): a **Beat** (liveness, stats, the node's probe summary and its neighbors' Rtts), a **Summary** (a beat with the 30-second stats summary, every sixth beat), and an **Inventory** (the node's processes, services, devices and details) when it changes. Each message is signed with the sender's Key and encrypted with the channel keys. A node drops messages whose signature does not match the NodeId they claim, messages from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
 - **No process secrets on the wire.** An inventory lists each process without its `env` or `args`.
 - **Deploys follow their origin.** A node that runs a copy of a peer's program never offers it further, and removes it as soon as that peer stops offering it, so removing a program on the node that deployed it removes it everywhere.
 - **Deploys only from the allowlist.** A process offered for mesh deploy is pulled only from an allowlisted signer and an allowlisted blob provider, never a peer's probe program, and only once per (peer, digest). Blob pulls use the node's own endpoint, so the provider's allowlist decides.
@@ -297,7 +299,7 @@ The `"dialtone"` channel (and any custom `--channel <name>`) is **secret-protect
 - **Argon2id Key Derivation (`v2`) & XChaCha20-Poly1305 Gossip Encryption**:
   1. `dialtone` derives three domain-separated 32-byte subkeys (`topic_id`, `auth_key`, `enc_key`) from `(channel, secret)` using **Argon2id** (`m=19456 KiB, t=2, p=1`).
   2. Only the derived subkey bundle (`derived_keys`) is persisted in `~/.dialtone/config.json` (`0600` permissions) — the plaintext secret is **never** written to disk. Any legacy `~/.dialtone2/config.json` is automatically migrated and scrubbed on startup.
-  3. Every message broadcast over `iroh-gossip` is signed with the sender's Key and encrypted with `enc_key` using **XChaCha20-Poly1305** (`dialtone.iroh.envelope.v4`, random 24-byte nonce). Unencrypted or unsigned frames are dropped.
+  3. Every message broadcast over `iroh-gossip` is signed with the sender's Key and encrypted with `enc_key` using **XChaCha20-Poly1305** (`dialtone.iroh.envelope.v5`: a binary frame, random 24-byte nonce). Unencrypted or unsigned frames are dropped.
 - **Deny-by-Default Peer Allowlist (`allowlist`)**:
   - On the main `"dialtone"` channel, inbound peers are **denied by default** unless their `NodeId` is listed in the host's local `~/.dialtone/config.json` (`allowlist`), even if `--invite` is passed.
   - Manage the allowlist via CLI:
@@ -449,17 +451,43 @@ Every running `dialtone` daemon attaches `iroh_blobs::BlobsProtocol` to its live
 
 ### Self-test loop (Probe)
 
-Every running node tests itself every 30 seconds against the live mesh and reports five checks:
+Every running node checks the gossip mesh every 30 seconds. These checks read what gossip already brought, so they cost no traffic of their own:
 
 | Check | What it proves |
 | :--- | :--- |
 | `MSH` | Every allowlisted peer is in the mesh |
+| `NBR` | The node has at least two gossip neighbors (one in a two-node mesh) |
+| `BEAT` | Every peer's beats are fresh (within three of its beat intervals) and every peer hears as many nodes as this one |
+
+A full probe also tests the node's other capabilities, which move data, so it runs only when asked (`dialtone probe --all`, or `POST /api/probe` with `{"all": true}`; `deploy` runs one on this machine):
+
+| Check | What it proves |
+| :--- | :--- |
 | `STO` | A fresh blob is written to the store and read back intact |
-| `PUL` | Every peer's latest probe blob downloads over QUIC through the node's downloader, SHA-256 verified |
-| `BEAT` | Every peer's beats are fresh (≤15s) and every peer hears this node's beats |
+| `PUL` | Up to 3 peers, chosen at random, each write a fresh blob on request; it downloads over QUIC through the node's downloader, SHA-256 verified |
 | `PRC` | The probe program, staged from the store, is running under the supervisor |
 
-The report travels in the node's beats, so each HUD shows every node's results (PRB row, tour steps) and each node knows which blob to pull from each peer next. Failed checks are logged. Probe blobs are forgotten after use, so the store does not grow. `dialtone probe` (or `POST /api/probe`) runs one immediately; `GET /api/probe` returns the latest.
+A compact report (the checks, without per-peer results) travels in the node's beats, so each HUD shows every node's results (PRB row, tour steps). Failed checks are logged. Probe blobs are forgotten after use, so the store does not grow. `dialtone probe` (or `POST /api/probe`) runs one immediately; `GET /api/probe` returns the latest.
+
+### Scaling the mesh
+
+Gossip is routed the way [libp2p GossipSub](https://docs.libp2p.io/concepts/pubsub/overview/) routes it, on top of iroh-gossip's HyParView membership and Plumtree broadcast tree:
+
+- **A few neighbors, not every node.** Each node keeps 2 to 5 gossip neighbors. Below two (GossipSub's `D_lo`) it joins up to three known peers chosen at random; nobody dials every other node. A message reaches the whole mesh along the broadcast tree, each node forwarding it once.
+- **Small, fixed-size announcements.** A beat is about 1.2 KB sealed and does not grow with the mesh: no seed lists, no per-peer probe results, none of the node's details. The beat announces its node's `inventory_version`.
+- **Fetch on demand.** The inventory and anything larger goes over a request–answer protocol of its own (`dialtone/fetch/1`, `fetch.rs`). A node that sees a beat announcing an inventory version it does not have (it missed the broadcast, or joined later) fetches the inventory from that node. Full probes fetch fresh blob tickets the same way.
+- **Separate topics.** Beats go on the channel's beats topic; inventories are broadcast on its events topic when they change, so beats stay small and regular.
+- **No echo broadcasts.** Rtt is timed with an empty request over a fetch connection to each gossip neighbor (the Links actor), not from replies broadcast to the whole mesh.
+- **Beat interval grows with the mesh.** Every node hears every beat, so a node beats every `clamp(nodes / 10, 5, 60)` seconds: about 10 incoming beats per second per node at any size (5s up to 50 nodes, 30s at 300). Freshness checks use each peer's own interval.
+
+`./dialtone.sh scale N [secs]` starts N nodes on this machine, each given 3 random seeds, and reports how long until every node sees all N and the traffic per node (`GET /api/net`: socket bytes from iroh's counters, gossip messages and neighbors). Measured on one Mac:
+
+| Nodes | Before | After |
+| ---: | :--- | :--- |
+| 10 | converged in 4s; 56 Mbit/s in and out per node, 2001 connections opened | converged in 7s; 60 kbit/s per node, 4.6 neighbors |
+| 30 | never converged (180s) | converged in 8s; 120 kbit/s per node |
+| 50 | — | converged in 19s; 200 kbit/s per node |
+| 100 | — | converged in 48s on one overloaded Mac |
 
 ### Devices
 
@@ -545,7 +573,8 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | `GET /api/devices` | Devices connected to this node (cameras, microphones, keyboards, ...) |
 | `POST /api/processes/blob` | Stage a program blob (or ticket) and run / stop it as a process |
 | `POST /api/processes` | Same, and `{"name": ..., "desired_state": "removed"}` stops a process and forgets it (mesh-deployed copies follow) |
-| `POST /api/probe` | Run one probe now (`GET` returns the latest); nodes probe themselves every 30s |
+| `POST /api/probe` | Run one probe now, `{"all": true}` for a full probe (`GET` returns the latest); nodes check the mesh every 30s |
+| `GET /api/net` | Traffic since boot: socket bytes in and out, connections, gossip messages, neighbors |
 
 
 ---
@@ -574,10 +603,12 @@ One script builds, tests and deploys. `cargo test` covers each capability with r
 ```bash
 ./dialtone.sh check     # lint, fmt, tests, release build, one-node test, three-node test (about 35s)
 ./dialtone.sh lint      # leak gate (no host names / NodeIds in git) and domain language
-./dialtone.sh e2e       # three real nodes on this machine: mesh, probe 5/5 with blob pulls between
-                        # them, deploy and removal across the mesh, a stopped node caught (about 30s)
-./dialtone.sh deploy    # check, build, install on every node, wait until every node passes 5/5
-                        # on the exact binary just installed
+./dialtone.sh e2e       # three real nodes on this machine: mesh, gossip probe 3/3, full probe 6/6
+                        # with blob pulls between them, deploy and removal across the mesh, a
+                        # stopped node caught (about 30s)
+./dialtone.sh scale 30  # 30 nodes on this machine: convergence time and traffic per node
+./dialtone.sh deploy    # check, build, install on every node, wait until every node's probe
+                        # passes on the exact binary just installed, then a full probe here
 ./dialtone.sh deploy --skip-check   # ... without running check first
 ./dialtone.sh fleet     # each node's latest probe in the live mesh
 ```

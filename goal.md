@@ -11,16 +11,18 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Node** | One running dialtone instance | `Node`, `node` | host, hub, site, fleet member |
 | **NodeId** | A node's public Ed25519 key (iroh's `EndpointId`) | `NodeId`, `node_id` | endpoint id, peer id |
 | **Key** | A node's private Ed25519 key, stored at `~/.dialtone/iroh-secret-key` | `Key`, `key_path` | secret key, identity key |
-| **Peer** | Any node other than this one | `peer`, `peers` | remote host, neighbour (except iroh-gossip `NeighborUp/Down`) |
+| **Peer** | Any node other than this one | `peer`, `peers` | remote host |
+| **Neighbor** | A peer this node is linked to directly in gossip (iroh-gossip's active view, 2 to 5 per node); messages reach other peers through neighbors | `neighbors`, `NBR` | neighbour, direct peer |
 | **Mesh** | All nodes in one channel | `mesh` | fleet, swarm, cluster |
 | **Channel** | A named gossip room unlocked by a secret | `Channel`, `channel` | room; *topic* only inside transport code |
 | **Secret** | A channel's password (`dt-…`) | `secret` | password, passphrase |
 | **Allowlist** | NodeIds permitted in the mesh | `allowlist` | allowed endpoint ids, ACL |
 | **Invite** | Signed, expiring, single-use join token | `Invite`, `invite` | bootstrap ticket, gossip ticket |
 | **Seed** | A peer address used to dial into the mesh | `Seed`, `seeds` | bootstrap peer |
-| **Message** | What nodes gossip on a channel, signed and encrypted: a Beat, Summary, Echo or Inventory | `Message` | frame, packet |
-| **Beat** | A node's status (stats, Rtt echoes), gossiped every 5s; a *Summary* adds the 30s rolling summary, an *Echo* answers an Rtt probe | `Beat`, `beat` | heartbeat, hb, ping, pulse |
-| **Inventory** | A node's processes, services and devices, gossiped when they change | `Inventory` | manifest, catalog |
+| **Message** | What nodes gossip on a channel, signed and encrypted: a Beat, Summary or Inventory | `Message` | frame, packet |
+| **Beat** | A node's status (stats, probe summary, neighbor Rtts), a fixed size, gossiped every 5 to 60s (the interval grows with the mesh); a *Summary* adds the 30s rolling summary | `Beat`, `beat` | heartbeat, hb, ping, pulse |
+| **Inventory** | A node's processes, services, devices and details, broadcast on the events topic when they change and fetched when a beat announces a version the node lacks | `Inventory` | manifest, catalog |
+| **Fetch** | Asking one node for one thing (its inventory, a fresh probe blob, its probe report, an Rtt) over `dialtone/fetch/1` | `fetch` | rpc, query |
 | **Device** | Hardware connected to a node: camera, microphone, speaker, keyboard, pointer, display, printer, storage, bluetooth, gamepad | `Device`, `devices` | peripheral, gadget |
 | **Stats** | Measured machine numbers: cpu, mem, disk, net | `Stats`, `stats` | telemetry, host resources, metrics |
 | **Rtt** | Round-trip time between two nodes, in ms | `rtt_ms` | latency |
@@ -33,12 +35,12 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Supervisor** | Keeps every process at its desired state | `Supervisor` | — |
 | **Service** | A network endpoint a process exposes to the mesh | `Service` | service advertisement |
 | **Deploy** | An order to run a program digest on nodes | `Deploy`, `deploy` | rollout, manifest apply |
-| **Probe** | The node testing itself every 30s: `MSH` peers in the mesh, `STO` store round trip, `PUL` blob pulls from every peer, `BEAT` beats both ways, `PRC` probe program running | `Probe`, `probe` | e2e tick, test tick, capability tick |
+| **Probe** | The node testing itself: every 30s the gossip checks `MSH` peers in the mesh, `NBR` enough neighbors, `BEAT` beats both ways; a full probe (on request) adds `STO` store round trip, `PUL` blob pulls from sampled peers, `PRC` probe program running | `Probe`, `probe` | e2e tick, test tick, capability tick |
 | **Record** | A stored event, alert, log line or KV entry | `Event`, `Alert`, `Log`, `Kv` | evidence |
 | **Daemon** | The OS login service (launchd / systemd / Scheduled Task) that starts the node | `daemon` | — |
 | **HUD** | The node's local web UI | `hud` | dashboard, index page |
 | **API** | The node's local HTTP control surface on `127.0.0.1:8788` | `api` | control plane routes |
-| **Actor** | One task of the running node: Mesh, Stats, Supervisor, Devices, Links, Allowlist, Deploy | `actors.rs` | worker, loop |
+| **Actor** | One task of the running node: Mesh, Stats, Supervisor, Devices, Links, Allowlist, Probe, Deploy | `actors.rs` | worker, loop |
 
 ### Code layout follows the words
 
@@ -55,6 +57,8 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | `api.rs` / `hud.rs` | API routes and node state / HUD page (was `http.rs`) |
 | `actors.rs` | The running node's actors and the channels between them |
 | `devices.rs` | Device listing per OS (`system_profiler`, `Get-PnpDevice`, `/sys`) |
+| `fetch.rs` | Fetch: the `dialtone/fetch/1` request–answer protocol |
+| `probe.rs` | Probe checks and full probes |
 | `hud/` | The HUD's static files and vendored three.js / h3-js |
 
 ### Commands and routes use the words
@@ -65,45 +69,55 @@ and config field names) were accepted for a while after the rename and were remo
 
 ## Current Work
 
-1. **Next — candidates from the target architecture:** an explicit signed `Deploy` message instead of
-   inventory-driven auto-deploy; let iroh's address lookup find peers instead of gossiping all-peer seed lists and
-   re-joining every 5s; Rtt from iroh connection paths instead of broadcast echoes; the API reading `watch`
-   snapshots instead of locking node state.
-2. **Done — 2026-10-25: One script.** `./dialtone.sh check | lint | e2e | deploy | fleet` replaced `ci.sh`, `e2e.sh`,
+1. **Next — candidates:** Phase B of scaling: peer scoring (GossipSub's), Scuttlebutt-style digests so a node
+   that rejoins catches up without fetching every inventory, the HUD fetching a node's details only when it is
+   focused, and a scale test that runs nodes on several machines; an explicit signed `Deploy` message instead of
+   inventory-driven auto-deploy; the API reading `watch` snapshots instead of locking node state.
+2. **Done — 2026-10-25: Gossip that scales (Phase A, after libp2p GossipSub).** Each node keeps 2 to 5 neighbors
+   and joins three random known peers only when it has fewer than two, instead of joining every known peer every
+   beat. Beats are a fixed ~1.2 KB (binary envelope v5, no seed lists, no per-peer probe results, no details); they
+   announce the node's inventory version, and inventories go on a separate events topic when they change or are
+   fetched on demand over `dialtone/fetch/1`. Rtt echoes broadcast to the whole mesh were replaced by timing a
+   request to each neighbor. The beat interval grows with the mesh (`clamp(nodes / 10, 5, 60)` s). The default
+   probe checks gossip only (`MSH` `NBR` `BEAT`); `dialtone probe --all` adds the store, pulls from 3 sampled
+   peers and the probe program. `./dialtone.sh scale N` measures it: 10 local nodes went from 56 Mbit/s per node
+   (2001 connections opened) to 60 kbit/s; 30 nodes, which never converged, converge in 8s at 120 kbit/s; 50 in 19s
+   at 200 kbit/s.
+3. **Done — 2026-10-25: One script.** `./dialtone.sh check | lint | e2e | deploy | fleet` replaced `ci.sh`, `e2e.sh`,
    `domain-lint.sh` and the local fleet deploy / test scripts. Fleet hosts live in the uncommitted `fleet.local.env`;
-   `deploy` ends by waiting until every node's probe passes 5/5 on the new build.
-3. **Done — 2026-10-25: Self-testing mesh and removals.** Every node runs a Probe every 30s against the live mesh:
+   `deploy` ends by waiting until every node's probe passes on the new build.
+4. **Done — 2026-10-25: Self-testing mesh and removals.** Every node runs a Probe every 30s against the live mesh:
    it writes a fresh blob, pulls every peer's latest probe blob over QUIC (SHA-256 verified), checks beats both ways,
    mesh membership and the probe program; results travel in beats and show in the HUD. It immediately found that
    the downloader's 1s connect timeout broke pulls over relayed / high-Rtt paths (now 10s) and that mesh-deployed
    programs could not be removed (copies now follow their origin). Removed: the old-name compatibility layer,
    the fake A/B slot and KV checks, the Rust node placement the HUD duplicated. Also fixed: `dialtone hud` next to
    a running node rewrote its config, hung on the store lock and could reap its processes.
-4. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
+5. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
    (`dist` profile keeps it for tagged releases): a one-file change rebuilds in ~1.5s instead of ~52s, `check` and
    fleet deploys reuse that build. Removed the in-process `self-test` command (`run_self_test`, the MemStore blob
    transfer and the gossip fixture in production code), which duplicated `cargo test`; GitHub CI no longer builds a
    second LTO binary just to run it, and `cargo test` builds one test binary instead of three.
-5. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
+6. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
    speakers, keyboards, pointers, displays, printers, storage and Bluetooth devices (no serials or IDs); they
    travel in the Inventory, appear in `GET /api/devices` and `/api/mesh`, and the HUD lists the focused node's
    devices with a 7th tour step, `DEV`.
-6. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
+7. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
    vendored three.js 0.179.1 and h3-js 4.4.0 (no CDN). The API parses requests with `httparse` and rejects
    `Transfer-Encoding`, ambiguous `Content-Length` and oversize heads. One persistent iroh-blobs `FsStore` replaces
    the SHA-256 file tree and the in-memory store: blobs are named by `sha256/<hex>` tags, GC removes untagged data,
    the node's one downloader pulls and SHA-256-checks peers' blobs, and old-layout blobs are imported at start.
    `run_node` boots the node and starts six actors (`actors.rs`: Mesh, Stats, Supervisor, Links, Allowlist,
-   Deploy) stopped by one `CancellationToken`. Gossip carries a typed `Message` (envelope v4: Beat, Summary, Echo,
-   Inventory); processes and services travel only in inventories, sent on change.
-7. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
+   Deploy) stopped by one `CancellationToken`. Gossip carries a typed `Message` (envelope v4 then: Beat, Summary,
+   Echo, Inventory); processes and services travel only in inventories, sent on change.
+8. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
    seeded node state (`dialtone hud` now serves live state); the deploy-plan, build-cache, build-decision, manifest,
    proof-validation, alert-ack, tiered-fetch, process-intent, install.sh, catalog, command-journal / rtcore UDP,
    cursor-job, key-lease, service-ref, systemd drop-in and peer-cache code; 22 API routes no caller used, including
    the one-frame `/ws` stub; the hand-written SHA-1 (now unneeded) and hex / base64 codecs (now the `hex` and
    `base64` crates, same accepted inputs). The self-test exercises only real behaviour. The HUD's non-working
    Init / Invite / Join actions became a panel of the CLI commands (the page carries no API token by design).
-8. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
+9. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
    **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)
@@ -112,9 +126,9 @@ and config field names) were accepted for a while after the rename and were remo
 |---|---------|--------------|----------------|
 | F1 | **Node & transport** | Persistent Key → NodeId, iroh endpoint presets (N0 / minimal / private mesh), relay / Pkarr DNS / DHT / mDNS policy, tailnet-address filtering, transport diagnostics | `node.rs` |
 | F2 | **Mesh membership** | Secret → Argon2id channel keys (topic, auth, enc), signed typed messages in XChaCha20-Poly1305 envelopes, deny-by-default Allowlist, signed single-use Invites, Seeds, `~/.dialtone/config.json` | `mesh.rs`, Mesh actor in `actors.rs` |
-| F3 | **Beats, stats & Rtt** | 5s beats / 30s summaries, real cpu / mem / disk / net stats on macOS, Linux and Windows, spread + thrashing detection, echo Rtt → mesh Rtt matrix, public-IP location (ipinfo); the HUD places the rest | `stats.rs`, `mesh.rs` |
+| F3 | **Beats, stats & Rtt** | Fixed-size beats every 5 to 60s (growing with the mesh) and summaries every sixth, real cpu / mem / disk / net stats on macOS, Linux and Windows, spread + thrashing detection, neighbor Rtt (Links actor) → mesh Rtt matrix, public-IP location (ipinfo); the HUD places the rest | `stats.rs`, `mesh.rs` |
 | F4 | **Blob store & tickets** | iroh-blobs `FsStore` under `~/.dialtone/blobs` with `sha256/<hex>` tags and GC, `blob share` / `blob pull` tickets through the node's downloader with digest re-check, per-node `store` stats in beats | `blob.rs` |
-| F5 | **Supervisor & probe** | Stage programs from blobs, start / restart / stop / remove processes, boot-time sweep of unused staged programs, the `probe` program, and the Probe actor testing the live mesh every 30s (`MSH` `STO` `PUL` `BEAT` `PRC`) | `supervisor.rs`, `probe.rs` |
+| F5 | **Supervisor & probe** | Stage programs from blobs, start / restart / stop / remove processes, boot-time sweep of unused staged programs, the `probe` program, and the Probe actor checking the live mesh every 30s (`MSH` `NBR` `BEAT`) and running full probes on request (`STO` `PUL` `PRC`) | `supervisor.rs`, `probe.rs` |
 | F6 | **Deploy & daemon install** | Mesh deploy (copies follow their origin and are removed with it), launchd / systemd `--user` / Scheduled Task daemon install | `deploy.rs`, Deploy actor |
 | F7 | **Node runtime & API** | 5-stage boot, six actors with one shutdown token, shared node state, `httparse` API on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `actors.rs`, `api.rs` |
 | F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, focused node's device list, 5-step tour with captions (mesh, blobs and pulls, process, beats, devices), blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |

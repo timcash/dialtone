@@ -144,25 +144,38 @@ impl IrohTransportConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// How a node's endpoint is set up and reached. Empty fields are left out of the JSON: a
+/// beat carries only the advertised addresses (`Beat::for_wire`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct IrohTransportDiagnostics {
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub profile: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub endpoint_preset: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub relay_mode: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub relay_config: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub relay_urls: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub persistent_identity: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub identity_key_path: Option<String>,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub node_id: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub address_lookup_modes: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ticket_addr_modes: Vec<String>,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub exclude_tailnet: bool,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bound_non_tailnet_ipv4: Option<String>,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub advertised_relay_urls: Vec<String>,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub advertised_ip_addrs: Vec<String>,
 }
 

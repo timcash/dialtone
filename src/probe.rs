@@ -1,34 +1,40 @@
-//! Probe: the running node testing itself, every `PROBE_INTERVAL_SECS`.
+//! Probe: the running node testing itself.
 //!
-//! Each run does real work against the live mesh and reports five checks:
+//! Every `PROBE_INTERVAL_SECS` the node checks the gossip mesh, which costs no traffic of
+//! its own (it reads what gossip already brought):
 //!
 //! - `MSH`  every allowlisted peer is in the mesh;
+//! - `NBR`  the node has at least two gossip neighbors (one in a two-node mesh);
+//! - `BEAT` every peer's beats are fresh, and every peer hears as many nodes as this one.
+//!
+//! A full probe (`dialtone probe --all`, `POST /api/probe {"all": true}`) also tests the
+//! node's other capabilities, which move data:
+//!
 //! - `STO`  a fresh blob is written to the store and read back intact;
-//! - `PUL`  every peer's latest probe blob is pulled over QUIC and its SHA-256 verified;
-//! - `BEAT` every peer's beats are fresh, and every peer hears this node's beats;
+//! - `PUL`  up to `PULL_SAMPLE` peers each write a fresh blob on request (`fetch.rs`), and
+//!   it is pulled over QUIC and its SHA-256 verified;
 //! - `PRC`  the probe program, staged from the store, is running under the supervisor.
 //!
-//! The report travels in the node's beats, so every HUD shows every node's results and peers
-//! learn the ticket of the blob to pull next. Probe blobs are forgotten once they are two runs
-//! old (own) or verified (pulled), so the store does not grow.
+//! A compact report travels in the node's beats, so every HUD shows every node's results.
+//! Probe blobs are forgotten once verified (pulled) or a few runs old (own), so the store
+//! does not grow.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::api::NodeState;
 use crate::blob::{Blobs, Store};
-use crate::mesh::{
-    now_unix, ProbeBeat, ProbeCheck, ProbePull, ProbeReport, BEAT_INTERVAL_SECS,
-    DEFAULT_PEER_TTL_SECS,
-};
+use crate::mesh::{now_unix, ProbeBeat, ProbeCheck, ProbePull, ProbeReport, DEFAULT_PEER_TTL_SECS};
 use crate::service::ProcessSpec;
 
-/// How often a running node probes itself.
+/// How often a running node probes the gossip mesh.
 pub const PROBE_INTERVAL_SECS: u64 = 30;
-/// A peer whose latest beat is older than this fails `BEAT`.
-pub const BEAT_FRESH_SECS: u64 = 3 * BEAT_INTERVAL_SECS;
-/// Own probe blobs kept for peers to pull (this run's and the previous one).
-const OWN_BLOBS_KEPT: usize = 2;
+/// How many peers a full probe pulls a blob from.
+pub const PULL_SAMPLE: usize = 3;
+/// Own probe blobs kept for peers to pull; peers ask for them at any time.
+const OWN_BLOBS_KEPT: usize = 16;
+/// The most peers a check's detail names.
+const NAMED_MAX: usize = 5;
 
 /// A peer as the probe sees it, taken from the node state.
 #[derive(Clone, Debug)]
@@ -36,9 +42,12 @@ pub struct PeerView {
     pub node: String,
     pub node_id: String,
     pub age_secs: u64,
-    pub hears_us: bool,
-    /// The peer's latest probe blob, if it has published one.
-    pub blob_ticket: Option<String>,
+    /// The peer's beat is fresh up to this age (three of its beat intervals).
+    pub fresh_secs: u64,
+    /// How many other nodes the peer hears, from its latest beat.
+    pub heard: u32,
+    /// For a full probe: the ticket of a blob the peer just wrote, or why there is none.
+    pub blob_ticket: Option<Result<String, String>>,
 }
 
 /// Everything a probe run needs, gathered under the node-state lock; the run itself does
@@ -49,6 +58,10 @@ pub struct ProbeInputs {
     pub node: String,
     pub node_id: String,
     pub cycle: u64,
+    /// Also test the store, pulls and programs.
+    pub all: bool,
+    /// Gossip neighbors on the beats topic.
+    pub neighbors: usize,
     pub blobs: Blobs,
     pub store: Option<Store>,
     pub peers: Vec<PeerView>,
@@ -58,12 +71,40 @@ pub struct ProbeInputs {
     pub expired_blobs: Vec<String>,
 }
 
-/// Run one probe against the live node: gather, test without the lock, record.
-pub fn run_probe_now(state: &Arc<Mutex<NodeState>>) -> Result<ProbeReport, String> {
-    let inputs = state
+/// A request to the Probe actor, answered on `reply`.
+#[derive(Debug)]
+pub struct ProbeRequest {
+    pub all: bool,
+    pub reply: std::sync::mpsc::SyncSender<Result<ProbeReport, String>>,
+}
+
+/// Ask the Probe actor for a run and wait for its report (from a blocking thread).
+pub fn request_probe(
+    tx: &tokio::sync::mpsc::UnboundedSender<ProbeRequest>,
+    all: bool,
+) -> Result<ProbeReport, String> {
+    let (reply, answer) = std::sync::mpsc::sync_channel(1);
+    tx.send(ProbeRequest { all, reply })
+        .map_err(|_| "the probe actor has stopped".to_string())?;
+    answer
+        .recv_timeout(Duration::from_secs(110))
+        .map_err(|_| "the probe did not finish within 110s".to_string())?
+}
+
+/// Run one probe against the live node: gather, test without the lock, record. `tickets`
+/// maps a peer's NodeId to the blob it offered for `PUL` (full probes only).
+pub fn run_probe_now(
+    state: &Arc<Mutex<NodeState>>,
+    all: bool,
+    tickets: std::collections::HashMap<String, Result<String, String>>,
+) -> Result<ProbeReport, String> {
+    let mut inputs = state
         .lock()
         .map_err(|_| "state poisoned".to_string())?
-        .probe_inputs();
+        .probe_inputs(all);
+    for peer in &mut inputs.peers {
+        peer.blob_ticket = tickets.get(&peer.node_id).cloned();
+    }
     let report = run(inputs);
     state
         .lock()
@@ -104,12 +145,89 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
                 listed.len()
             )
         } else {
-            format!("missing {}", missing.join(", "))
+            format!("missing {}", name_some(&missing))
         },
         ms: None,
     });
 
-    // STO: write a blob nobody has seen before, read it back, offer it to peers.
+    // NBR: enough gossip neighbors that one lost link does not cut the node off.
+    let live: Vec<&PeerView> = inputs
+        .peers
+        .iter()
+        .filter(|p| p.age_secs <= p.fresh_secs)
+        .collect();
+    let needed = live.len().min(2);
+    checks.push(ProbeCheck {
+        code: "NBR".to_string(),
+        ok: inputs.neighbors >= needed,
+        detail: format!("{} gossip neighbor(s), {needed} needed", inputs.neighbors),
+        ms: None,
+    });
+
+    // BEAT: beats arrive from every peer, and every peer hears the whole mesh.
+    let mesh_size = live.len() + 1;
+    let beats: Vec<ProbeBeat> = inputs
+        .peers
+        .iter()
+        .map(|p| {
+            let hears_all = p.heard as usize + 1 >= mesh_size;
+            ProbeBeat {
+                peer: p.node.clone(),
+                age_secs: p.age_secs,
+                hears_all,
+                ok: p.age_secs <= p.fresh_secs && hears_all,
+            }
+        })
+        .collect();
+    let fresh = beats.iter().filter(|b| b.ok).count();
+    let bad: Vec<String> = inputs
+        .peers
+        .iter()
+        .zip(&beats)
+        .filter(|(_, b)| !b.ok)
+        .map(|(p, b)| {
+            if p.age_secs > p.fresh_secs {
+                format!("{} silent {}s", b.peer, b.age_secs)
+            } else {
+                format!("{} hears {}/{}", b.peer, p.heard, mesh_size - 1)
+            }
+        })
+        .collect();
+    checks.push(ProbeCheck {
+        code: "BEAT".to_string(),
+        ok: fresh == beats.len(),
+        detail: if beats.is_empty() {
+            "no peers yet".to_string()
+        } else if bad.is_empty() {
+            format!("{fresh}/{} peers beating, each hears all", beats.len())
+        } else {
+            name_some(&bad)
+        },
+        ms: None,
+    });
+
+    let mut report = ProbeReport {
+        build: inputs.build.clone(),
+        cycle: inputs.cycle,
+        updated_at_unix: now_unix(),
+        beats,
+        ..Default::default()
+    };
+    if inputs.all {
+        full_checks(&inputs, &mut checks, &mut report);
+    }
+    for digest in &inputs.expired_blobs {
+        let _ = inputs.blobs.forget_blocking(digest);
+    }
+    report.passed_count = checks.iter().filter(|c| c.ok).count() as u8;
+    report.total_count = checks.len() as u8;
+    report.checks = checks;
+    report
+}
+
+/// STO, PUL and PRC: the store, pulls from sampled peers and the probe program.
+fn full_checks(inputs: &ProbeInputs, checks: &mut Vec<ProbeCheck>, report: &mut ProbeReport) {
+    // STO: write a blob nobody has seen before and read it back.
     let payload = format!(
         "dialtone probe blob from {} (cycle {}, {} ms)",
         inputs.node,
@@ -117,65 +235,51 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
         now_unix_ms()
     );
     let started = Instant::now();
-    let stored = match &inputs.store {
-        Some(store) => store
-            .share_blob(payload.as_bytes(), None)
-            .map(|r| (r.digest, r.ticket_uri)),
-        None => inputs
-            .blobs
-            .put_blocking(payload.as_bytes(), None)
-            .map(|d| (d, String::new())),
-    }
-    .and_then(|(digest, ticket)| {
-        let back = inputs.blobs.get_blocking(&digest)?;
-        if back == payload.as_bytes() {
-            Ok((digest, ticket))
-        } else {
-            Err("read back different bytes".to_string())
-        }
-    });
+    let stored = inputs
+        .blobs
+        .put_blocking(payload.as_bytes(), None)
+        .and_then(|digest| {
+            let back = inputs.blobs.get_blocking(&digest)?;
+            if back == payload.as_bytes() {
+                Ok(digest)
+            } else {
+                Err("read back different bytes".to_string())
+            }
+        });
     let sto_ms = ms_since(started);
-    let (blob_digest, blob_ticket) = match &stored {
-        Ok((digest, ticket)) => (digest.clone(), ticket.clone()),
-        Err(_) => (String::new(), String::new()),
-    };
+    if let Ok(digest) = &stored {
+        report.blob_digest = digest.clone();
+    }
     checks.push(ProbeCheck {
         code: "STO".to_string(),
         ok: stored.is_ok(),
         detail: match &stored {
-            Ok((digest, _)) => format!("wrote and read back {}", short(digest)),
+            Ok(digest) => format!("wrote and read back {}", short(digest)),
             Err(e) => e.clone(),
         },
         ms: Some(sto_ms),
     });
 
-    // PUL: download every peer's latest probe blob over QUIC; the pull checks its SHA-256.
-    let mut pulls = Vec::new();
-    let mut already_pulled = 0;
+    // PUL: download each sampled peer's fresh blob over QUIC; the pull checks its SHA-256.
     for peer in &inputs.peers {
-        let (Some(ticket), Some(store)) = (&peer.blob_ticket, &inputs.store) else {
+        let Some(offered) = &peer.blob_ticket else {
             continue;
         };
-        // A ticket already pulled in an earlier run would be served from local data, so it
-        // proves nothing about the network; wait for the peer's next blob instead.
-        let already_here = crate::blob::parse_blob_ticket_uri(ticket)
-            .map(|(t, _)| inputs.blobs.has_data_blocking(t.hash()))
-            .unwrap_or(false);
-        if already_here {
-            already_pulled += 1;
-            continue;
-        }
         let started = Instant::now();
-        let result = store.pull_blob(ticket, true);
+        let result = match (offered, &inputs.store) {
+            (Ok(ticket), Some(store)) => store.pull_blob(ticket, true),
+            (Ok(_), None) => Err("no store".to_string()),
+            (Err(e), _) => Err(e.clone()),
+        };
         let ms = ms_since(started);
-        pulls.push(match result {
-            Ok(report) => {
-                let _ = inputs.blobs.forget_blocking(&report.digest);
+        report.pulls.push(match result {
+            Ok(pulled) => {
+                let _ = inputs.blobs.forget_blocking(&pulled.digest);
                 ProbePull {
                     peer: peer.node.clone(),
                     ok: true,
                     ms,
-                    bytes: report.bytes,
+                    bytes: pulled.bytes,
                     error: String::new(),
                 }
             }
@@ -188,66 +292,25 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
             },
         });
     }
+    let pulls = &report.pulls;
     let pulled = pulls.iter().filter(|p| p.ok).count();
+    let failed: Vec<String> = pulls
+        .iter()
+        .filter(|p| !p.ok)
+        .map(|p| p.peer.clone())
+        .collect();
     checks.push(ProbeCheck {
         code: "PUL".to_string(),
-        ok: pulled == pulls.len(),
-        detail: if pulls.is_empty() && already_pulled > 0 {
-            format!("no new blob from {already_pulled} peer(s) since the last run")
-        } else if pulls.is_empty() {
-            "no peer blobs to pull yet".to_string()
+        ok: failed.is_empty(),
+        detail: if pulls.is_empty() {
+            "no peers to pull from".to_string()
+        } else if failed.is_empty() {
+            format!("pulled {pulled}/{} sampled peer blobs", pulls.len())
         } else {
-            let failed: Vec<&str> = pulls
-                .iter()
-                .filter(|p| !p.ok)
-                .map(|p| p.peer.as_str())
-                .collect();
-            if failed.is_empty() {
-                format!("pulled {pulled}/{} peer blobs", pulls.len())
-            } else {
-                format!("pull failed from {}", failed.join(", "))
-            }
+            format!("pull failed from {}", name_some(&failed))
         },
         ms: (!pulls.is_empty())
             .then(|| pulls.iter().map(|p| p.ms).sum::<f64>() / pulls.len() as f64),
-    });
-
-    // BEAT: beats arrive from every peer, and every peer hears ours.
-    let beats: Vec<ProbeBeat> = inputs
-        .peers
-        .iter()
-        .map(|p| ProbeBeat {
-            peer: p.node.clone(),
-            age_secs: p.age_secs,
-            hears_us: p.hears_us,
-            ok: p.age_secs <= BEAT_FRESH_SECS && p.hears_us,
-        })
-        .collect();
-    let fresh = beats.iter().filter(|b| b.ok).count();
-    checks.push(ProbeCheck {
-        code: "BEAT".to_string(),
-        ok: fresh == beats.len(),
-        detail: if beats.is_empty() {
-            "no peers yet".to_string()
-        } else {
-            let bad: Vec<String> = beats
-                .iter()
-                .filter(|b| !b.ok)
-                .map(|b| {
-                    if b.age_secs > BEAT_FRESH_SECS {
-                        format!("{} silent {}s", b.peer, b.age_secs)
-                    } else {
-                        format!("{} does not hear us", b.peer)
-                    }
-                })
-                .collect();
-            if bad.is_empty() {
-                format!("{fresh}/{} peers beating both ways", beats.len())
-            } else {
-                bad.join(", ")
-            }
-        },
-        ms: None,
     });
 
     // PRC: the probe program, staged from the store, runs under the supervisor.
@@ -268,33 +331,31 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
         },
         ms: None,
     });
-
-    for digest in &inputs.expired_blobs {
-        let _ = inputs.blobs.forget_blocking(digest);
+    if let Some(p) = program {
+        report.program_name = p.name.clone();
+        report.program_digest = p.digest.clone();
+        report.pid = p.pid;
+        report.staged_path = p.path.clone();
     }
+}
 
-    let passed_count = checks.iter().filter(|c| c.ok).count() as u8;
-    ProbeReport {
-        build: inputs.build.clone(),
-        cycle: inputs.cycle,
-        updated_at_unix: now_unix(),
-        passed_count,
-        total_count: checks.len() as u8,
-        checks,
-        blob_digest,
-        blob_ticket,
-        pulls,
-        beats,
-        program_name: program.map(|p| p.name.clone()).unwrap_or_default(),
-        program_digest: program.map(|p| p.digest.clone()).unwrap_or_default(),
-        pid: program.and_then(|p| p.pid),
-        staged_path: program.map(|p| p.path.clone()).unwrap_or_default(),
+/// The first few names, then how many more.
+fn name_some(names: &[String]) -> String {
+    let mut text = names
+        .iter()
+        .take(NAMED_MAX)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if names.len() > NAMED_MAX {
+        text.push_str(&format!(" and {} more", names.len() - NAMED_MAX));
     }
+    text
 }
 
 /// Own probe blobs past `OWN_BLOBS_KEPT`, oldest first, given the newest-last history.
 pub fn expired(history: &[String]) -> Vec<String> {
-    history[..history.len().saturating_sub(OWN_BLOBS_KEPT - 1)].to_vec()
+    history[..history.len().saturating_sub(OWN_BLOBS_KEPT)].to_vec()
 }
 
 fn now_unix_ms() -> u128 {
@@ -352,9 +413,67 @@ mod tests {
         }
     }
 
-    /// Two live nodes: each writes its probe blob, the other pulls it over QUIC.
+    fn peer(node: &str, node_id: &str, age_secs: u64, heard: u32) -> PeerView {
+        PeerView {
+            node: node.to_string(),
+            node_id: node_id.to_string(),
+            age_secs,
+            fresh_secs: 15,
+            heard,
+            blob_ticket: None,
+        }
+    }
+
+    fn inputs(blobs: &Blobs, store: Option<Store>, peers: Vec<PeerView>) -> ProbeInputs {
+        ProbeInputs {
+            build: String::new(),
+            node: "node-a".to_string(),
+            node_id: "a".to_string(),
+            cycle: 7,
+            all: false,
+            neighbors: 2,
+            blobs: blobs.clone(),
+            store,
+            allowlist: peers.iter().map(|p| p.node_id.clone()).collect(),
+            peers,
+            probe_program: Some(running_probe_program()),
+            expired_blobs: Vec::new(),
+        }
+    }
+
+    /// The default probe checks gossip only: membership, neighbors and beats both ways.
     #[test]
-    fn probe_pulls_a_peers_blob_and_checks_beats_both_ways() {
+    fn gossip_probe_checks_membership_neighbors_and_beats() {
+        let (dir, blobs) = temp_blobs("gossip");
+        let healthy = vec![peer("node-b", "b", 2, 2), peer("node-c", "c", 4, 2)];
+        let report = run(inputs(&blobs, None, healthy.clone()));
+        assert_eq!(report.passed_count, 3, "{:#?}", report.checks);
+        assert_eq!(report.total_count, 3);
+        assert!(report.check("STO").is_none());
+
+        // c is silent and b hears nobody; a has no neighbors; d is missing.
+        let mut sick = inputs(
+            &blobs,
+            None,
+            vec![peer("node-b", "b", 2, 0), peer("node-c", "c", 60, 2)],
+        );
+        sick.neighbors = 0;
+        sick.allowlist.push("d".repeat(64));
+        let report = run(sick);
+        for code in ["MSH", "NBR", "BEAT"] {
+            assert_eq!(report.check(code).map(|c| c.ok), Some(false), "{code}");
+        }
+        let beat = report.check("BEAT").unwrap();
+        assert!(beat.detail.contains("node-b hears 0/1"), "{}", beat.detail);
+        assert!(beat.detail.contains("node-c silent 60s"), "{}", beat.detail);
+
+        blobs.close_blocking();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A full probe: node B writes a fresh blob on request, node A pulls it over QUIC.
+    #[test]
+    fn full_probe_pulls_a_fresh_blob_from_a_peer() {
         let (dir_a, blobs_a) = temp_blobs("a");
         let (dir_b, blobs_b) = temp_blobs("b");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -373,74 +492,36 @@ mod tests {
             (store_a, store_b, router_b, id_b)
         });
 
-        // Node B's probe publishes a blob ticket.
-        let report_b = run(ProbeInputs {
-            build: String::new(),
-            node: "node-b".to_string(),
-            node_id: id_b.clone(),
-            cycle: 1,
-            blobs: blobs_b.clone(),
-            store: Some(store_b),
-            peers: Vec::new(),
-            allowlist: Vec::new(),
-            probe_program: Some(running_probe_program()),
-            expired_blobs: Vec::new(),
-        });
-        assert_eq!(report_b.check("STO").map(|c| c.ok), Some(true));
-        assert!(report_b.blob_ticket.starts_with("iroh-blobs://ticket/"));
-
-        // Node A pulls it, sees B's beats, and B hears A.
-        let peer_b = PeerView {
-            node: "node-b".to_string(),
-            node_id: id_b.clone(),
-            age_secs: 2,
-            hears_us: true,
-            blob_ticket: Some(report_b.blob_ticket.clone()),
-        };
-        let report_a = run(ProbeInputs {
-            build: String::new(),
-            node: "node-a".to_string(),
-            node_id: "a".to_string(),
-            cycle: 7,
-            blobs: blobs_a.clone(),
-            store: Some(store_a.clone()),
-            peers: vec![peer_b.clone()],
-            allowlist: vec![id_b.clone()],
-            probe_program: Some(running_probe_program()),
-            expired_blobs: Vec::new(),
-        });
-        assert_eq!(report_a.passed_count, 5, "{:#?}", report_a.checks);
-        assert_eq!(report_a.total_count, 5);
-        assert!(report_a.pulls[0].ok && report_a.pulls[0].bytes > 0);
+        // What `fetch::probe_blob` asks node B to do.
+        let offered = store_b.share_blob(b"probe blob from node-b", None).unwrap();
+        let mut b = peer("node-b", &id_b, 2, 1);
+        b.blob_ticket = Some(Ok(offered.ticket_uri.clone()));
+        let mut full = inputs(&blobs_a, Some(store_a.clone()), vec![b.clone()]);
+        full.all = true;
+        let report = run(full);
+        assert_eq!(report.passed_count, 6, "{:#?}", report.checks);
+        assert_eq!(report.total_count, 6);
+        assert!(report.pulls[0].ok && report.pulls[0].bytes > 0);
         // The pulled blob was verified, then forgotten: probes do not fill the store.
-        assert!(!blobs_a.has_blocking(&report_b.blob_digest));
-        assert!(blobs_a.has_blocking(&report_a.blob_digest));
+        assert!(!blobs_a.has_blocking(&offered.digest));
+        assert!(blobs_a.has_blocking(&report.blob_digest));
 
-        // A silent peer that does not hear us, a bad ticket and a missing allowlisted node
-        // fail BEAT, PUL and MSH; an expired own blob is forgotten.
-        let silent = PeerView {
-            age_secs: 120,
-            hears_us: false,
-            blob_ticket: Some(report_b.blob_ticket.replace("sha256:", "sha256:0")),
-            ..peer_b
-        };
-        let report_fail = run(ProbeInputs {
-            build: String::new(),
-            node: "node-a".to_string(),
-            node_id: "a".to_string(),
-            cycle: 8,
-            blobs: blobs_a.clone(),
-            store: Some(store_a),
-            peers: vec![silent],
-            allowlist: vec![id_b, "c".repeat(64)],
-            probe_program: None,
-            expired_blobs: vec![report_a.blob_digest.clone()],
-        });
-        for code in ["MSH", "PUL", "BEAT", "PRC"] {
+        // A peer that could not offer a blob, or a bad ticket, fails PUL; no program fails PRC.
+        let mut refused = b.clone();
+        refused.blob_ticket = Some(Err("no store".to_string()));
+        let mut bad = b;
+        bad.node = "node-c".to_string();
+        bad.blob_ticket = Some(Ok(offered.ticket_uri.replace("sha256:", "sha256:0")));
+        let mut failing = inputs(&blobs_a, Some(store_a), vec![refused, bad]);
+        failing.all = true;
+        failing.probe_program = None;
+        failing.expired_blobs = vec![report.blob_digest.clone()];
+        let report_fail = run(failing);
+        for code in ["PUL", "PRC"] {
             assert_eq!(report_fail.check(code).map(|c| c.ok), Some(false), "{code}");
         }
         assert_eq!(report_fail.check("STO").map(|c| c.ok), Some(true));
-        assert!(!blobs_a.has_blocking(&report_a.blob_digest));
+        assert!(!blobs_a.has_blocking(&report.blob_digest));
 
         rt.block_on(async {
             let _ = router_b.shutdown().await;
@@ -455,7 +536,10 @@ mod tests {
     fn own_probe_blobs_older_than_the_previous_run_expire() {
         let h = |n: usize| (0..n).map(|i| i.to_string()).collect::<Vec<_>>();
         assert!(expired(&h(0)).is_empty());
-        assert!(expired(&h(1)).is_empty());
-        assert_eq!(expired(&h(3)), vec!["0".to_string(), "1".to_string()]);
+        assert!(expired(&h(OWN_BLOBS_KEPT)).is_empty());
+        assert_eq!(
+            expired(&h(OWN_BLOBS_KEPT + 2)),
+            vec!["0".to_string(), "1".to_string()]
+        );
     }
 }

@@ -16,12 +16,11 @@ use dialtone::deploy::{install_persistent_os_daemon, render_os_service_unit};
 use dialtone::mesh::{
     allow_peer_in_config_with_addrs, cached_local_public_ip_geo, default_arch, default_config_path,
     default_os, default_seeds, default_store_dir, derive_standby_topic_id,
-    detect_default_node_name, is_allowed_peer_in_list, load_mesh_config, monotonic_now_ms,
-    new_invite, new_secret, node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
-    parse_duration_secs, redeem_invite, revoke_peer_in_config, save_mesh_config,
-    spawn_background_public_ip_geo_probe, validate_secret, Beat, ChannelKeys, LiveAllowlist,
-    MeshControlCommand, PeerRttEcho, SeedList, StoreStats, BEAT_INTERVAL_SECS, BEAT_SCHEMA,
-    DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_INTERVAL_SECS,
+    detect_default_node_name, is_allowed_peer_in_list, load_mesh_config, new_invite, new_secret,
+    node_capabilities_for, node_role_for, normalize_channel_name, now_unix, parse_duration_secs,
+    redeem_invite, revoke_peer_in_config, save_mesh_config, spawn_background_public_ip_geo_probe,
+    validate_secret, Beat, ChannelKeys, LiveAllowlist, MeshControlCommand, SeedList, StoreStats,
+    BEAT_INTERVAL_SECS, BEAT_SCHEMA, DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
@@ -49,7 +48,8 @@ fn print_usage() {
          \x20 blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket\n\
          \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use invite\n\
          \x20 daemon [install|status]  Install or inspect the daemon that starts the node at login\n\
-         \x20 probe                    Run one probe now (MSH, STO, PUL, BEAT, PRC; nodes also probe every 30s)\n\
+         \x20 probe [--all]            Run one probe now: the gossip checks (MSH, NBR, BEAT; nodes run them\n\
+         \x20                          every 30s), and with --all the store, pulls and programs (STO, PUL, PRC)\n\
          \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
          \x20 mesh-test                Check the running node's security, mesh convergence and blob transfer\n\
          \x20 hud                      Serve the HUD and API only (no mesh)\n\
@@ -83,7 +83,8 @@ fn print_usage() {
          \x20 --relay-only             Advertise relay-only gossip tickets\n\
          \x20 --relay-url <url>        Custom Iroh relay URL (repeatable)\n\
          \x20 --os <macos|linux|windows> Target OS for service unit generation\n\
-         \x20 --once                   Run one cycle and exit"
+         \x20 --once                   Run one cycle and exit\n\
+         \x20 --all                    'dialtone probe': also test the store, pulls and programs"
     );
 }
 
@@ -109,6 +110,7 @@ struct CliOptions {
     timeout_secs: u64,
     invite_ttl_secs: u64,
     once: bool,
+    all: bool,
     os_kind: String,
     invites: Vec<String>,
     transport: IrohTransportConfig,
@@ -159,6 +161,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         timeout_secs: 15,
         invite_ttl_secs: 900,
         once: false,
+        all: false,
         os_kind: if cfg!(target_os = "macos") {
             "macos".to_string()
         } else if cfg!(target_os = "windows") {
@@ -362,6 +365,9 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "--once" => {
                 opts.once = true;
             }
+            "--all" => {
+                opts.all = true;
+            }
             "--lan" | "--local-discovery" => {
                 opts.transport.local_discovery = true;
                 opts.transport.profile = "lan_only".to_string();
@@ -418,9 +424,8 @@ fn self_beat(
         kind: "regular".to_string(),
         beat_interval_secs: BEAT_INTERVAL_SECS,
         summary_interval_secs: SUMMARY_INTERVAL_SECS,
-        sent_mono_ms: monotonic_now_ms(),
-        rtt_probe_requested: false,
-        peer_echoes: std::collections::HashMap::new(),
+        heard: 0,
+        inventory_version: 0,
         peer_rtt_ms: std::collections::BTreeMap::new(),
         summary_stats: None,
         os: default_os(),
@@ -443,29 +448,6 @@ fn self_beat(
         }),
         sent_unix_ms: 0,
     }
-}
-
-fn echoes_for_peers(
-    last_rx_from_peer: &std::collections::HashMap<String, (u64, u64)>,
-    now_mono_ms: u64,
-) -> std::collections::HashMap<String, PeerRttEcho> {
-    let mut out = std::collections::HashMap::new();
-    for (peer, &(peer_sent_mono, local_rx_mono)) in last_rx_from_peer {
-        if peer_sent_mono == 0 || now_mono_ms < local_rx_mono {
-            continue;
-        }
-        let hold_ms = now_mono_ms - local_rx_mono;
-        if hold_ms <= 60_000 {
-            out.insert(
-                peer.clone(),
-                PeerRttEcho {
-                    echoed_mono_ms: peer_sent_mono,
-                    hold_time_ms: hold_ms,
-                },
-            );
-        }
-    }
-    out
 }
 
 fn bind_local_web_listener(requested: &str, explicit: bool) -> Result<TcpListener, String> {
@@ -865,6 +847,10 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
         .accept(iroh_blobs::ALPN, blobs_proto)
+        .accept(
+            dialtone::fetch::ALPN,
+            dialtone::fetch::FetchHandler::new(shared_state.clone()),
+        )
         .spawn();
 
     if let Some(st_arc) = &shared_state {
@@ -1025,7 +1011,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         diagnostics.clone(),
     );
     initial_self_beat.kind = "summary".to_string();
-    initial_self_beat.rtt_probe_requested = true;
 
     if let Some(st_arc) = &shared_state {
         if let Ok(mut st) = st_arc.lock() {
@@ -1138,6 +1123,10 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         blobs: blobs.clone(),
         allowlist: live_allowlist.clone(),
         state: shared_state.clone(),
+        net: shared_state
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|st| st.net.clone()))
+            .unwrap_or_default(),
         cancel: cancel.clone(),
     };
     let actors = actors::spawn_all(
@@ -1153,7 +1142,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             topic_id,
             seed_ids,
             known_peer_addrs,
-            joined_peer_ids,
             print_first_beat: !serve_http,
             control_rx,
         },
@@ -1375,9 +1363,9 @@ async fn main() {
                 &opts.listen,
                 "POST",
                 "/api/probe",
-                Some(&json!({})),
+                Some(&json!({ "all": opts.all })),
                 &api_token,
-                5,
+                if opts.all { 120 } else { 5 },
             )?;
             println!("{}", serde_json::to_string_pretty(&resp).unwrap());
             Ok(())

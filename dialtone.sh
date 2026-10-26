@@ -4,6 +4,9 @@
 #   ./dialtone.sh check            lint, fmt, tests, release build, one-node test, three-node test
 #   ./dialtone.sh lint             leak gate (no host names / NodeIds in git) and domain language
 #   ./dialtone.sh e2e              three real nodes on this machine (about 30s)
+#   ./dialtone.sh scale [N] [secs] N nodes on this machine (default 20): gossip convergence and
+#                                    bytes per node over secs (default 30); fails above
+#                                    SCALE_BUDGET_KBPS (kbit/s in or out per node) when set
 #   ./dialtone.sh deploy [opts]    build, install on every node, wait for every probe to pass
 #                                    --skip-check   do not run `check` first
 #                                    --release      every node downloads the latest GitHub release (SHA-256 checked)
@@ -158,10 +161,14 @@ node_test() {
   DIALTONE_STATE_DIR="$dir" "$BIN" mesh-test --expect-peers 1 --timeout 5s --listen 127.0.0.1:18794 | grep -q '"status": "ok"'
   node_post /api/probe '{}' | python3 -c '
 import sys, json
+c = {x["code"]: x for x in json.load(sys.stdin)["probe"]["checks"]}
+assert sorted(c) == ["BEAT", "MSH", "NBR"], c'
+  node_post /api/probe '{"all":true}' | python3 -c '
+import sys, json
 p = json.load(sys.stdin)["probe"]
 c = {x["code"]: x for x in p["checks"]}
-assert sorted(c) == ["BEAT", "MSH", "PRC", "PUL", "STO"] and c["STO"]["ok"] and c["PRC"]["ok"], c'
-  echo "    Blobs share / pull, mesh-test, probe"
+assert sorted(c) == ["BEAT", "MSH", "NBR", "PRC", "PUL", "STO"] and c["STO"]["ok"] and c["PRC"]["ok"], c'
+  echo "    Blobs share / pull, mesh-test, probe (gossip only, then full)"
 
   local before; before=$(shasum "$dir/config.json")
   DIALTONE_STATE_DIR="$dir" "$BIN" hud --node check-hud --listen 127.0.0.1:18795 --once > /dev/null 2>&1 &
@@ -211,13 +218,18 @@ cmd_e2e() {
   for i in 0 1 2; do until_ok 60 "${names[$i]} sees 3 nodes" sees_all "$i"; done
   echo "    1. Mesh: 3 nodes see each other"
 
-  # A pull needs the peer's previous probe blob, so probe until each node passes everything.
-  probe_passes() { e2e_post "$1" /api/probe | python3 -c '
+  # The gossip probe passes on every node, then a full probe pulls a fresh blob from each peer.
+  gossip_passes() { e2e_post "$1" /api/probe | python3 -c '
 import sys, json
 p = json.load(sys.stdin)["probe"]
-sys.exit(not (p["passed_count"] == p["total_count"] == 5 and sum(x["ok"] for x in p["pulls"]) == 2))'; }
-  for i in 0 1 2; do until_ok 60 "${names[$i]} probe 5/5 with 2 pulls" probe_passes "$i"; done
-  echo "    2. Probe: 5/5 on every node, each pulled both peers' blobs over QUIC"
+sys.exit(not (p["passed_count"] == p["total_count"] == 3))'; }
+  full_passes() { e2e_post "$1" /api/probe '{"all":true}' | python3 -c '
+import sys, json
+p = json.load(sys.stdin)["probe"]
+sys.exit(not (p["passed_count"] == p["total_count"] == 6 and sum(x["ok"] for x in p["pulls"]) == 2))'; }
+  for i in 0 1 2; do until_ok 60 "${names[$i]} gossip probe 3/3" gossip_passes "$i"; done
+  for i in 0 1 2; do until_ok 60 "${names[$i]} full probe 6/6 with 2 pulls" full_passes "$i"; done
+  echo "    2. Probe: gossip checks 3/3 on every node; full probe 6/6, each pulled a fresh blob from both peers"
 
   local program
   program=$(printf ':; while true; do sleep 5; done; exit 0;\r\n@echo off\r\nREM e2e %s\r\n:loop\r\nping -n 6 127.0.0.1 >NUL\r\ngoto loop\r\n' "$root" | base64 | tr -d '\n')
@@ -238,6 +250,113 @@ beat = next(c for c in json.load(sys.stdin)["probe"]["checks"] if c["code"] == "
 sys.exit(beat["ok"] or "e2e-c" not in beat["detail"])'; }
   until_ok 45 "a's probe reports e2e-c as silent" a_sees_c_silent
     echo "    4. Failure: a's probe flagged e2e-c once it stopped"
+  cleanup
+}
+
+# -----------------------------------------------------------------------------
+# scale: many nodes on this machine, gossip only, bytes per node
+# -----------------------------------------------------------------------------
+cmd_scale() {
+  local n=${1:-20} secs=${2:-30} budget=${SCALE_BUDGET_KBPS:-0}
+  say "Scale test: $n nodes, measuring for ${secs}s"
+  [ -x "$BIN" ] || build
+  local root; root=$(mktemp -d /tmp/dialtone-scale-XXXXXX)
+  local secret="dt-Scale_Local_Mesh_Secret_2026!" i ip="127.0.0.1"
+  SCALE_PIDS=""
+  # Nodes left by a run that was killed (no EXIT trap) would hold the ports.
+  pkill -9 -f -- "--secret $secret" 2>/dev/null && sleep 1
+  CLEANUP="kill \${SCALE_PIDS:-} 2>/dev/null || true; sleep 2; kill -9 \${SCALE_PIDS:-} 2>/dev/null || true; wait 2>/dev/null || true; rm -rf '$root'"
+  name() { echo "s$1"; }
+
+  # Identities (in parallel), then each node allowlists everyone but dials only 3 seeds.
+  for i in $(seq 1 "$n"); do
+    mkdir -p "$root/$(name "$i")"
+    DIALTONE_STATE_DIR="$root/$(name "$i")" "$BIN" status --node "$(name "$i")" --private-mesh > "$root/$(name "$i").status" &
+  done
+  wait
+  for i in $(seq 1 "$n"); do
+    ip=$(python3 -c 'import sys,json; print(json.load(open(sys.argv[1]))["diagnostics"]["bound_non_tailnet_ipv4"] or "127.0.0.1")' "$root/$(name "$i").status")
+  done
+  python3 - "$root" "$n" "$ip" <<'PY'
+import json, os, random, sys
+root, n, ip = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+ids = {i: json.load(open(f"{root}/s{i}.status"))["diagnostics"]["node_id"] for i in range(1, n + 1)}
+random.seed(n)
+for i in range(1, n + 1):
+    others = [j for j in ids if j != i]
+    seeds = random.sample(others, min(3, len(others)))
+    cfg = {
+        "allowlist": [ids[j] for j in others],
+        "seeds": [{"node_id": ids[j], "relay_url": "none", "ip_addrs": [f"{ip}:{20000 + j}"]} for j in seeds],
+    }
+    with open(f"{root}/s{i}/config.json", "w") as f:
+        json.dump(cfg, f)
+PY
+  for i in $(seq 1 "$n"); do
+    DIALTONE_STATE_DIR="$root/$(name "$i")" "$BIN" up --node "$(name "$i")" --listen "127.0.0.1:$((21000 + i))" \
+      --private-mesh --quic-port "$((20000 + i))" --secret "$secret" > "$root/$(name "$i").log" 2>&1 &
+    SCALE_PIDS="$SCALE_PIDS $!"
+  done
+
+  # Convergence: every node lists every node.
+  local started; started=$(date +%s)
+  converged() {
+    local k
+    for k in $(seq 1 "$n"); do
+      curl -fsS -m 5 "http://127.0.0.1:$((21000 + k))/api/net" 2>/dev/null \
+        | python3 -c 'import sys,json; sys.exit(json.load(sys.stdin)["nodes_known"] < int(sys.argv[1]))' "$n" 2>/dev/null || return 1
+    done
+  }
+  report() {
+    local k
+    for k in $(seq 1 "$n"); do
+      printf '    s%-4s ' "$k"
+      curl -fsS -m 5 "http://127.0.0.1:$((21000 + k))/api/net" 2>/dev/null \
+        | python3 -c 'import sys,json; d=json.load(sys.stdin); print("knows", d["nodes_known"], "neighbors", d["gossip"]["neighbors"])' \
+        || echo "no answer"
+    done
+    echo "    last lines of s1's log:"; tail -n 15 "$root/s1.log" | sed 's/^/      /'
+  }
+  for _ in $(seq 1 180); do converged && break; sleep 1; done
+  converged || { report; fail "all $n nodes see each other (gave up after 180s)"; }
+  echo "    converged: every node sees all $n in $(( $(date +%s) - started ))s"
+
+  snapshot() {
+    local k
+    for k in $(seq 1 "$n"); do
+      curl -fsS -m 5 "http://127.0.0.1:$((21000 + k))/api/net" 2>/dev/null || echo '{}'
+      echo
+    done > "$1"
+  }
+  snapshot "$root/net-start.json"
+  sleep "$secs"
+  snapshot "$root/net-end.json"
+  python3 - "$root" "$secs" "$budget" <<'PY'
+import json, sys
+root, secs, budget = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
+def load(p): return [json.loads(l) for l in open(p) if l.strip()]
+start, end = load(f"{root}/net-start.json"), load(f"{root}/net-end.json")
+rows = []
+for a, b in zip(start, end):
+    if not a.get("socket") or not b.get("socket"):
+        continue
+    kin = (b["socket"]["bytes_in"] - a["socket"]["bytes_in"]) * 8 / secs / 1000
+    kout = (b["socket"]["bytes_out"] - a["socket"]["bytes_out"]) * 8 / secs / 1000
+    g0, g1 = a["gossip"], b["gossip"]
+    msgs_in = (g1["gossip_msgs_in"] - g0["gossip_msgs_in"]) / secs
+    out_n = g1["gossip_msgs_out"] - g0["gossip_msgs_out"]
+    out_b = g1["gossip_bytes_out"] - g0["gossip_bytes_out"]
+    rows.append((kin, kout, msgs_in, out_b / out_n if out_n else 0, g1["neighbors"], b["socket"]["conns_opened"]))
+avg = lambda xs: sum(xs) / len(xs)
+cols = list(zip(*rows))
+print("    per node (avg / max): in %.1f / %.1f kbit/s, out %.1f / %.1f kbit/s" % (avg(cols[0]), max(cols[0]), avg(cols[1]), max(cols[1])))
+print("    gossip: %.1f msgs/s received per node, %.0f bytes per message sent, %.1f neighbors, %.1f connections opened since boot"
+      % (avg(cols[2]), avg(cols[3]), avg(cols[4]), avg(cols[5])))
+worst = max(max(cols[0]), max(cols[1]))
+if budget and worst > budget:
+    print("    FAIL: %.1f kbit/s is over the budget of %.0f kbit/s" % (worst, budget))
+    sys.exit(1)
+PY
   cleanup
 }
 
@@ -396,13 +515,23 @@ PS
     done
   fi
 
-  say "Waiting for every node's probe to pass 5/5 on the new build (up to 150s)"
+  say "Waiting for every node's gossip probe to pass on the new build (up to 150s)"
+  local passed=""
   for _ in $(seq 1 30); do
-    fleet_report "$expect" > /tmp/dialtone-fleet.txt && { cat /tmp/dialtone-fleet.txt; say "DEPLOYED: every node passed its probe"; return 0; }
+    fleet_report "$expect" > /tmp/dialtone-fleet.txt && { passed=1; break; }
     sleep 5
   done
   cat /tmp/dialtone-fleet.txt
-  fail "not every node passed its probe within 150s (FAIL lines above)"
+  [ -n "$passed" ] || fail "not every node passed its probe within 150s (FAIL lines above)"
+  # The store, pulls (a fresh blob from each peer) and programs, from this node.
+  say "Full probe on $LOCAL_NODE"
+  "$HOME/.dialtone/bin/dialtone" probe --all | python3 -c '
+import sys, json
+p = json.load(sys.stdin)["probe"]
+for c in p["checks"]:
+    print("    %-4s %s %s" % (c["code"], "ok  " if c["ok"] else "FAIL", c.get("detail", "")))
+sys.exit(p["passed_count"] != p["total_count"])' || fail "the full probe on $LOCAL_NODE failed"
+  say "DEPLOYED: every node passed its probe"
 }
 
 # fleet_report ["node=sha256 ..."]: every node's latest probe. Succeeds when every node's
@@ -433,6 +562,7 @@ case "${1:-help}" in
   check) cmd_check ;;
   lint) cmd_lint ;;
   e2e) cmd_e2e ;;
+  scale) shift; cmd_scale "$@" ;;
   deploy) shift; cmd_deploy "$@" ;;
   fleet) cmd_fleet ;;
   help|-h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;

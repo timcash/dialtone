@@ -16,10 +16,10 @@ use crate::deploy::install_persistent_os_daemon;
 use crate::hud::render_hud;
 use crate::mesh::{
     build_mesh_rtt_matrix, cached_local_public_ip_geo, default_arch, default_config_path,
-    default_os, default_state_dir, monotonic_now_ms, node_capabilities_for, node_role_for,
-    normalize_channel_name, now_unix, prune_stale_peers, save_mesh_config, validate_secret, Beat,
-    BootStageStatus, MeshConfig, MeshControlCommand, ProbeReport, BEAT_INTERVAL_SECS,
-    DEFAULT_CHANNEL_NAME, DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
+    default_os, default_state_dir, node_capabilities_for, node_role_for, normalize_channel_name,
+    now_unix, prune_stale_peers, save_mesh_config, validate_secret, Beat, BootStageStatus,
+    MeshConfig, MeshControlCommand, ProbeReport, BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME,
+    DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
 };
 use crate::node::IrohTransportDiagnostics;
 use crate::record::{AlertRecord, EventRecord, ServiceLogRecord};
@@ -178,6 +178,19 @@ pub struct NodeState {
     /// Digests of this node's recent probe blobs, oldest first (see `probe.rs`).
     #[serde(skip)]
     pub probe_blobs: Vec<String>,
+    /// Gossip traffic counters (see `GET /api/net`).
+    #[serde(skip)]
+    pub net: Arc<crate::mesh::NetCounters>,
+    /// This node's inventory as it leaves the node (`Inventory::for_wire`), served to
+    /// fetches (`fetch.rs`). Kept by the Mesh actor.
+    #[serde(skip)]
+    pub inventory: Option<crate::mesh::Inventory>,
+    /// NodeIds of this node's gossip neighbors on the beats topic. Kept by the Mesh actor.
+    #[serde(default)]
+    pub gossip_neighbors: Vec<String>,
+    /// Asks the Probe actor for a run (`POST /api/probe`), when the node runs actors.
+    #[serde(skip)]
+    pub probe_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::probe::ProbeRequest>>,
 }
 
 impl NodeState {
@@ -421,7 +434,7 @@ impl NodeState {
     }
 
     /// Gather what a probe run needs (see `probe.rs`), keeping the probe program running.
-    pub fn probe_inputs(&mut self) -> crate::probe::ProbeInputs {
+    pub fn probe_inputs(&mut self, all: bool) -> crate::probe::ProbeInputs {
         let _ = ensure_probe_program(&self.blobs, &mut self.processes, None);
         self.reconcile_processes();
         let now = now_unix();
@@ -434,12 +447,9 @@ impl NodeState {
                 node: n.node.clone(),
                 node_id: n.node_id.clone(),
                 age_secs: now.saturating_sub(n.updated_at_unix),
-                hears_us: n.peer_rtt_ms.contains_key(&self.node),
-                blob_ticket: n
-                    .probe
-                    .as_ref()
-                    .map(|p| p.blob_ticket.clone())
-                    .filter(|t| !t.is_empty()),
+                fresh_secs: crate::mesh::beat_fresh_secs(n),
+                heard: n.heard,
+                blob_ticket: None,
             })
             .collect();
         let expired = crate::probe::expired(&self.probe_blobs);
@@ -454,6 +464,8 @@ impl NodeState {
             node: self.node.clone(),
             node_id: own_id,
             cycle: self.probe.as_ref().map(|r| r.cycle + 1).unwrap_or(1),
+            all,
+            neighbors: self.gossip_neighbors.len(),
             blobs: self.blobs.clone(),
             store: self.store.clone(),
             peers,
@@ -522,9 +534,8 @@ impl NodeState {
             kind: "summary".to_string(),
             beat_interval_secs: BEAT_INTERVAL_SECS,
             summary_interval_secs: SUMMARY_INTERVAL_SECS,
-            sent_mono_ms: monotonic_now_ms(),
-            rtt_probe_requested: true,
-            peer_echoes: HashMap::new(),
+            heard: 0,
+            inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
             sent_unix_ms: 0,
@@ -603,6 +614,10 @@ impl NodeState {
             alerts: Vec::new(),
             probe: None,
             probe_blobs: Vec::new(),
+            net: Arc::default(),
+            inventory: None,
+            gossip_neighbors: Vec::new(),
+            probe_tx: None,
         };
         st.record_event(
             "mesh.boot",
@@ -1057,6 +1072,25 @@ fn route_request(
             projected.mesh_config = masked_mesh_config(&st.mesh_config);
             write_json(&mut stream, 200, &projected)
         }
+        ("GET", "/api/net") => {
+            // Bytes on the wire (iroh's socket counters) and gossip messages, since boot.
+            let socket = st.store.as_ref().map(|s| {
+                let m = &s.endpoint.metrics().socket;
+                json!({
+                    "bytes_out": m.send_ipv4.get() + m.send_ipv6.get() + m.send_relay.get(),
+                    "bytes_in": m.recv_data_ipv4.get() + m.recv_data_ipv6.get() + m.recv_data_relay.get(),
+                    "conns_opened": m.num_conns_opened.get(),
+                    "conns_closed": m.num_conns_closed.get(),
+                })
+            });
+            let body = json!({
+                "node": st.node,
+                "nodes_known": st.nodes.len(),
+                "socket": socket,
+                "gossip": st.net.snapshot(),
+            });
+            write_json(&mut stream, 200, &body)
+        }
         ("GET", "/api/devices") => {
             let body = json!({ "node": st.node, "devices": st.devices });
             write_json(&mut stream, 200, &body)
@@ -1443,10 +1477,20 @@ fn route_request(
                     );
                 }
             }
-            // A probe pulls blobs from peers: run it without the node-state lock.
+            // `{"all": true}` adds the store, pull and program checks. A full probe pulls
+            // blobs from peers: run it in the Probe actor, without the node-state lock.
+            let all = serde_json::from_str::<Value>(body_part)
+                .ok()
+                .and_then(|v| v.get("all").and_then(|a| a.as_bool()))
+                .unwrap_or(false);
             let node = st.node.clone();
+            let probe_tx = st.probe_tx.clone();
             drop(st);
-            match crate::probe::run_probe_now(state) {
+            let result = match probe_tx {
+                Some(tx) => crate::probe::request_probe(&tx, all),
+                None => crate::probe::run_probe_now(state, all, Default::default()),
+            };
+            match result {
                 Ok(report) => write_json(
                     &mut stream,
                     200,

@@ -20,16 +20,21 @@ use crate::service::Service;
 use crate::stats::{Stats, StatsSummary};
 
 pub const BEAT_SCHEMA: &str = "dialtone.iroh.beat.v1";
-/// v4: the encrypted plaintext is a `SignedMessage` (a typed `Message` as JSON + the sender
-/// Key's Ed25519 signature). v3 carried only beats.
-pub const DIALTONE_ENVELOPE_SCHEMA_V4: &str = "dialtone.iroh.envelope.v4";
+/// v5: a binary frame, `ENVELOPE_MAGIC` + 24-byte nonce + ciphertext; the plaintext is the
+/// sender Key's 64-byte Ed25519 signature followed by the signed `Message` JSON. v4 wrapped
+/// the same in JSON with hex and base64, a third larger.
+pub const DIALTONE_ENVELOPE_SCHEMA_V5: &str = "dialtone.iroh.envelope.v5";
+const ENVELOPE_MAGIC: &[u8; 4] = b"dt5\0";
 /// Beats sent more than this far from local time (either direction) are rejected.
 pub const REPLAY_WINDOW_MS: u64 = 5 * 60 * 1000;
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
 pub const INVITE_PREFIX: &str = "dialtone-invite-v1:";
 pub const DEFAULT_CHANNEL_NAME: &str = "dialtone";
 pub const DEFAULT_PEER_TTL_SECS: u64 = 300;
+/// The shortest beat interval; larger meshes beat less often (`beat_interval_for`).
 pub const BEAT_INTERVAL_SECS: u64 = 5;
+/// The longest beat interval, reached at 600 nodes.
+pub const MAX_BEAT_INTERVAL_SECS: u64 = 60;
 pub const SUMMARY_INTERVAL_SECS: u64 = 30;
 pub const SUMMARY_EVERY_N_BEATS: u64 = SUMMARY_INTERVAL_SECS / BEAT_INTERVAL_SECS;
 
@@ -147,6 +152,16 @@ pub fn validate_secret(secret: &str) -> Result<String, String> {
     }
 
     Ok(trimmed.to_string())
+}
+
+/// The channel's events topic: inventories, broadcast when they change, kept apart from
+/// the beats topic so beats stay small and regular.
+pub fn events_topic_id(beats: TopicId) -> TopicId {
+    let mut hasher = Sha256::new();
+    hasher.update(b"dialtone.channel.events.v1:");
+    hasher.update(beats.as_bytes());
+    let digest: [u8; 32] = hasher.finalize().into();
+    TopicId::from_bytes(digest)
 }
 
 /// Derive a node-private standby `TopicId` when no channel secret has been configured yet.
@@ -864,25 +879,15 @@ pub fn monotonic_now_ms() -> u64 {
         .as_millis() as u64
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PeerRttEcho {
-    pub echoed_mono_ms: u64,
-    pub hold_time_ms: u64,
+/// Seconds between beats in a mesh of `nodes`: every node hears every beat, so the interval
+/// grows with the mesh to keep each node's incoming beats at about 10 per second.
+pub fn beat_interval_for(nodes: usize) -> u64 {
+    (nodes.div_ceil(10) as u64).clamp(BEAT_INTERVAL_SECS, MAX_BEAT_INTERVAL_SECS)
 }
 
-pub fn compute_rtt_ms_from_echo(now_mono_ms: u64, echo: &PeerRttEcho) -> Option<f64> {
-    if echo.echoed_mono_ms == 0 || now_mono_ms < echo.echoed_mono_ms {
-        return None;
-    }
-    let elapsed_ms = now_mono_ms - echo.echoed_mono_ms;
-    if elapsed_ms < echo.hold_time_ms {
-        return None;
-    }
-    let net_ms = (elapsed_ms - echo.hold_time_ms) as f64;
-    if net_ms > 5_000.0 {
-        return None;
-    }
-    Some(((net_ms.max(0.2)) * 10.0).round() / 10.0)
+/// How long a peer's beat stays fresh: three of the peer's own beat intervals.
+pub fn beat_fresh_secs(beat: &Beat) -> u64 {
+    3 * beat.beat_interval_secs.max(BEAT_INTERVAL_SECS)
 }
 
 pub fn build_mesh_rtt_matrix(nodes: &[Beat]) -> std::collections::BTreeMap<String, f64> {
@@ -1075,10 +1080,12 @@ fn default_summary_interval_secs() -> u64 {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProbeCheck {
-    /// `MSH` allowlisted peers in the mesh, `STO` local store round trip, `PUL` blobs pulled
-    /// from peers, `BEAT` beats from and to every peer, `PRC` the probe program is running.
+    /// `MSH` allowlisted peers in the mesh, `NBR` gossip neighbors, `BEAT` beats from and
+    /// to every peer; with a full probe also `STO` local store round trip, `PUL` blobs
+    /// pulled from sampled peers, `PRC` the probe program is running.
     pub code: String,
     pub ok: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ms: Option<f64>,
@@ -1102,13 +1109,13 @@ pub struct ProbePull {
 pub struct ProbeBeat {
     pub peer: String,
     pub age_secs: u64,
-    /// The peer reports an Rtt to this node, so it receives this node's beats.
-    pub hears_us: bool,
+    /// The peer hears as many nodes as this one, so it receives this node's beats.
+    pub hears_all: bool,
     pub ok: bool,
 }
 
-/// The latest probe: the node testing itself (see `probe.rs`). Gossiped in beats so every
-/// HUD shows every node's results, and so peers can pull this run's blob.
+/// The latest probe: the node testing itself (see `probe.rs`). Gossiped in beats, without
+/// the per-peer lists (`Beat::for_wire`), so every HUD shows every node's results.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProbeReport {
@@ -1120,14 +1127,20 @@ pub struct ProbeReport {
     pub passed_count: u8,
     pub total_count: u8,
     pub checks: Vec<ProbeCheck>,
-    /// This run's probe blob; peers pull it in their next run.
+    /// The blob a full probe wrote and read back.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub blob_digest: String,
-    pub blob_ticket: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub pulls: Vec<ProbePull>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub beats: Vec<ProbeBeat>,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub program_name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub program_digest: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub staged_path: String,
 }
 
@@ -1151,6 +1164,7 @@ pub struct Beat {
     pub schema: String,
     pub node: String,
     pub node_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ticket: String,
     pub counter: u64,
     pub updated_at_unix: u64,
@@ -1160,12 +1174,13 @@ pub struct Beat {
     pub beat_interval_secs: u64,
     #[serde(default = "default_summary_interval_secs")]
     pub summary_interval_secs: u64,
+    /// How many other nodes this node hears beats from (the probe's BEAT check).
     #[serde(default)]
-    pub sent_mono_ms: u64,
+    pub heard: u32,
+    /// The version of the node's inventory; a peer holding another version fetches it.
     #[serde(default)]
-    pub rtt_probe_requested: bool,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub peer_echoes: HashMap<String, PeerRttEcho>,
+    pub inventory_version: u64,
+    /// Rtt to the node's gossip neighbors, measured by the Links actor.
     #[serde(default)]
     pub peer_rtt_ms: std::collections::BTreeMap<String, f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1183,32 +1198,89 @@ pub struct Beat {
     pub os: String,
     #[serde(default = "default_arch")]
     pub arch: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub role: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub stats: Stats,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub service_endpoints: Vec<Service>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processes: Vec<crate::service::ProcessSpec>,
+    #[serde(default)]
     pub iroh_transport: IrohTransportDiagnostics,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observed_remote_addrs: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tailnet_used: bool,
     /// The node's devices, from its latest inventory (never sent in a beat).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub devices: Vec<crate::devices::Device>,
 }
 
-/// A node's inventory: the programs it runs, the services it offers and the devices
-/// connected to it. Sent when it
-/// changes, when a neighbor joins and with every summary, never in plain beats.
+impl Beat {
+    /// The fixed-size form a beat takes on the wire: nothing that grows with the mesh (seed
+    /// lists, per-peer probe results), and none of the node's details or inventory, which
+    /// travel in the `Inventory`. Peers keep those from the last inventory (`merge_beat`).
+    pub fn for_wire(&self) -> Beat {
+        let mut b = self.clone();
+        b.ticket.clear();
+        b.processes.clear();
+        b.service_endpoints.clear();
+        b.devices.clear();
+        b.role.clear();
+        b.capabilities.clear();
+        b.geo_location = None;
+        b.observed_remote_addrs.clear();
+        b.tailnet_used = false;
+        b.stats.stats_line.clear();
+        b.stats.interfaces.truncate(1);
+        b.iroh_transport = IrohTransportDiagnostics {
+            advertised_relay_urls: self.iroh_transport.advertised_relay_urls.clone(),
+            advertised_ip_addrs: self.iroh_transport.advertised_ip_addrs.clone(),
+            ..Default::default()
+        };
+        if let Some(p) = &mut b.probe {
+            // A passing check needs no explanation; a failing one keeps it.
+            for check in p.checks.iter_mut().filter(|c| c.ok) {
+                check.detail.clear();
+            }
+            p.blob_digest.clear();
+            p.pulls.clear();
+            p.beats.clear();
+            p.program_digest.clear();
+            p.staged_path.clear();
+        }
+        b
+    }
+}
+
+/// What a node says about itself that rarely changes: kept out of beats, sent in the
+/// inventory.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NodeDetails {
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo_location: Option<NodeGeoLocation>,
+    pub iroh_transport: IrohTransportDiagnostics,
+}
+
+/// A node's inventory: the programs it runs, the services it offers, the devices connected
+/// to it and its details. Broadcast on the events topic when it changes; a peer that missed
+/// it sees a new `inventory_version` in the node's beats and fetches it (`fetch.rs`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
     pub node: String,
     pub node_id: String,
+    /// Hash of the content, so it changes when the content does and survives restarts.
+    #[serde(default)]
+    pub version: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<NodeDetails>,
     #[serde(default)]
     pub processes: Vec<crate::service::ProcessSpec>,
     #[serde(default)]
@@ -1220,38 +1292,55 @@ pub struct Inventory {
     pub sent_unix_ms: u64,
 }
 
+impl Inventory {
+    /// The form that leaves this node: process adverts only (see `process_advert`), with
+    /// `version` set from the content.
+    pub fn for_wire(&self) -> Inventory {
+        let mut inv = self.clone();
+        inv.processes = inv.processes.iter().map(process_advert).collect();
+        inv.sent_unix_ms = 0;
+        inv.version = 0;
+        let json = serde_json::to_vec(&inv).unwrap_or_default();
+        let digest = Sha256::digest(&json);
+        let mut first = [0u8; 8];
+        first.copy_from_slice(&digest[..8]);
+        // 0 means "no inventory yet".
+        inv.version = u64::from_be_bytes(first).max(1);
+        inv
+    }
+}
+
 /// What nodes say to each other on a channel. Every message is signed by its sender.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
-    /// Every beat interval: liveness, stats and RTT echoes.
+    /// Every beat interval, on the beats topic: liveness and stats, a fixed size.
     Beat(Beat),
-    /// Every 30s and when a neighbor joins: a beat with the rolling stats summary.
+    /// Every sixth beat: a beat with the rolling stats summary.
     Summary(Beat),
-    /// Reply to a peer that asked for an RTT probe.
-    Echo(Beat),
-    /// The sender's programs and services.
+    /// On the events topic, when it changes: the sender's programs, services, devices and
+    /// details.
     Inventory(Inventory),
 }
 
 impl Message {
     pub fn node_id(&self) -> &str {
         match self {
-            Message::Beat(b) | Message::Summary(b) | Message::Echo(b) => &b.node_id,
+            Message::Beat(b) | Message::Summary(b) => &b.node_id,
             Message::Inventory(i) => &i.node_id,
         }
     }
 
     pub fn node(&self) -> &str {
         match self {
-            Message::Beat(b) | Message::Summary(b) | Message::Echo(b) => &b.node,
+            Message::Beat(b) | Message::Summary(b) => &b.node,
             Message::Inventory(i) => &i.node,
         }
     }
 
     pub fn sent_unix_ms(&self) -> u64 {
         match self {
-            Message::Beat(b) | Message::Summary(b) | Message::Echo(b) => b.sent_unix_ms,
+            Message::Beat(b) | Message::Summary(b) => b.sent_unix_ms,
             Message::Inventory(i) => i.sent_unix_ms,
         }
     }
@@ -1270,39 +1359,28 @@ impl Message {
         let (mut beat, kind) = match self {
             Message::Beat(b) => (b, "regular"),
             Message::Summary(b) => (b, "summary"),
-            Message::Echo(b) => (b, "rtt_echo"),
             Message::Inventory(_) => return None,
         };
         beat.kind = kind.to_string();
         Some(beat)
     }
 
-    /// Prepare for the wire: stamp `sent_unix_ms`, keep inventory out of beats and strip
-    /// process `env` / `args` (they may hold secrets).
+    /// Prepare for the wire: stamp `sent_unix_ms`, keep beats small (`Beat::for_wire`) and
+    /// strip process `env` / `args` (they may hold secrets).
     fn for_wire(&self, sent_unix_ms: u64) -> Message {
         let mut msg = self.clone();
         match &mut msg {
-            Message::Beat(b) | Message::Summary(b) | Message::Echo(b) => {
+            Message::Beat(b) | Message::Summary(b) => {
+                *b = b.for_wire();
                 b.sent_unix_ms = sent_unix_ms;
-                b.processes.clear();
-                b.service_endpoints.clear();
-                b.devices.clear();
             }
             Message::Inventory(i) => {
+                *i = i.for_wire();
                 i.sent_unix_ms = sent_unix_ms;
-                i.processes = i.processes.iter().map(process_advert).collect();
             }
         }
         msg
     }
-}
-
-/// Encrypted wire frame for a `Message` over `iroh-gossip` using XChaCha20-Poly1305.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EncryptedGossipEnvelope {
-    pub schema: String,
-    pub nonce: String,
-    pub ciphertext: String,
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -1314,13 +1392,6 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= x ^ y;
     }
     diff == 0
-}
-
-/// What a sealed frame carries: the exact message JSON that was signed, and its signature.
-#[derive(Serialize, Deserialize)]
-struct SignedMessage {
-    msg: String,
-    sig: String,
 }
 
 /// Wall-clock milliseconds, but never equal to or below the previous value returned in
@@ -1366,7 +1437,7 @@ pub fn process_advert(spec: &crate::service::ProcessSpec) -> crate::service::Pro
 }
 
 /// Sign a `Message` with this node's Key, then encrypt it with XChaCha20-Poly1305 (random
-/// 24-byte nonce, `DIALTONE_ENVELOPE_SCHEMA_V4` as AAD). Process `env` / `args` never
+/// 24-byte nonce, `DIALTONE_ENVELOPE_SCHEMA_V5` as AAD). Process `env` / `args` never
 /// leave the node, and `sent_unix_ms` is stamped here so every frame is unique.
 pub fn seal_message(
     msg: &Message,
@@ -1374,13 +1445,11 @@ pub fn seal_message(
     key: &iroh::SecretKey,
 ) -> Result<Vec<u8>, String> {
     let wire = msg.for_wire(next_sent_unix_ms());
-    let msg_json = serde_json::to_string(&wire).map_err(|e| e.to_string())?;
-    let sig = key.sign(msg_json.as_bytes());
-    let plaintext = serde_json::to_vec(&SignedMessage {
-        msg: msg_json,
-        sig: crate::hex_encode(&sig.to_bytes()),
-    })
-    .map_err(|e| e.to_string())?;
+    let msg_json = serde_json::to_vec(&wire).map_err(|e| e.to_string())?;
+    let sig = key.sign(&msg_json);
+    let mut plaintext = Vec::with_capacity(64 + msg_json.len());
+    plaintext.extend_from_slice(&sig.to_bytes());
+    plaintext.extend_from_slice(&msg_json);
 
     let rand_bytes = iroh::SecretKey::generate().to_bytes();
     let nonce_bytes = &rand_bytes[..24];
@@ -1391,68 +1460,97 @@ pub fn seal_message(
             nonce,
             Payload {
                 msg: &plaintext,
-                aad: DIALTONE_ENVELOPE_SCHEMA_V4.as_bytes(),
+                aad: DIALTONE_ENVELOPE_SCHEMA_V5.as_bytes(),
             },
         )
         .map_err(|_| "XChaCha20-Poly1305 encryption failed".to_string())?;
 
-    let env = EncryptedGossipEnvelope {
-        schema: DIALTONE_ENVELOPE_SCHEMA_V4.to_string(),
-        nonce: crate::hex_encode(nonce_bytes),
-        ciphertext: crate::base64url_encode(&ciphertext),
-    };
-    serde_json::to_vec(&env).map_err(|e| e.to_string())
+    let mut frame = Vec::with_capacity(ENVELOPE_MAGIC.len() + 24 + ciphertext.len());
+    frame.extend_from_slice(ENVELOPE_MAGIC);
+    frame.extend_from_slice(nonce_bytes);
+    frame.extend_from_slice(&ciphertext);
+    Ok(frame)
 }
 
 /// Decrypt a gossip frame and verify that the message inside was signed by the Key of the
 /// `node_id` it names. Drops plaintext frames, other envelope versions, tampered
 /// ciphertext, and messages whose signature does not match their claimed NodeId.
 pub fn open_message(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Message, String> {
-    let env: EncryptedGossipEnvelope = serde_json::from_slice(raw_frame)
-        .map_err(|_| "gossip frame is not a valid encrypted envelope".to_string())?;
-    if env.schema != DIALTONE_ENVELOPE_SCHEMA_V4 {
+    let Some(rest) = raw_frame.strip_prefix(ENVELOPE_MAGIC.as_slice()) else {
         return Err(format!(
-            "unsupported gossip envelope schema '{}' (expected {DIALTONE_ENVELOPE_SCHEMA_V4})",
-            env.schema
+            "gossip frame is not a {DIALTONE_ENVELOPE_SCHEMA_V5} envelope"
         ));
+    };
+    if rest.len() < 24 {
+        return Err("gossip frame too short".to_string());
     }
-    let nonce_bytes = crate::hex_decode(&env.nonce)?;
-    if nonce_bytes.len() != 24 {
-        return Err("invalid XChaCha20-Poly1305 nonce length (expected 24 bytes)".to_string());
-    }
-    let ciphertext = crate::base64_decode(&env.ciphertext)?;
-    let nonce = XNonce::from_slice(&nonce_bytes);
+    let (nonce_bytes, ciphertext) = rest.split_at(24);
+    let nonce = XNonce::from_slice(nonce_bytes);
     let cipher = XChaCha20Poly1305::new((&keys.enc_key).into());
     let plaintext = cipher
         .decrypt(
             nonce,
             Payload {
-                msg: &ciphertext,
-                aad: DIALTONE_ENVELOPE_SCHEMA_V4.as_bytes(),
+                msg: ciphertext,
+                aad: DIALTONE_ENVELOPE_SCHEMA_V5.as_bytes(),
             },
         )
         .map_err(|_| {
             "XChaCha20-Poly1305 decryption failed (wrong key or tampered frame)".to_string()
         })?;
-
-    let signed: SignedMessage =
-        serde_json::from_slice(&plaintext).map_err(|e| format!("invalid signed message: {e}"))?;
-    let msg: Message = serde_json::from_str(&signed.msg)
+    if plaintext.len() < 64 {
+        return Err("signed message too short".to_string());
+    }
+    let (sig_bytes, msg_json) = plaintext.split_at(64);
+    let msg: Message = serde_json::from_slice(msg_json)
         .map_err(|e| format!("invalid decrypted message JSON: {e}"))?;
     let signer: iroh::PublicKey = msg
         .node_id()
         .parse()
         .map_err(|_| format!("message names an invalid node_id '{}'", msg.node_id()))?;
-    let sig_bytes: [u8; 64] = crate::hex_decode(&signed.sig)?
+    let sig_bytes: [u8; 64] = sig_bytes
         .try_into()
         .map_err(|_| "message signature must be 64 bytes".to_string())?;
     signer
-        .verify(
-            signed.msg.as_bytes(),
-            &iroh::Signature::from_bytes(&sig_bytes),
-        )
+        .verify(msg_json, &iroh::Signature::from_bytes(&sig_bytes))
         .map_err(|_| format!("message signature does not match node_id {}", msg.node_id()))?;
     Ok(msg)
+}
+
+/// Gossip traffic counters, kept by the Mesh actor and read by `GET /api/net`.
+#[derive(Debug, Default)]
+pub struct NetCounters {
+    pub gossip_msgs_in: AtomicU64,
+    pub gossip_bytes_in: AtomicU64,
+    pub gossip_msgs_out: AtomicU64,
+    pub gossip_bytes_out: AtomicU64,
+    /// Current gossip neighbors (iroh-gossip's active view).
+    pub neighbors: AtomicU64,
+}
+
+impl NetCounters {
+    pub fn count_in(&self, bytes: usize) {
+        self.gossip_msgs_in.fetch_add(1, Ordering::Relaxed);
+        self.gossip_bytes_in
+            .fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    pub fn count_out(&self, bytes: usize) {
+        self.gossip_msgs_out.fetch_add(1, Ordering::Relaxed);
+        self.gossip_bytes_out
+            .fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self) -> serde_json::Value {
+        let get = |c: &AtomicU64| c.load(Ordering::Relaxed);
+        serde_json::json!({
+            "gossip_msgs_in": get(&self.gossip_msgs_in),
+            "gossip_bytes_in": get(&self.gossip_bytes_in),
+            "gossip_msgs_out": get(&self.gossip_msgs_out),
+            "gossip_bytes_out": get(&self.gossip_bytes_out),
+            "neighbors": get(&self.neighbors),
+        })
+    }
 }
 
 /// Rejects a beat unless it is strictly newer than the last one accepted from the same
@@ -1596,22 +1694,29 @@ pub fn merge_beat(nodes: &mut Vec<Beat>, mut beat: Beat) {
         if beat.probe.is_none() {
             beat.probe = existing.probe.clone();
         }
-        // A beat carries the sender's full Rtt map; only echo replies arrive without one.
-        if beat.peer_rtt_ms.is_empty() {
-            beat.peer_rtt_ms = existing.peer_rtt_ms.clone();
-        }
-        if beat.kind == "rtt_echo" {
-            beat.kind = existing.kind.clone();
-        }
-        // Inventory arrives in its own message; a beat never changes it.
+        // The inventory and details arrive in their own message; a beat never changes them
+        // (see `Beat::for_wire`), and how the node is reached is observed locally.
         beat.processes = std::mem::take(&mut existing.processes);
         beat.service_endpoints = std::mem::take(&mut existing.service_endpoints);
         beat.devices = std::mem::take(&mut existing.devices);
+        if beat.role.is_empty() {
+            beat.role = std::mem::take(&mut existing.role);
+        }
+        if beat.capabilities.is_empty() {
+            beat.capabilities = std::mem::take(&mut existing.capabilities);
+        }
+        if beat.iroh_transport.profile.is_empty() && !existing.iroh_transport.profile.is_empty() {
+            let mut full = existing.iroh_transport.clone();
+            full.advertised_relay_urls = beat.iroh_transport.advertised_relay_urls.clone();
+            full.advertised_ip_addrs = beat.iroh_transport.advertised_ip_addrs.clone();
+            beat.iroh_transport = full;
+        }
+        if beat.observed_remote_addrs.is_empty() {
+            beat.observed_remote_addrs = std::mem::take(&mut existing.observed_remote_addrs);
+            beat.tailnet_used = existing.tailnet_used;
+        }
         *existing = beat;
     } else {
-        if beat.kind == "rtt_echo" {
-            beat.kind = "regular".to_string();
-        }
         nodes.push(beat);
     }
 }
@@ -1623,6 +1728,21 @@ pub fn merge_inventory(nodes: &mut [Beat], inventory: &Inventory) -> bool {
             node.processes = inventory.processes.clone();
             node.service_endpoints = inventory.service_endpoints.clone();
             node.devices = inventory.devices.clone();
+            if let Some(d) = &inventory.details {
+                node.role = d.role.clone();
+                node.capabilities = d.capabilities.clone();
+                node.geo_location = d.geo_location.clone();
+                let mut transport = d.iroh_transport.clone();
+                // Addresses in beats are newer than those in the inventory.
+                if !node.iroh_transport.advertised_ip_addrs.is_empty()
+                    || !node.iroh_transport.advertised_relay_urls.is_empty()
+                {
+                    transport.advertised_ip_addrs = node.iroh_transport.advertised_ip_addrs.clone();
+                    transport.advertised_relay_urls =
+                        node.iroh_transport.advertised_relay_urls.clone();
+                }
+                node.iroh_transport = transport;
+            }
             true
         }
         None => false,
@@ -1748,9 +1868,8 @@ mod tests {
             kind: "summary".to_string(),
             beat_interval_secs: BEAT_INTERVAL_SECS,
             summary_interval_secs: SUMMARY_INTERVAL_SECS,
-            sent_mono_ms: monotonic_now_ms(),
-            rtt_probe_requested: true,
-            peer_echoes: HashMap::new(),
+            heard: 0,
+            inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
             sent_unix_ms: 0,
@@ -1815,9 +1934,8 @@ mod tests {
             kind: "summary".to_string(),
             beat_interval_secs: BEAT_INTERVAL_SECS,
             summary_interval_secs: SUMMARY_INTERVAL_SECS,
-            sent_mono_ms: monotonic_now_ms(),
-            rtt_probe_requested: false,
-            peer_echoes: HashMap::new(),
+            heard: 0,
+            inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
             sent_unix_ms: 0,
@@ -1978,9 +2096,8 @@ mod tests {
             kind: "regular".to_string(),
             beat_interval_secs: BEAT_INTERVAL_SECS,
             summary_interval_secs: SUMMARY_INTERVAL_SECS,
-            sent_mono_ms: 1_000,
-            rtt_probe_requested: false,
-            peer_echoes: HashMap::new(),
+            heard: 0,
+            inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
             sent_unix_ms: 0,
@@ -2014,11 +2131,11 @@ mod tests {
         assert_eq!(decrypted.counter, 42);
         assert!(open_message(&wire_bytes, &k_other).is_err());
 
-        let mut tampered_env: EncryptedGossipEnvelope =
-            serde_json::from_slice(&wire_bytes).unwrap();
-        tampered_env.ciphertext.push_str("AA");
-        let tampered_bytes = serde_json::to_vec(&tampered_env).unwrap();
+        let mut tampered_bytes = wire_bytes.clone();
+        let last = tampered_bytes.len() - 1;
+        tampered_bytes[last] ^= 1;
         assert!(open_message(&tampered_bytes, &k1).is_err());
+        assert!(open_message(&wire_bytes[..20], &k1).is_err());
     }
 
     fn test_beat(node_key: &iroh::SecretKey) -> Beat {
@@ -2034,9 +2151,8 @@ mod tests {
             kind: "regular".to_string(),
             beat_interval_secs: BEAT_INTERVAL_SECS,
             summary_interval_secs: SUMMARY_INTERVAL_SECS,
-            sent_mono_ms: 1,
-            rtt_probe_requested: false,
-            peer_echoes: HashMap::new(),
+            heard: 0,
+            inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
             summary_stats: None,
             sent_unix_ms: 0,
@@ -2060,6 +2176,58 @@ mod tests {
             probe: None,
             store: None,
         }
+    }
+
+    /// Beats stay small and do not grow with the mesh: every node hears every beat.
+    #[test]
+    fn a_sealed_beat_is_small_and_fixed_size() {
+        let keys = derive_channel_keys_v2("dialtone", "dt-Beat_Size_Test_Secret_2026!");
+        let alice = iroh::SecretKey::generate();
+        let mut beat = test_beat(&alice);
+        beat.stats = sample_stats("node-alpha", None, 1);
+        beat.role = node_role_for("node-alpha");
+        beat.capabilities = node_capabilities_for("node-alpha");
+        beat.ticket = "x".repeat(2_000);
+        beat.peer_rtt_ms = (0..5).map(|i| (format!("peer-{i}"), 12.5)).collect();
+        let mut window = crate::stats::StatsWindow::new(SUMMARY_INTERVAL_SECS);
+        window.record_sample(1, &beat.stats, &beat.peer_rtt_ms, 0);
+        let summary = window.summarize(1);
+        beat.probe = Some(ProbeReport {
+            build: format!("sha256:{}", "b".repeat(64)),
+            cycle: 9,
+            passed_count: 3,
+            total_count: 3,
+            checks: ["MSH", "NBR", "BEAT"]
+                .iter()
+                .map(|code| ProbeCheck {
+                    code: code.to_string(),
+                    ok: true,
+                    detail: "299/299 peers beating, each hears all".to_string(),
+                    ms: None,
+                })
+                .collect(),
+            beats: (0..299)
+                .map(|i| ProbeBeat {
+                    peer: format!("peer-{i}"),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        });
+        let size = |b: &Beat, summary: bool| {
+            let msg = if summary {
+                Message::Summary(b.clone())
+            } else {
+                Message::Beat(b.clone())
+            };
+            seal_message(&msg, &keys, &alice).unwrap().len()
+        };
+        let regular = size(&beat, false);
+        beat.summary_stats = Some(summary);
+        let with_summary = size(&beat, true);
+        println!("sealed beat {regular} bytes, summary {with_summary} bytes");
+        assert!(regular < 1_300, "beat is {regular} bytes");
+        assert!(with_summary < 1_900, "summary is {with_summary} bytes");
     }
 
     #[test]
@@ -2174,6 +2342,8 @@ mod tests {
         let inventory = Message::Inventory(Inventory {
             node: beat.node.clone(),
             node_id: beat.node_id.clone(),
+            version: 0,
+            details: None,
             processes,
             service_endpoints: Vec::new(),
             devices: Vec::new(),
@@ -2220,7 +2390,6 @@ mod tests {
         for (msg, kind) in [
             (Message::Beat(beat.clone()), "regular"),
             (Message::Summary(beat.clone()), "summary"),
-            (Message::Echo(beat.clone()), "rtt_echo"),
         ] {
             let opened = open_message(&seal_message(&msg, &keys, &alice).unwrap(), &keys).unwrap();
             assert_eq!(opened.node_id(), alice.public().to_string());
@@ -2247,6 +2416,13 @@ mod tests {
         let inventory = Inventory {
             node: beat.node.clone(),
             node_id: beat.node_id.clone(),
+            version: 0,
+            details: Some(NodeDetails {
+                role: "edge".to_string(),
+                capabilities: vec!["device-listing".to_string()],
+                geo_location: None,
+                iroh_transport: beat.iroh_transport.clone(),
+            }),
             processes: vec![spec],
             service_endpoints: Vec::new(),
             devices: vec![crate::devices::Device {
@@ -2272,6 +2448,29 @@ mod tests {
         assert_eq!(nodes[0].counter, 2);
         assert_eq!(nodes[0].processes.len(), 1);
         assert_eq!(nodes[0].devices[0].name, "Desk Cam");
+        // The details come from the inventory too: a wire beat leaves them out, and the
+        // node's entry keeps them.
+        let wire = beat.for_wire();
+        assert!(wire.role.is_empty() && wire.iroh_transport.profile.is_empty());
+        assert_eq!(
+            wire.iroh_transport.advertised_ip_addrs,
+            beat.iroh_transport.advertised_ip_addrs
+        );
+        merge_beat(&mut nodes, wire);
+        assert_eq!(nodes[0].role, "edge");
+        assert_eq!(nodes[0].iroh_transport, beat.iroh_transport);
+        // The version follows the content.
+        let v1 = inventory.for_wire().version;
+        assert_eq!(v1, inventory.for_wire().version);
+        assert_ne!(
+            v1,
+            Inventory {
+                devices: Vec::new(),
+                ..inventory.clone()
+            }
+            .for_wire()
+            .version
+        );
         // A beat never carries devices on the wire.
         let mut stuffed = beat.clone();
         stuffed.devices = nodes[0].devices.clone();
@@ -2352,10 +2551,10 @@ mod tests {
             "old Rtt entries are not kept forever"
         );
         assert!(entry.peer_rtt_ms.contains_key("node-gamma"));
-        // An echo reply without a map keeps the last one.
+        // A node with no neighbors left reports an empty map, and that replaces it too.
         merge_beat(&mut nodes, a.clone());
         let entry = nodes.iter().find(|n| n.node_id == a.node_id).unwrap();
-        assert!(entry.peer_rtt_ms.contains_key("node-gamma"));
+        assert!(entry.peer_rtt_ms.is_empty());
     }
 
     #[test]
@@ -2438,17 +2637,14 @@ mod tests {
     }
 
     #[test]
-    fn rtt_echo_and_mesh_matrix_calculate_pairwise_latency() {
+    fn mesh_matrix_and_beat_interval_scale_with_the_mesh() {
         assert_eq!(BEAT_INTERVAL_SECS, 5);
         assert_eq!(SUMMARY_INTERVAL_SECS, 30);
         assert_eq!(SUMMARY_EVERY_N_BEATS, 6);
-
-        let echo = PeerRttEcho {
-            echoed_mono_ms: 10_000,
-            hold_time_ms: 120,
-        };
-        let rtt = compute_rtt_ms_from_echo(10_148, &echo).unwrap();
-        assert!((rtt - 28.0).abs() < 0.01);
+        assert_eq!(beat_interval_for(3), 5);
+        assert_eq!(beat_interval_for(100), 10);
+        assert_eq!(beat_interval_for(300), 30);
+        assert_eq!(beat_interval_for(5000), 60);
 
         let cfg = IrohTransportConfig::local_offline();
         let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
@@ -2464,9 +2660,8 @@ mod tests {
             kind: "summary".to_string(),
             beat_interval_secs: BEAT_INTERVAL_SECS,
             summary_interval_secs: SUMMARY_INTERVAL_SECS,
-            sent_mono_ms: 1_000,
-            rtt_probe_requested: false,
-            peer_echoes: HashMap::new(),
+            heard: 0,
+            inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::from([("node-beta".to_string(), 14.2)]),
             summary_stats: None,
             sent_unix_ms: 0,
