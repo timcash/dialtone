@@ -312,8 +312,9 @@ cmd_deploy() {
     esac
     shift
   done
-  load_fleet
-  local started; started=$(date +%s)
+    load_fleet
+  # node=sha256 of the binary installed on it; the gate waits for probes from exactly these.
+  local expect="" sha
   # Find SSH routes while the local build runs (an offline route costs a 3s timeout).
   local routes_file; routes_file=$(mktemp)
     pick_routes > "$routes_file" &
@@ -326,12 +327,14 @@ cmd_deploy() {
   [ -f ~/.dialtone/bin/dialtone ] && cp ~/.dialtone/bin/dialtone ~/.dialtone/bin/dialtone.bak
   cp target/release/dialtone ~/.dialtone/bin/dialtone.new && mv ~/.dialtone/bin/dialtone.new ~/.dialtone/bin/dialtone
   launchctl kickstart -k "gui/$(id -u)/$LOCAL_LAUNCHD"
-  echo "    $LOCAL_NODE $(shasum -a 256 ~/.dialtone/bin/dialtone | cut -c1-16)"
+    sha=$(shasum -a 256 ~/.dialtone/bin/dialtone | cut -d' ' -f1)
+  expect="$expect $LOCAL_NODE=$sha"
+  echo "    $LOCAL_NODE ${sha:0:16}"
 
   wait "$routes_pid" || fail "a Windows node is unreachable over SSH"
   # shellcheck disable=SC1090
   source "$routes_file"; rm -f "$routes_file"
-  local builder rest node sha
+    local builder rest node
   read -r builder rest <<<"$WINDOWS_NODES"
   if [ -z "$tag" ]; then
     say "Build on $builder, install on $WINDOWS_NODES"
@@ -349,7 +352,9 @@ cmd_deploy() {
     copy_from "$builder" .dialtone/dialtone-windows.tgz /tmp/dialtone-windows.tgz
     for node in $WINDOWS_NODES; do
       [ "$node" = "$builder" ] || copy_to "$node" /tmp/dialtone-windows.tgz .dialtone/dialtone-windows.tgz
-      sha=$(win_install "$node" 'tar.exe -xzf "$env:USERPROFILE\.dialtone\dialtone-windows.tgz" -C "$env:USERPROFILE\.dialtone\deploy-new";')
+            sha=$(win_install "$node" 'tar.exe -xzf "$env:USERPROFILE\.dialtone\dialtone-windows.tgz" -C "$env:USERPROFILE\.dialtone\deploy-new";')
+      [ -n "$sha" ] || fail "install on $node did not report its binary"
+      expect="$expect $node=$sha"
       echo "    $node ${sha:0:16}"
     done
     rm -f /tmp/dialtone-src.tgz /tmp/dialtone-windows.tgz
@@ -358,41 +363,45 @@ cmd_deploy() {
     [ "$tag" = latest ] || url="https://github.com/timcash/dialtone/releases/download/$tag/dialtone-windows-x86_64.exe"
     say "Install release $tag on $WINDOWS_NODES"
     for node in $WINDOWS_NODES; do
-      sha=$(win_install "$node" "curl.exe -fsSL '$url' -o \"\$env:USERPROFILE\\.dialtone\\deploy-new\\dialtone.exe\"; if (\$LASTEXITCODE -ne 0) { throw 'download failed' };")
+            sha=$(win_install "$node" "curl.exe -fsSL '$url' -o \"\$env:USERPROFILE\\.dialtone\\deploy-new\\dialtone.exe\"; if (\$LASTEXITCODE -ne 0) { throw 'download failed' };")
+      [ -n "$sha" ] || fail "install on $node did not report its binary"
+      expect="$expect $node=$sha"
       echo "    $node ${sha:0:16}"
     done
   fi
 
-  say "Waiting for every node's probe to pass 5/5 on the new build (up to 150s)"
+    say "Waiting for every node's probe to pass 5/5 on the new build (up to 150s)"
   for _ in $(seq 1 30); do
-    fleet_report "$started" > /tmp/dialtone-fleet.txt && { cat /tmp/dialtone-fleet.txt; say "DEPLOYED: every node passed its probe"; return 0; }
+    fleet_report "$expect" > /tmp/dialtone-fleet.txt && { cat /tmp/dialtone-fleet.txt; say "DEPLOYED: every node passed its probe"; return 0; }
     sleep 5
   done
   cat /tmp/dialtone-fleet.txt
   fail "not every node passed its probe within 150s (FAIL lines above)"
 }
 
-# fleet_report [since]: every node's latest probe; succeeds when all nodes passed one run after `since`.
+# fleet_report ["node=sha256 ..."]: every node's latest probe. Succeeds when every node's
+# probe passed and, for each node given, came from the binary with that digest.
 fleet_report() {
   curl -fsS "$LIVE_API/api/mesh" 2>/dev/null | python3 -c '
 import sys, json
-since, expected = int(sys.argv[1]), sys.argv[2].split()
+builds = dict(x.split("=", 1) for x in sys.argv[1].split())
 nodes = {n["node"]: n for n in json.load(sys.stdin)["nodes"]}
 ok = True
-for name in expected:
+for name in sys.argv[2].split():
     p = (nodes.get(name) or {}).get("probe") or {}
+    build = p.get("build", "").replace("sha256:", "")
     fails = "; ".join("%s: %s" % (c["code"], c["detail"]) for c in p.get("checks", []) if not c["ok"])
-    fresh = p.get("updated_at_unix", 0) >= since
-    passed = name in nodes and fresh and p.get("passed_count") == p.get("total_count") and p.get("total_count")
+    on_build = name not in builds or build == builds[name]
+    passed = name in nodes and on_build and p.get("total_count") and p.get("passed_count") == p.get("total_count")
     ok = ok and bool(passed)
     pulls = " ".join("%s %.0fms" % (x["peer"], x["ms"]) for x in p.get("pulls", []) if x["ok"])
-    note = "missing from the mesh" if name not in nodes else ("" if fresh else "no probe since deploy yet")
-    print("    %-8s probe #%-4s %s/%s  %s%s%s" % (name, p.get("cycle"), p.get("passed_count"), p.get("total_count"),
-          "pulls: " + pulls if pulls else "", "  " + note if note else "", "  FAIL " + fails if fails else ""))
-sys.exit(0 if ok else 1)' "${1:-0}" "$FLEET_NODES"
+    note = "missing from the mesh" if name not in nodes else ("" if on_build else "no probe from the new build yet")
+    print("    %-8s build %-12s probe #%-4s %s/%s  %s%s%s" % (name, build[:12] or "?", p.get("cycle"), p.get("passed_count"),
+          p.get("total_count"), "pulls: " + pulls if pulls else "", "  " + note if note else "", "  FAIL " + fails if fails else ""))
+sys.exit(0 if ok else 1)' "${1:-}" "$FLEET_NODES"
 }
 
-cmd_fleet() { load_fleet; fleet_report 0 || true; }
+cmd_fleet() { load_fleet; fleet_report "" || true; }
 
 case "${1:-help}" in
   check) cmd_check ;;

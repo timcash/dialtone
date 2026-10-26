@@ -576,7 +576,8 @@ One script builds, tests and deploys. `cargo test` covers each capability with r
 ./dialtone.sh lint      # leak gate (no host names / NodeIds in git) and domain language
 ./dialtone.sh e2e       # three real nodes on this machine: mesh, probe 5/5 with blob pulls between
                         # them, deploy and removal across the mesh, a stopped node caught (about 30s)
-./dialtone.sh deploy    # check, build, install on every node, wait until every probe passes 5/5
+./dialtone.sh deploy    # check, build, install on every node, wait until every node passes 5/5
+                        # on the exact binary just installed
 ./dialtone.sh deploy --skip-check   # ... without running check first
 ./dialtone.sh fleet     # each node's latest probe in the live mesh
 ```

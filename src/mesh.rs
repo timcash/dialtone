@@ -1112,6 +1112,9 @@ pub struct ProbeBeat {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProbeReport {
+    /// Digest of the dialtone binary that ran this probe, so a deploy can tell the new
+    /// build's results from those of the process it replaced.
+    pub build: String,
     pub cycle: u64,
     pub updated_at_unix: u64,
     pub passed_count: u8,

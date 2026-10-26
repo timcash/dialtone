@@ -445,6 +445,12 @@ impl NodeState {
         let expired = crate::probe::expired(&self.probe_blobs);
         self.probe_blobs.retain(|d| !expired.contains(d));
         crate::probe::ProbeInputs {
+            build: self
+                .installed_programs
+                .iter()
+                .find(|p| p.name == "dialtone")
+                .map(|p| p.digest.clone())
+                .unwrap_or_default(),
             node: self.node.clone(),
             node_id: own_id,
             cycle: self.probe.as_ref().map(|r| r.cycle + 1).unwrap_or(1),

@@ -44,6 +44,8 @@ pub struct PeerView {
 /// Everything a probe run needs, gathered under the node-state lock; the run itself does
 /// its network and disk work without the lock.
 pub struct ProbeInputs {
+    /// Digest of the running dialtone binary.
+    pub build: String,
     pub node: String,
     pub node_id: String,
     pub cycle: u64,
@@ -273,6 +275,7 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
 
     let passed_count = checks.iter().filter(|c| c.ok).count() as u8;
     ProbeReport {
+        build: inputs.build.clone(),
         cycle: inputs.cycle,
         updated_at_unix: now_unix(),
         passed_count,
@@ -372,6 +375,7 @@ mod tests {
 
         // Node B's probe publishes a blob ticket.
         let report_b = run(ProbeInputs {
+            build: String::new(),
             node: "node-b".to_string(),
             node_id: id_b.clone(),
             cycle: 1,
@@ -394,6 +398,7 @@ mod tests {
             blob_ticket: Some(report_b.blob_ticket.clone()),
         };
         let report_a = run(ProbeInputs {
+            build: String::new(),
             node: "node-a".to_string(),
             node_id: "a".to_string(),
             cycle: 7,
@@ -420,6 +425,7 @@ mod tests {
             ..peer_b
         };
         let report_fail = run(ProbeInputs {
+            build: String::new(),
             node: "node-a".to_string(),
             node_id: "a".to_string(),
             cycle: 8,
