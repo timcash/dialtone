@@ -61,7 +61,7 @@ HUD keys (at http://127.0.0.1:8788):
 
 ```text
   Up / Down Arrow                          Zoom camera in/out across Layers 1..5 (GLOBE -> PROCESS)
-  Left / Right Arrow                       Step backward/forward through the 6-Step System Tour & Nodes
+  Left / Right Arrow                       Step backward/forward through the 5-step tour (MSH BLB PRC NET DEV) and nodes
   Double-Click Node / Row                  Zoom into focused node symbol (resets to L1 GLOBE after L5)
   Click [1 MSH] .. [5 DEV] in Bottom CC    Jump directly to any capability step in the live Closed Captions
 ```
@@ -146,7 +146,7 @@ Every GitHub Release publishes standalone, size-optimized single-file executable
 
 ### 5-Stage Boot Sequence
 
-Running `./dialtone` (with no arguments, or `./dialtone up` / `start` / `hub`) boots 5 subsystems in strict dependency order and starts the local Web HUD immediately:
+Running `./dialtone` (with no arguments, or `./dialtone up`) boots 5 subsystems in strict dependency order and starts the local Web HUD immediately:
 
 ```text
 [BOOT 1/5] Local Runtime & Stdout Logger ................. [READY] (node=node-alpha, os=macos/aarch64)
@@ -165,18 +165,15 @@ Running `./dialtone` (with no arguments, or `./dialtone up` / `start` / `hub`) b
 
 Open **`http://127.0.0.1:8788`** to access the embedded tactical HUD:
 
-- **Terminal `top` Process & Resource Table**: Displays every discovered peer (`NODE`, `OS/ARCH`, `BIND IP`, `HB`, `CORES`, `CPU%`, `MEM%`, `DISK%`, `NET RX/TX`, `STATUS / WARNINGS`).
-- **Automatic Threshold Warnings**: Rows remain monochrome greyscale when nominal and highlight in red (`#ff2e3b`) only when limits are breached:
-  - `CPU >= 80%`
-  - `MEM >= 80%`
-  - `DISK >= 85%`
-  - `VPN PATH` (`tailnet_used: true` detected on transport path)
+- **Terminal `top` table**: mesh-wide rows (`MSH`, `NET`, `PRB`, `CPU`, `MEM`, `DSK`), where `PRB` counts each probe check passing across nodes (`MSH` `STO` `PUL` `BEAT` `PRC`), then one row per node (`NODE`, `ARCH`, `CPU`, `MEM`, `DSK`, `IP/PATH`, `RX/TX`, `LNK`, `RTT`, `JIT`, `PROC`, `PRB`), then the focused node's devices.
+- **Threshold colours**: values stay greyscale when nominal, turn amber at the warning level and red at the error level (CPU 75% / 92%, memory 78% / 92%, disk 82% / 94%).
+- **Tour**: visits every node and steps through `MSH` (mesh), `BLB` (store and blob pulls), `PRC` (probe program), `NET` (beats and Rtt) and `DEV` (devices); the closed captions narrate that node's latest probe.
 - **Interactive 3D Mesh Topology**: Drag to orbit, scroll to zoom, or click any peer node to inspect its live QUIC links and metadata.
 - **Menu** (bottom-right button): tour and camera controls, zoom layers, display toggles, and — under
   *05 // Mesh setup (CLI)* — the commands for creating a mesh, inviting and allowing nodes. The page holds no API
   token, so mesh changes are made with the CLI.
-- **Endpoints the HUD uses**: `GET /` (the page) and `GET /api/mesh` (polled every 1.5s); `GET /health` returns
-  `{"ok": true, "node": "..."}`.
+- **Endpoints the HUD uses**: `GET /` (the page), `GET /hud/...` (its static files) and `GET /api/mesh` (polled
+  every 1.5s).
 
 ---
 
@@ -367,8 +364,8 @@ By default, `dialtone` uses **zero public directory publishing** (`dns-pkarr` an
 | :--- | :--- |
 | `--no-tailnet` | **(Default)** Strips Tailscale IPv4 (`100.64.0.0/10`) and IPv6 (`fd7a:115c:a1e0::/48`) addresses from advertised tickets and binds the QUIC socket to the primary physical non-Tailnet IPv4 interface. |
 | `--allow-tailnet` | Permits Tailscale interface addresses in advertised endpoints. |
-| `--private-mesh` | Zero-internet private LAN mesh mode: disables public relays, DNS/Pkarr, and Mainline DHT, and enables mDNS + direct IP:port peer dialing. |
-| `--quic-port <port>` | Binds the Iroh QUIC UDP socket to a deterministic port (e.g. `19440`) for direct LAN peer dialing (`DIALTONE_QUIC_PORT`). |
+| `--private-mesh` | Zero-internet private mesh: disables public relays, DNS/Pkarr and Mainline DHT; peers are dialed at the direct `ip:port` addresses from `allowlist add --addr` or invites. |
+| `--quic-port <port>` | Binds the Iroh QUIC UDP socket to a fixed port (e.g. `19440`) so peers can dial it directly. |
 | `--lan` / `--local-discovery` | Enables zero-conf mDNS local network discovery (`lan_only` profile). |
 | `--dns` | Explicitly enables public Pkarr DNS address lookup/publishing (`dns.iroh.link`). |
 | `--dht` | Explicitly enables Mainline BitTorrent DHT address publication and lookup. |
@@ -376,7 +373,7 @@ By default, `dialtone` uses **zero public directory publishing** (`dns-pkarr` an
 | `--no-relay` | Disables Iroh relay servers (direct UDP/QUIC only). |
 | `--relay-only` | Strips direct IP addresses from tickets so traffic routes strictly via relay (`relay_only` profile). |
 | `--relay-url <url>` | Adds a custom Iroh relay server URL (repeatable). |
-| `--invite <t>` | Adds an explicit seed gossip or `dialtone-invite-v1:` ticket (repeatable; alias `--join-ticket`). |
+| `--invite <t>` | Redeems a `dialtone-invite-v1:` invite or adds a seed list when joining (repeatable). |
 | `--api-token <token>` | Sets an explicit bearer token for `POST` routes on the HTTP control API. |
 
 ---
@@ -440,12 +437,12 @@ curl -s "http://127.0.0.1:8788/api/blob?sha256=<64-hex-digest>"
 Every running `dialtone` daemon attaches `iroh_blobs::BlobsProtocol` to its live QUIC router so peers can share and pull content-addressed blobs directly over QUIC:
 
 ```bash
-# On Node A: import a file or payload into store + live iroh-blobs store and mint an iroh-blob:// ticket URI
+# On Node A: add a file (or text) to the store and get a ticket for it
 ./dialtone blob share ./process-script.sh
-# -> returns {"digest": "...", "ticket_uri": "iroh-blob://<sha256>?peer=<node_id>&relay=...", ...}
+# -> {"digest": "sha256:...", "ticket_uri": "iroh-blobs://ticket/blob...#sha256:...", ...}
 
-# On Node B: pull the blob over live Iroh QUIC from Node A and verify its SHA-256 into ~/.dialtone/blobs
-./dialtone blob pull "iroh-blob://<sha256>?peer=<node_id>&relay=..." --force
+# On Node B: pull it over QUIC from Node A; its SHA-256 is checked against the ticket before it is kept
+./dialtone blob pull "iroh-blobs://ticket/blob...#sha256:..." --force
 ```
 
 ---
@@ -511,10 +508,17 @@ curl -X POST http://127.0.0.1:8788/api/processes/blob \
     "digest": "<64-hex-digest>",
     "desired_state": "stopped"
   }'
+
+# Remove it: stop it, forget its spec and delete its staged program
+# (on the node that deployed it to the mesh, this removes every copy)
+curl -X POST http://127.0.0.1:8788/api/processes \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "stats-blob-process", "desired_state": "removed"}'
 ```
 
-- **Crash Auto-Respawn**: Every 2 seconds (and on process status queries), the daemon checks all managed child PIDs via `try_wait()`. If a process with `"desired_state": "running"` exits or crashes, `dialtone` increments `restart_count`, re-stages the verified store blob, and spawns a fresh child PID automatically.
-- **Environment Sanitization**: Internal daemon environment variables (`DIALTONE_*`, `DAEMON_V1_*`) are stripped before spawning child processes.
+- **Crash Auto-Respawn**: Every second (and on process status queries), the daemon checks all managed child PIDs via `try_wait()`. If a process with `"desired_state": "running"` exits or crashes, `dialtone` increments `restart_count`, re-stages the verified store blob, and spawns a fresh child PID automatically.
+- **Environment Sanitization**: the node's own `DIALTONE_*` / `DAEMON_V1_*` variables (such as `DIALTONE_SECRET`) are removed from every process's environment, and a spec's `env` entries with those prefixes are ignored.
 - **Restart Persistence**: process definitions are saved to `~/.dialtone/config.json` and automatically re-staged and started when `dialtone` boots.
 
 ## 8. HTTP API Quick Reference
@@ -527,11 +531,11 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | :--- | :--- |
 | `GET /` | The HUD (served with a per-response Content-Security-Policy nonce) |
 | `GET /hud/...` | The HUD's static files (`app.js`, `style.css`, vendored three.js and h3-js) |
-| `GET /health` | `{"ok": true, "node": "..."}` |
+| `GET /health` | `{"status": "ok", "node": ..., "peers": ..., "boot_stages": ...}` |
 | `GET /api/config` (`/api/boot-status`) | Boot stages, mesh config (`derived_keys` redacted), store path |
 | `POST /api/mesh/join` | Join or switch the channel of the running node |
 | `POST /api/daemon/install` | Install the daemon (OS login service) |
-| `GET /api/state` | Full node state (supports `include_kv`, `kv_offset`, `kv_limit`) |
+| `GET /api/state` | Full node state |
 | `GET /api/mesh` | Every node's latest beat, the Rtt matrix and Services |
 | `POST /api/blob` | Put a base64 blob in the store (`~/.dialtone/blobs`) |
 | `GET /api/blob?digest=...` | Blob bytes and metadata (`HEAD` also supported) |
@@ -540,6 +544,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | `GET /api/processes` | Supervised processes with live PID / status |
 | `GET /api/devices` | Devices connected to this node (cameras, microphones, keyboards, ...) |
 | `POST /api/processes/blob` | Stage a program blob (or ticket) and run / stop it as a process |
+| `POST /api/processes` | Same, and `{"name": ..., "desired_state": "removed"}` stops a process and forgets it (mesh-deployed copies follow) |
 | `POST /api/probe` | Run one probe now (`GET` returns the latest); nodes probe themselves every 30s |
 
 

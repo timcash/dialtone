@@ -138,16 +138,19 @@ node_test() {
   [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$api/api/blob" -d '{}')" = 401 ] || fail "unauthenticated POST was accepted"
 
   local program digest pid1 pid2
-  program=$(printf '#!/bin/sh\nsleep 30\n' | base64 | tr -d '\n')
+    # The program records its environment: the node's DIALTONE_* settings must not reach it.
+  program=$(printf '#!/bin/sh\nenv > "%s/process.env"\nsleep 30\n' "$dir" | base64 | tr -d '\n')
   digest=$(node_post /api/blob "{\"bytes_base64\":\"$program\"}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["digest"])')
   pid1=$(node_post /api/processes/blob "{\"name\":\"check-process\",\"digest\":\"$digest\",\"desired_state\":\"running\"}" \
     | python3 -c 'import sys,json; p=json.load(sys.stdin)["process"]; assert p["status"]=="running"; print(p["pid"])')
   kill -9 "$pid1"; sleep 0.3
   pid2=$(curl -fsS "$api/api/processes" | python3 -c 'import sys,json; p=[p for p in json.load(sys.stdin)["processes"] if p["name"]=="check-process"][0]; assert p["status"]=="running" and p["restart_count"]>=1; print(p["pid"])')
-  [ "$pid1" != "$pid2" ] || fail "the supervisor did not restart the crashed process"
+    [ "$pid1" != "$pid2" ] || fail "the supervisor did not restart the crashed process"
+  grep -q '^APP_BIN=' "$dir/process.env" || fail "the process did not record its environment"
+  ! grep -q '^DIALTONE_' "$dir/process.env" || fail "the node's DIALTONE_* environment reached a process"
   node_post /api/processes '{"name":"check-process","desired_state":"removed"}' | grep -q '"status":"removed"'
   ! ls "$dir"/run/check-process-* >/dev/null 2>&1 || fail "a removed process left its staged program"
-  echo "    Supervisor: started from a blob, restarted after kill -9, removed with its file"
+    echo "    Supervisor: started from a blob without the node's env, restarted after kill -9, removed with its file"
 
   local ticket
   ticket=$(DIALTONE_STATE_DIR="$dir" "$BIN" blob share "check-blob" --listen 127.0.0.1:18794 | python3 -c 'import sys,json; print(json.load(sys.stdin)["ticket_uri"])')

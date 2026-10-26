@@ -492,6 +492,13 @@ impl Supervisor {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         tree::isolate(&mut cmd);
+        // The node's own settings (DIALTONE_SECRET above all) never reach a process.
+        for (key, _) in std::env::vars_os() {
+            let name = key.to_string_lossy();
+            if name.starts_with("DIALTONE_") || name.starts_with("DAEMON_V1_") {
+                cmd.env_remove(&key);
+            }
+        }
         if let Ok(exe_path) = std::env::current_exe() {
             cmd.env("APP_BIN", exe_path);
         }
