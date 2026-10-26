@@ -668,7 +668,20 @@ mod tests {
         assert!(err.contains("in use by another process"), "{err}");
         assert!(start.elapsed() < Duration::from_secs(2));
         blobs.close_blocking();
-        let reopened = Blobs::open_blocking(&dir).unwrap();
+        // Closing releases the lock. Other tests spawn processes in parallel, and a child can
+        // hold a copy of the lock file's handle for a moment before it execs, so allow a
+        // short wait here; the refusal above must still be immediate.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let reopened = loop {
+            match Blobs::open_blocking(&dir) {
+                Ok(b) => break b,
+                Err(e) if std::time::Instant::now() < deadline => {
+                    assert!(e.contains("in use"), "{e}");
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => panic!("store still locked 3s after close: {e}"),
+            }
+        };
         reopened.close_blocking();
         let _ = fs::remove_dir_all(&dir);
     }
