@@ -6,7 +6,7 @@
 #   ./dialtone.sh e2e              three real nodes on this machine (about 30s)
 #   ./dialtone.sh deploy [opts]    build, install on every node, wait for every probe to pass
 #                                    --skip-check   do not run `check` first
-#                                    --release      Windows nodes download the latest GitHub release
+#                                    --release      every node downloads the latest GitHub release (SHA-256 checked)
 #                                    --tag vX.Y.Z   ... or this release
 #   ./dialtone.sh fleet            probe results of every node in the live mesh
 #
@@ -312,22 +312,39 @@ cmd_deploy() {
     esac
     shift
   done
-    load_fleet
+      load_fleet
   # node=sha256 of the binary installed on it; the gate waits for probes from exactly these.
   local expect="" sha
-  # Find SSH routes while the local build runs (an offline route costs a 3s timeout).
+  # Published binaries: every node downloads its own and checks the published SHA-256.
+  local releases="https://github.com/timcash/dialtone/releases/latest/download"
+  [ -z "$tag" ] || [ "$tag" = latest ] || releases="https://github.com/timcash/dialtone/releases/download/$tag"
+  # Find SSH routes while the local build or download runs (an offline route costs 3s).
   local routes_file; routes_file=$(mktemp)
-    pick_routes > "$routes_file" &
+  pick_routes > "$routes_file" &
   local routes_pid=$!
 
-  if [ "$skip_check" -eq 0 ]; then cmd_check; else say "Release build"; build; fi
+  local binary=target/release/dialtone
+  if [ -n "$tag" ]; then
+    say "Download release $tag for $LOCAL_NODE"
+    [ "$(uname -sm)" = "Darwin arm64" ] || fail "$LOCAL_NODE: only macOS arm64 has a published local binary"
+    binary=/tmp/dialtone-release
+    curl -fsSL "$releases/dialtone-macos-arm64" -o "$binary"
+    [ "$(shasum -a 256 "$binary" | cut -d' ' -f1)" = "$(curl -fsSL "$releases/dialtone-macos-arm64.sha256" | cut -d' ' -f1)" ] \
+      || fail "the downloaded macOS binary does not match its published SHA-256"
+    chmod +x "$binary"
+    echo "    $("$binary" --help | head -1)  (SHA-256 matches the release)"
+  elif [ "$skip_check" -eq 0 ]; then
+    cmd_check
+  else
+    say "Release build"; build
+  fi
 
   say "Install on $LOCAL_NODE"
   mkdir -p ~/.dialtone/bin
   [ -f ~/.dialtone/bin/dialtone ] && cp ~/.dialtone/bin/dialtone ~/.dialtone/bin/dialtone.bak
-  cp target/release/dialtone ~/.dialtone/bin/dialtone.new && mv ~/.dialtone/bin/dialtone.new ~/.dialtone/bin/dialtone
+  cp "$binary" ~/.dialtone/bin/dialtone.new && mv ~/.dialtone/bin/dialtone.new ~/.dialtone/bin/dialtone
   launchctl kickstart -k "gui/$(id -u)/$LOCAL_LAUNCHD"
-    sha=$(shasum -a 256 ~/.dialtone/bin/dialtone | cut -d' ' -f1)
+  sha=$(shasum -a 256 ~/.dialtone/bin/dialtone | cut -d' ' -f1)
   expect="$expect $LOCAL_NODE=$sha"
   echo "    $LOCAL_NODE ${sha:0:16}"
 
@@ -359,18 +376,27 @@ cmd_deploy() {
     done
     rm -f /tmp/dialtone-src.tgz /tmp/dialtone-windows.tgz
   else
-    local url="https://github.com/timcash/dialtone/releases/latest/download/dialtone-windows-x86_64.exe"
-    [ "$tag" = latest ] || url="https://github.com/timcash/dialtone/releases/download/$tag/dialtone-windows-x86_64.exe"
-    say "Install release $tag on $WINDOWS_NODES"
+    say "Download release $tag on $WINDOWS_NODES"
+    # Download the published .exe on the node and refuse it unless its SHA-256 matches.
+    local download
+    download=$(cat <<'PS'
+$n = "$env:USERPROFILE\.dialtone\deploy-new\dialtone.exe"
+curl.exe -fsSL "URL" -o $n
+if ($LASTEXITCODE -ne 0) { throw "download failed" }
+$want = ((curl.exe -fsSL "URL.sha256") -split '\s+')[0].ToLower()
+if ($want -ne (Get-FileHash $n -Algorithm SHA256).Hash.ToLower()) { throw "the download does not match its published SHA-256" }
+PS
+)
+    download=${download//URL/$releases/dialtone-windows-x86_64.exe}
     for node in $WINDOWS_NODES; do
-            sha=$(win_install "$node" "curl.exe -fsSL '$url' -o \"\$env:USERPROFILE\\.dialtone\\deploy-new\\dialtone.exe\"; if (\$LASTEXITCODE -ne 0) { throw 'download failed' };")
-      [ -n "$sha" ] || fail "install on $node did not report its binary"
+      sha=$(win_install "$node" "$download")
+      [ -n "$sha" ] || fail "install on $node failed (download, SHA-256 check or restart)"
       expect="$expect $node=$sha"
-      echo "    $node ${sha:0:16}"
+      echo "    $node ${sha:0:16}  (SHA-256 matches the release)"
     done
   fi
 
-    say "Waiting for every node's probe to pass 5/5 on the new build (up to 150s)"
+  say "Waiting for every node's probe to pass 5/5 on the new build (up to 150s)"
   for _ in $(seq 1 30); do
     fleet_report "$expect" > /tmp/dialtone-fleet.txt && { cat /tmp/dialtone-fleet.txt; say "DEPLOYED: every node passed its probe"; return 0; }
     sleep 5
