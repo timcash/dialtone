@@ -742,6 +742,10 @@ struct Mesh {
     own_inventory_version: u64,
     /// Neighbors by how many beats in a row did not list this node (see `on_beat`).
     one_sided: HashMap<EndpointId, u32>,
+    /// When each current neighbor became one, and when a silent one was last joined again
+    /// (monotonic ms; see `rejoin_silent_neighbors`).
+    neighbor_since: HashMap<EndpointId, u64>,
+    silent_rejoined_at: HashMap<EndpointId, u64>,
     /// What this node last announced for each program it deploys, by name, with when it was
     /// removed (monotonic ms) for programs it no longer deploys.
     announced: HashMap<String, (Deploy, Option<u64>)>,
@@ -810,6 +814,8 @@ impl Mesh {
             inventories: HashMap::new(),
             own_inventory_version: 0,
             one_sided: HashMap::new(),
+            neighbor_since: HashMap::new(),
+            silent_rejoined_at: HashMap::new(),
             announced: HashMap::new(),
             announced_all_at: 0,
             new_node_seen: false,
@@ -857,11 +863,13 @@ impl Mesh {
                 }
                 event = self.receiver.next(), if self.subscribed => {
                     let ended = match event {
-                        Some(Ok(GossipEvent::NeighborUp(_))) => {
+                        Some(Ok(GossipEvent::NeighborUp(peer))) => {
+                            self.neighbor_since.insert(peer, monotonic_now_ms());
                             self.neighbors_changed();
                             None
                         }
-                        Some(Ok(GossipEvent::NeighborDown(_))) => {
+                        Some(Ok(GossipEvent::NeighborDown(peer))) => {
+                            self.neighbor_since.remove(&peer);
                             self.neighbors_changed();
                             self.keep_neighbors().await;
                             None
@@ -1313,6 +1321,7 @@ impl Mesh {
         }
         self.ctx.scores(PeerScores::decay);
         self.keep_neighbors().await;
+        self.rejoin_silent_neighbors().await;
 
         let counter = self.counter;
         if counter <= 2 || counter.is_multiple_of(INVENTORY_REFRESH_EVERY) {
@@ -1468,6 +1477,59 @@ impl Mesh {
         // early TTL pruning.
         beat.updated_at_unix = now_unix();
         self.merge_peer_beat(beat);
+    }
+
+    /// A neighbor that does not count this node as its neighbor sends it nothing, so its
+    /// beats never arrive (when it has no other neighbors, they go nowhere at all). A
+    /// neighbor this node has not heard a fresh beat from for three beat intervals is joined
+    /// again, which completes the link on both sides; at most once per three intervals.
+    async fn rejoin_silent_neighbors(&mut self) {
+        let now = monotonic_now_ms();
+        let grace = 3 * self.beat_interval_secs * 1000;
+        let neighbors: Vec<EndpointId> = self.receiver.neighbors().collect();
+        self.neighbor_since.retain(|id, _| neighbors.contains(id));
+        self.silent_rejoined_at
+            .retain(|id, _| neighbors.contains(id));
+        let unix = now_unix();
+        let silent: Vec<(EndpointId, String)> = self
+            .ctx
+            .with_state(|st| {
+                neighbors
+                    .iter()
+                    .filter(|id| {
+                        let id = id.to_string();
+                        !st.nodes.iter().any(|n| {
+                            n.node_id == id
+                                && unix.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n)
+                        })
+                    })
+                    .map(|id| {
+                        let name = st
+                            .nodes
+                            .iter()
+                            .find(|n| n.node_id == id.to_string())
+                            .map(|n| n.node.clone())
+                            .unwrap_or_else(|| id.fmt_short().to_string());
+                        (*id, name)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (id, name) in silent {
+            let since = *self.neighbor_since.entry(id).or_insert(now);
+            let last = self.silent_rejoined_at.get(&id).copied().unwrap_or(0);
+            if now.saturating_sub(since) < grace || now.saturating_sub(last) < grace {
+                continue;
+            }
+            self.silent_rejoined_at.insert(id, now);
+            println!(
+                "[mesh] neighbor '{name}' has sent no beat for {}s; joining it again",
+                grace / 1000
+            );
+            let _ =
+                tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(vec![id]))
+                    .await;
+        }
     }
 
     /// iroh-gossip's HyParView can lose the one `Neighbor` reply that completes a link and
