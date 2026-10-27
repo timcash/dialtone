@@ -279,6 +279,50 @@ sys.exit(not any(p["name"] == sys.argv[1] and p.get("status") == "running" for p
   until_ok 60 "${names[1]} removed the targeted program" lacks_named 1 e2e-targeted
   echo "    Targeted deploy: ran on ${names[1]} only, removed with its origin"
 
+  # A direct link: UDP packets from a source on a reach a listener on b (one of them split
+  # into parts and put back together), and a TCP service on a answers through b.
+  e2e_post 0 /api/links/export '{"name":"e2e-cam","udp":"127.0.0.1:19621"}' >/dev/null
+  e2e_post 0 /api/links/export '{"name":"e2e-web","tcp":"127.0.0.1:19631"}' >/dev/null
+  e2e_post 1 /api/links/import "{\"node\":\"${names[0]}\",\"name\":\"e2e-cam\",\"udp\":\"127.0.0.1:19622\"}" >/dev/null
+  e2e_post 1 /api/links/import "{\"node\":\"${names[0]}\",\"name\":\"e2e-web\",\"tcp\":\"127.0.0.1:19632\"}" >/dev/null
+  python3 - <<'PY' || fail "packets did not cross the link"
+import socket, threading, time
+rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); rx.bind(("127.0.0.1", 19622)); rx.settimeout(0.5)
+tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+want = {b"small", bytes(range(256)) * 12}
+got, deadline = set(), time.time() + 30
+while got != want and time.time() < deadline:
+    for p in want - got:
+        tx.sendto(p, ("127.0.0.1", 19621))
+    try:
+        while True:
+            got.add(rx.recvfrom(65535)[0])
+    except socket.timeout:
+        pass
+assert got == want, "received %d of %d packets" % (len(got & want), len(want))
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("127.0.0.1", 19631)); srv.listen(1)
+threading.Thread(target=lambda: (lambda c: (c.sendall(c.recv(100) + b" back"), c.close()))(srv.accept()[0]), daemon=True).start()
+for _ in range(30):
+    try:
+        c = socket.create_connection(("127.0.0.1", 19632), timeout=5); c.sendall(b"hello")
+        reply = c.recv(100)
+        if reply:
+            break
+    except OSError:
+        pass
+    time.sleep(1)
+assert reply == b"hello back", reply
+PY
+  get 1 /api/links | python3 -c '
+import sys, json
+imports = {i["name"]: i for i in json.load(sys.stdin)["imports"]}
+cam = imports["e2e-cam"]
+assert cam["state"] == "up" and cam["path"] == "direct" and cam["rtt_ms"] is not None, cam
+assert cam["counters"]["packets_in"] >= 2, cam'
+  e2e_post 1 /api/links/close "{\"id\":\"${names[0]}/e2e-cam\"}" >/dev/null
+  echo "    Link: UDP (a split packet too) and TCP crossed a direct link from a to b; it reports DIRECT and an Rtt"
+
     kill "${E2E_PIDS##* }"
   a_sees_c_silent() { e2e_post 0 /api/probe | python3 -c '
 import sys, json

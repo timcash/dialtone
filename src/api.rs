@@ -198,6 +198,9 @@ pub struct NodeState {
     /// NodeIds of this node's gossip neighbors on the beats topic. Kept by the Mesh actor.
     #[serde(default)]
     pub gossip_neighbors: Vec<String>,
+    /// This node's direct links for live media (`link.rs`), when the node runs.
+    #[serde(skip)]
+    pub links: Option<crate::link::Links>,
     /// Asks the Probe actor for a run (`POST /api/probe`), when the node runs actors.
     #[serde(skip)]
     pub probe_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::probe::ProbeRequest>>,
@@ -663,6 +666,7 @@ impl NodeState {
             details_cache: HashMap::new(),
             gossip_neighbors: Vec::new(),
             probe_tx: None,
+            links: None,
         };
         st.record_event(
             "mesh.boot",
@@ -1194,6 +1198,81 @@ fn route_request(
                     write_json(&mut stream, 200, &details)
                 }
                 Err(err) => write_json(&mut stream, 502, &json!({ "error": err })),
+            }
+        }
+        ("GET", "/api/links") => match st.links.clone() {
+            Some(links) => {
+                drop(st);
+                write_json(&mut stream, 200, &links.status())
+            }
+            None => write_json(&mut stream, 503, &json!({ "error": "node not running" })),
+        },
+        ("POST", "/api/links/export")
+        | ("POST", "/api/links/import")
+        | ("POST", "/api/links/close") => {
+            // Direct links for live media (`link.rs`): offer a source, open a peer's, or close.
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let text = |k: &str| {
+                parsed
+                    .get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            };
+            let Some(links) = st.links.clone() else {
+                return write_json(&mut stream, 503, &json!({ "error": "node not running" }));
+            };
+            let target = || -> Result<(crate::link::LinkKind, std::net::SocketAddr), String> {
+                let (kind, raw) = match (text("udp"), text("tcp")) {
+                    (u, t) if !u.is_empty() && t.is_empty() => (crate::link::LinkKind::Udp, u),
+                    (u, t) if u.is_empty() && !t.is_empty() => (crate::link::LinkKind::Tcp, t),
+                    _ => return Err("give exactly one of udp or tcp (an ip:port)".to_string()),
+                };
+                let addr = raw
+                    .parse()
+                    .map_err(|e| format!("invalid address '{raw}': {e}"))?;
+                Ok((kind, addr))
+            };
+            let result = match path {
+                "/api/links/export" => {
+                    drop(st);
+                    target().and_then(|(kind, addr)| {
+                        links.export(&text("name"), kind, addr)?;
+                        Ok(json!({ "status": "exported", "name": text("name") }))
+                    })
+                }
+                "/api/links/import" => {
+                    // `node` is a node name or NodeId in the mesh.
+                    let node = text("node");
+                    let peer = st
+                        .nodes
+                        .iter()
+                        .find(|n| n.node == node || n.node_id == node)
+                        .map(|n| (n.node.clone(), n.node_id.clone()));
+                    drop(st);
+                    match peer {
+                        None => Err(format!("no node '{node}' in the mesh")),
+                        Some((name, id)) => target().and_then(|(kind, addr)| {
+                            let peer_id = id.parse().map_err(|_| "invalid NodeId".to_string())?;
+                            let id = links.import(&name, peer_id, &text("name"), kind, addr)?;
+                            Ok(json!({ "status": "importing", "id": id }))
+                        }),
+                    }
+                }
+                _ => {
+                    drop(st);
+                    let id = text("id");
+                    if links.close(&id) {
+                        Ok(json!({ "status": "closed", "id": id }))
+                    } else {
+                        Err(format!("no export or import '{id}'"))
+                    }
+                }
+            };
+            match result {
+                Ok(body) => write_json(&mut stream, 200, &body),
+                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
         ("GET", "/api/devices") => {

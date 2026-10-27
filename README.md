@@ -500,6 +500,28 @@ With gossip only and compact beats (envelope v6), 50 nodes on the same Mac conve
 
 On Windows the test starts its nodes through WMI. Microsoft Defender's behaviour monitoring once flagged `dialtone.exe` on a fleet machine during such a run (`Trojan:Win32/Bearfoos.A!ml`, a machine-learning detection) and quarantined it, which stopped that machine's node; check Defender before running it on a machine you depend on.
 
+### Direct links (video)
+
+Gossip carries only what every node needs. Live media goes over a **link**: a direct QUIC connection between exactly two nodes (ALPN `dialtone/link/1`, `link.rs`), opened only while someone uses it. The allowlist decides who may open one, and iroh's hole punching finds a direct path; when two nodes cannot reach each other directly the link still runs through the relay and says so (`RELAY`, with more latency).
+
+```bash
+# On the node with the camera: offer what arrives on 127.0.0.1:5000 as "cam".
+dialtone link export cam --udp 127.0.0.1:5000
+ffmpeg -f dshow -i video="Cam Link 4K" -c:v libx264 -preset ultrafast -tune zerolatency \
+  -g 30 -f mpegts "udp://127.0.0.1:5000?pkt_size=1128"          # macOS: -f avfoundation -i "0"
+
+# On the viewer: deliver node "camera-node"'s "cam" to 127.0.0.1:6000 and play it.
+dialtone link import camera-node/cam --udp 127.0.0.1:6000
+ffplay -fflags nobuffer -flags low_delay -framedrop udp://127.0.0.1:6000
+
+dialtone link list      # each link: DIRECT or RELAY, QUIC's Rtt, packets in / out / dropped
+dialtone link close camera-node/cam
+```
+
+- **UDP** (`--udp`): on the exporting node, the address the source sends to; on the importing node, where packets are delivered. Packets travel as QUIC datagrams: unreliable and unordered, so a late frame is dropped instead of delaying the next one. A packet larger than the path allows is split into parts and put back together (a lost part drops its packet); `pkt_size=1128` (six MPEG-TS packets) keeps each one in a single datagram. Replies (RTCP) travel back to the source.
+- **TCP** (`--tcp`): on the exporting node, a service to connect to (an RTSP or HTTP server); on the importing node, an address to listen on. Each TCP connection gets its own QUIC stream.
+- Exports live in the running node until it restarts or `link close`; imports reconnect until closed. `GET /api/links` and `POST /api/links/{export,import,close}` are the API; the HUD lists this node's links with their path and Rtt.
+
 ### Devices
 
 Every node lists the devices connected to it — cameras, microphones, speakers, keyboards, pointers (mice, trackpads), displays, printers, storage, Bluetooth devices and gamepads — using the OS's own view: `system_profiler` on macOS, `Get-PnpDevice` on Windows, `/sys` and `/proc` on Linux. Only each device's kind, name, bus (`built-in`, `usb`, `bluetooth`, `hid`, `display`, ...) and a short detail are kept; serial numbers and device IDs are dropped.

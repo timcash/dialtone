@@ -46,6 +46,9 @@ fn print_usage() {
          \x20 secret                   Generate a new channel secret (dt-...)\n\
          \x20 allowlist [list|add|remove] [<node_id>] Manage the allowlist in ~/.dialtone/config.json\n\
          \x20 blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket\n\
+         \x20 link export <name> --udp|--tcp <ip:port>    Offer a local source to peers over a direct link\n\
+         \x20 link import <node>/<name> --udp|--tcp <ip:port>  Open a peer's source and deliver it here\n\
+         \x20 link [list|close <id>]   Show links (path direct or relay, Rtt, packets), or close one\n\
          \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use invite\n\
          \x20 daemon [install|status]  Install or inspect the daemon that starts the node at login\n\
          \x20 probe [--all]            Run one probe now: the gossip checks (MSH, NBR, BEAT; nodes run them\n\
@@ -70,7 +73,9 @@ fn print_usage() {
          \x20 --expect-peers <count>   Expected peer count for 'dialtone mesh-test'\n\
          \x20 --timeout <duration>     Timeout for 'dialtone mesh-test' (default: 15s)\n\
          \x20 --force                  Pull over QUIC even if the blob is already in the store\n\
-         \x20 --install-daemon         Install the daemon so the node starts at login\n\
+         \x20 --udp <ip:port>          'dialtone link': where the source sends (export) or packets go (import)\n\
+         \x20 --tcp <ip:port>          'dialtone link': the service to connect to (export) or listen on (import)\n\
+         \x20 --install-daemon        Install the daemon so the node starts at login\n\
          \x20 --no-tailnet             Exclude Tailscale (100.64.0.0/10 & fd7a:115c:a1e0::/48) and bind physical IPv4\n\
          \x20 --allow-tailnet          Allow Tailscale interface addresses\n\
          \x20 --private-mesh           Disable relays, Pkarr DNS, and Mainline DHT (direct static peer QUIC only)\n\
@@ -104,6 +109,10 @@ struct CliOptions {
     peer_addrs: Vec<String>,
     blob_subcmd: String,
     blob_target: Option<String>,
+    link_subcmd: String,
+    link_target: Option<String>,
+    link_udp: Option<String>,
+    link_tcp: Option<String>,
     force: bool,
     json: bool,
     expect_peers: Option<usize>,
@@ -155,6 +164,10 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         peer_addrs: Vec::new(),
         blob_subcmd: "share".to_string(),
         blob_target: None,
+        link_subcmd: "list".to_string(),
+        link_target: None,
+        link_udp: None,
+        link_tcp: None,
         force: false,
         json: false,
         expect_peers: None,
@@ -204,6 +217,26 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                         }
                     }
                 }
+            }
+            "link" if !action_set => {
+                opts.action = "link".to_string();
+                action_set = true;
+                if let Some(sub) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                    idx += 1;
+                    opts.link_subcmd = sub.clone();
+                    if let Some(target) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                        idx += 1;
+                        opts.link_target = Some(target.clone());
+                    }
+                }
+            }
+            "--udp" => {
+                idx += 1;
+                opts.link_udp = Some(args.get(idx).ok_or("missing --udp value")?.clone());
+            }
+            "--tcp" => {
+                idx += 1;
+                opts.link_tcp = Some(args.get(idx).ok_or("missing --tcp value")?.clone());
             }
             "allowlist" if !action_set => {
                 opts.action = "allowlist".to_string();
@@ -481,6 +514,68 @@ fn update_boot_stage(
                 stage.updated_at_unix = now_unix();
             }
         }
+    }
+}
+
+/// Print `GET /api/links` as a table. A link over the relay is flagged: expect more latency.
+fn print_links(resp: &serde_json::Value) {
+    let text = |v: &serde_json::Value, k: &str| {
+        v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    };
+    let rtt = |v: &serde_json::Value| {
+        v.get("rtt_ms")
+            .and_then(|r| r.as_f64())
+            .map(|r| format!("{r:.1}ms"))
+            .unwrap_or_else(|| "-".to_string())
+    };
+    let counters = |v: &serde_json::Value| {
+        let c = &v["counters"];
+        format!(
+            "in {} pkts / out {} pkts, {} dropped",
+            c["packets_in"], c["packets_out"], c["drops"]
+        )
+    };
+    let path = |p: String| match p.as_str() {
+        "relay" => "RELAY (slower: no direct path)".to_string(),
+        "direct" => "DIRECT".to_string(),
+        _ => "-".to_string(),
+    };
+    let empty = Vec::new();
+    for e in resp["exports"].as_array().unwrap_or(&empty) {
+        println!(
+            "export {:<16} {} {:<22} {}",
+            text(e, "name"),
+            text(e, "kind"),
+            text(e, "addr"),
+            counters(e)
+        );
+        for v in e["viewers"].as_array().unwrap_or(&empty) {
+            let id = text(v, "node_id");
+            println!(
+                "    viewer {}  {}  {}",
+                id.get(..10).unwrap_or(&id),
+                path(text(v, "path")),
+                rtt(v)
+            );
+        }
+    }
+    for i in resp["imports"].as_array().unwrap_or(&empty) {
+        let err = text(i, "error");
+        println!(
+            "import {:<24} {} -> {:<22} {:<10} {}  {}  {}{}",
+            text(i, "id"),
+            text(i, "kind"),
+            text(i, "addr"),
+            text(i, "state"),
+            path(text(i, "path")),
+            rtt(i),
+            counters(i),
+            if err.is_empty() {
+                String::new()
+            } else {
+                format!("  ({err})")
+            }
+        );
     }
 }
 
@@ -860,6 +955,10 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         st.gossip_metrics = Some(gossip.metrics().clone());
     }
     let blobs_proto = iroh_blobs::BlobsProtocol::new(blobs.api(), None);
+    let links = dialtone::link::Links::new(endpoint.clone());
+    if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
+        st.links = Some(links.clone());
+    }
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
         .accept(iroh_blobs::ALPN, blobs_proto)
@@ -867,6 +966,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             dialtone::fetch::ALPN,
             dialtone::fetch::FetchHandler::new(shared_state.clone()),
         )
+        .accept(dialtone::link::ALPN, links)
         .spawn();
 
     if let Some(st_arc) = &shared_state {
@@ -1359,6 +1459,65 @@ async fn main() {
                     "unknown blob subcommand {other:?}; use: dialtone blob [share|pull] <arg>"
                 )),
             }
+        })(),
+        "link" => (|| -> Result<(), String> {
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+            let call = |path: &str, body: serde_json::Value| {
+                local_daemon_http_json(&opts.listen, "POST", path, Some(&body), &api_token, 20)
+            };
+            let resp = match opts.link_subcmd.as_str() {
+                "export" => {
+                    let name = opts.link_target.as_deref().ok_or(
+                        "usage: dialtone link export <name> --udp <ip:port> | --tcp <ip:port>",
+                    )?;
+                    call(
+                        "/api/links/export",
+                        json!({ "name": name, "udp": opts.link_udp, "tcp": opts.link_tcp }),
+                    )?
+                }
+                "import" => {
+                    let (node, name) = opts
+                        .link_target
+                        .as_deref()
+                        .and_then(|t| t.split_once('/'))
+                        .ok_or("usage: dialtone link import <node>/<name> --udp <ip:port> | --tcp <ip:port>")?;
+                    call(
+                        "/api/links/import",
+                        json!({ "node": node, "name": name, "udp": opts.link_udp, "tcp": opts.link_tcp }),
+                    )?
+                }
+                "close" => {
+                    let id = opts
+                        .link_target
+                        .as_deref()
+                        .ok_or("usage: dialtone link close <name | node/name>")?;
+                    call("/api/links/close", json!({ "id": id }))?
+                }
+                "list" | "status" => {
+                    let resp =
+                        local_daemon_http_json(&opts.listen, "GET", "/api/links", None, &api_token, 5)?;
+                    if opts.json {
+                        resp
+                    } else {
+                        print_links(&resp);
+                        return Ok(());
+                    }
+                }
+                other => {
+                    return Err(format!(
+                        "unknown link subcommand {other:?}; use: dialtone link [export|import|list|close]"
+                    ))
+                }
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&resp).unwrap_or_default()
+            );
+            Ok(())
         })(),
         "devices" => dialtone::devices::list_devices().map(|devices| {
             if opts.json {

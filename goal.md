@@ -60,6 +60,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | `actors.rs` | The running node's actors and the channels between them |
 | `devices.rs` | Device listing per OS (`system_profiler`, `Get-PnpDevice`, `/sys`) |
 | `fetch.rs` | Fetch: the `dialtone/fetch/1` request–answer protocol |
+| `link.rs` | Links: direct QUIC connections for live media (`dialtone/link/1`) |
 | `probe.rs` | Probe checks and full probes |
 | `hud/` | The HUD's static files and vendored three.js / h3-js |
 
@@ -71,17 +72,23 @@ and config field names) were accepted for a while after the rename and were remo
 
 ## Current Work
 
-1. **Next — in progress:** direct links for video (`dialtone/link/1`, phase 3). **Candidates:** rerun `scale-fleet` to see whether the
+1. **Next — candidates:** rerun `scale-fleet` to see whether the
    longer `message_id_retention` removed the extra messages; cut the remaining duplicate gossip frames (IDONTWANT as
    in GossipSub v1.2); start Windows scale nodes without WMI; the API reading `watch` snapshots instead of locking
    node state.
-2. **Done — 2026-10-27: Deploys announced over gossip (phase 2).** A signed `Deploy` message on the events topic
+2. **Done — 2026-10-27: Direct links for video (phase 3).** `dialtone link export <name> --udp|--tcp <addr>` and
+   `dialtone link import <node>/<name> --udp|--tcp <addr>` carry a local source to one peer over a direct QUIC
+   connection (`dialtone/link/1`): UDP as QUIC datagrams (split and rejoined when too large; late packets dropped,
+   never queued), TCP as one stream per connection. `GET /api/links`, `dialtone link list` and the HUD show each
+   link's path (DIRECT, or RELAY when hole punching fails) and QUIC's Rtt. Checked by e2e (UDP with a split packet,
+   TCP) on macOS and by the same test on Windows; live video between fleet machines is next.
+3. **Done — 2026-10-27: Deploys announced over gossip (phase 2).** A signed `Deploy` message on the events topic
    (program advert, blob ticket, target NodeIds) replaced inventory-driven auto-deploy. Only targeted nodes pull,
    first from peers that already run the program, then the origin, after a random delay of up to one beat. Copies
    are removed when the origin removes the program, retargets it, or stops announcing it for 30 minutes; the origin
    re-announces every 10 minutes and soon after a node joins, so missed deploys are repaired through gossip. The
    probe program is no longer offered. Checked by e2e (deploy to all, deploy to one) and on the fleet.
-3. **Done — 2026-10-27: Gossip only, minimal by default.** Once joined, a node talks to the mesh only through
+4. **Done — 2026-10-27: Gossip only, minimal by default.** Once joined, a node talks to the mesh only through
    gossip: no inventory fetches, no catch-ups, no Rtt requests. Beats are a compact postcard record (envelope v6),
    about 255 bytes sealed instead of 1.2 KB, with up to five gossip neighbors and QUIC's own Rtt to each (read from
    the open gossip connection by the Paths actor, which replaced Links); summaries are no longer gossiped. One-sided
@@ -90,7 +97,7 @@ and config field names) were accepted for a while after the rename and were remo
    stop being join candidates. What beats leave out is fetched for the HUD's focused node (`/api/details`).
    50 nodes on one Mac: converged in 12s at 42.5 kbit/s per node (was 19s at 200); the live fleet takes in
    0.76 kbit/s of gossip payload per node and opens no connection in steady state.
-4. **Done — 2026-10-25: Scaling phase B.** Peer scores after GossipSub (delivered, invalid; failed fetches only
+5. **Done — 2026-10-25: Scaling phase B.** Peer scores after GossipSub (delivered, invalid; failed fetches only
    steer fetches elsewhere — counting them toward the graylist cut a node off from the live mesh during a rolling
    deploy, caught by the deploy gate). Scuttlebutt-style catch-up from one neighbor on joining and every 12 beats,
    with frames still signed by their authors; inventory fetches return the signed frame too. Devices and full
@@ -101,7 +108,7 @@ and config field names) were accepted for a while after the rename and were remo
    a fix after one run each and made no difference over two more. `GET /api/net` adds iroh-gossip's data /
    control frame counts and each peer's last fetch error. Defender flagged a Windows node's binary during a fleet
    run (`Bearfoos.A!ml`, behaviour-based; the test starts nodes through WMI) and quarantined it.
-5. **Done — 2026-10-25: Gossip that scales (Phase A, after libp2p GossipSub).** Each node keeps 2 to 5 neighbors
+6. **Done — 2026-10-25: Gossip that scales (Phase A, after libp2p GossipSub).** Each node keeps 2 to 5 neighbors
    and joins three random known peers only when it has fewer than two, instead of joining every known peer every
    beat. Beats are a fixed ~1.2 KB (binary envelope v5, no seed lists, no per-peer probe results, no details); they
    announce the node's inventory version, and inventories go on a separate events topic when they change or are
@@ -111,26 +118,26 @@ and config field names) were accepted for a while after the rename and were remo
    peers and the probe program. `./dialtone.sh scale N` measures it: 10 local nodes went from 56 Mbit/s per node
    (2001 connections opened) to 60 kbit/s; 30 nodes, which never converged, converge in 8s at 120 kbit/s; 50 in 19s
    at 200 kbit/s.
-6. **Done — 2026-10-25: One script.** `./dialtone.sh check | lint | e2e | deploy | fleet` replaced `ci.sh`, `e2e.sh`,
+7. **Done — 2026-10-25: One script.** `./dialtone.sh check | lint | e2e | deploy | fleet` replaced `ci.sh`, `e2e.sh`,
    `domain-lint.sh` and the local fleet deploy / test scripts. Fleet hosts live in the uncommitted `fleet.local.env`;
    `deploy` ends by waiting until every node's probe passes on the new build.
-7. **Done — 2026-10-25: Self-testing mesh and removals.** Every node runs a Probe every 30s against the live mesh:
+8. **Done — 2026-10-25: Self-testing mesh and removals.** Every node runs a Probe every 30s against the live mesh:
    it writes a fresh blob, pulls every peer's latest probe blob over QUIC (SHA-256 verified), checks beats both ways,
    mesh membership and the probe program; results travel in beats and show in the HUD. It immediately found that
    the downloader's 1s connect timeout broke pulls over relayed / high-Rtt paths (now 10s) and that mesh-deployed
    programs could not be removed (copies now follow their origin). Removed: the old-name compatibility layer,
    the fake A/B slot and KV checks, the Rust node placement the HUD duplicated. Also fixed: `dialtone hud` next to
    a running node rewrote its config, hung on the store lock and could reap its processes.
-8. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
+9. **Done — 2026-10-25: Faster change → test loop.** The everyday `--release` build no longer uses fat LTO
    (`dist` profile keeps it for tagged releases): a one-file change rebuilds in ~1.5s instead of ~52s, `check` and
    fleet deploys reuse that build. Removed the in-process `self-test` command (`run_self_test`, the MemStore blob
    transfer and the gossip fixture in production code), which duplicated `cargo test`; GitHub CI no longer builds a
    second LTO binary just to run it, and `cargo test` builds one test binary instead of three.
-9. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
+10. **Done — 2026-10-25: Devices.** `dialtone devices` and a Devices actor list each node's cameras, microphones,
    speakers, keyboards, pointers, displays, printers, storage and Bluetooth devices (no serials or IDs); they
    travel in the Inventory, appear in `GET /api/devices` and `/api/mesh`, and the HUD lists the focused node's
    devices with a 7th tour step, `DEV`.
-10. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
+11. **Done — 2026-10-25: Phase 4 architecture.** The HUD is `src/hud/` static files served from `/hud/` with
    vendored three.js 0.179.1 and h3-js 4.4.0 (no CDN). The API parses requests with `httparse` and rejects
    `Transfer-Encoding`, ambiguous `Content-Length` and oversize heads. One persistent iroh-blobs `FsStore` replaces
    the SHA-256 file tree and the in-memory store: blobs are named by `sha256/<hex>` tags, GC removes untagged data,
@@ -138,14 +145,14 @@ and config field names) were accepted for a while after the rename and were remo
    `run_node` boots the node and starts six actors (`actors.rs`: Mesh, Stats, Supervisor, Links, Allowlist,
    Deploy) stopped by one `CancellationToken`. Gossip carries a typed `Message` (envelope v4 then: Beat, Summary,
    Echo, Inventory); processes and services travel only in inventories, sent on change.
-11. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
+12. **Done — 2026-10-25: Phase 3 cleanup.** Removed the 11 `*-fixture` / preview commands and the fabricated
    seeded node state (`dialtone hud` now serves live state); the deploy-plan, build-cache, build-decision, manifest,
    proof-validation, alert-ack, tiered-fetch, process-intent, install.sh, catalog, command-journal / rtcore UDP,
    cursor-job, key-lease, service-ref, systemd drop-in and peer-cache code; 22 API routes no caller used, including
    the one-frame `/ws` stub; the hand-written SHA-1 (now unneeded) and hex / base64 codecs (now the `hex` and
    `base64` crates, same accepted inputs). The self-test exercises only real behaviour. The HUD's non-working
    Init / Invite / Join actions became a panel of the CLI commands (the page carries no API token by design).
-12. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
+14. **Done — 2026-10-23:** Phase 2 reliability, Phase 1 security, domain language, cleanup tier A.
    **2026-10-22:** authentic stats, Rtt, 5s / 30s beats, H3 globe, blob / process FX (see §0).
 
 ## Main Features (System Map)

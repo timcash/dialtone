@@ -5,6 +5,7 @@ pub mod devices;
 pub mod fetch;
 pub mod h3_land;
 pub mod hud;
+pub mod link;
 pub mod mesh;
 pub mod node;
 pub mod probe;

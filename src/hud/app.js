@@ -2195,7 +2195,8 @@ function renderTopShellStats() {
 
   const hudEl = document.getElementById("node-top-hud");
     const deviceLines = renderDeviceLines(target, stepMeta.code === "DEV");
-  hudEl.innerHTML = [...overallRows, "", headerLine, ...nodeRows, "", ...deviceLines].join("\n");
+  const linkLines = renderLinkLines();
+  hudEl.innerHTML = [...overallRows, "", headerLine, ...nodeRows, "", ...deviceLines, ...linkLines].join("\n");
 
   renderTourClosedCaptions({
     nodes,
@@ -2848,6 +2849,39 @@ function withDetails(node) {
   return out;
 }
 
+// This node's direct links for live media (`GET /api/links`): what it exports and imports,
+// each with its path (DIRECT, or RELAY when no direct path was found) and QUIC's Rtt.
+let linkState = { exports: [], imports: [] };
+
+async function pollLinks() {
+  try {
+    const resp = await fetch("/api/links", { cache: "no-store" });
+    if (resp.ok) linkState = scrubStrings(await resp.json());
+  } catch (_) {}
+}
+
+function renderLinkLines() {
+  const exportsList = linkState.exports || [];
+  const importsList = linkState.imports || [];
+  if (exportsList.length === 0 && importsList.length === 0) return [];
+  const pathCell = p => p === "direct"
+    ? `<span class="hi">DIRECT</span>`
+    : (p === "relay" ? `<span class="warn">RELAY </span>` : `<span class="dim">------</span>`);
+  const rttCell = r => `<span class="dim">${padL(typeof r === "number" ? r.toFixed(1) + "ms" : "-", 8)}</span>`;
+  const pkts = c => `<span class="dim">${(c && c.packets_in) || 0} in / ${(c && c.packets_out) || 0} out${c && c.drops ? ", " + c.drops + " dropped" : ""}</span>`;
+  const lines = [`<span class="dim">LINKS (direct QUIC; dialtone link list)</span>`];
+  for (const e of exportsList) {
+    const viewers = e.viewers || [];
+    lines.push(`<span class="focus">EXP</span> ${padR(e.name, 16)} <span class="dim">${padR((e.kind || "").toUpperCase() + " " + e.addr, 26)}</span> ${viewers.length} viewer(s)  ${pkts(e.counters)}`);
+    for (const v of viewers) lines.push(`    ${padR((v.node_id || "").slice(0, 10), 12)} ${pathCell(v.path)} ${rttCell(v.rtt_ms)}`);
+  }
+  for (const i of importsList) {
+    const state = i.state === "up" ? `<span class="hi">UP  </span>` : `<span class="warn">WAIT</span>`;
+    lines.push(`<span class="focus">IMP</span> ${padR(i.id, 16)} <span class="dim">${padR((i.kind || "").toUpperCase() + " " + i.addr, 26)}</span> ${state} ${pathCell(i.path)} ${rttCell(i.rtt_ms)}  ${pkts(i.counters)}${i.error ? ` <span class="warn">${i.error}</span>` : ""}`);
+  }
+  return ["", ...lines];
+}
+
 async function pollGossipState() {
   try {
     const resp = await fetch("/api/mesh", { cache: "no-store" });
@@ -2879,3 +2913,5 @@ if (tourStops.length > 0) {
 detectNodeFxEvents(meshState.nodes || [], false);
 requestAnimationFrame(renderFrame);
 setInterval(pollGossipState, 1500);
+pollLinks();
+setInterval(pollLinks, 3000);
