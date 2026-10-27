@@ -81,7 +81,10 @@ and config field names) were accepted for a while after the rename and were remo
    connection (`dialtone/link/1`): UDP as QUIC datagrams (split and rejoined when too large; late packets dropped,
    never queued), TCP as one stream per connection. `GET /api/links`, `dialtone link list` and the HUD show each
    link's path (DIRECT, or RELAY when hole punching fails) and QUIC's Rtt. Checked by e2e (UDP with a split packet,
-   TCP) on macOS and by the same test on Windows; live video between fleet machines is next.
+   TCP) on macOS and Windows. Live, between two Windows fleet machines on a direct path: a 720p30 H.264 stream
+   at 4 Mbit/s crossed with every one of 11,539 packets delivered and none dropped, while 64-byte probes echoed
+   through the same link took 13 ms p50 / 29 ms p99 round trip. Capturing the Cam Link 4K with ffmpeg on the sending
+   machine ran at only 0.17x real time (5 fps): the capture and scaling, not the link, limit live camera video there.
 3. **Done — 2026-10-27: Deploys announced over gossip (phase 2).** A signed `Deploy` message on the events topic
    (program advert, blob ticket, target NodeIds) replaced inventory-driven auto-deploy. Only targeted nodes pull,
    first from peers that already run the program, then the origin, after a random delay of up to one beat. Copies
