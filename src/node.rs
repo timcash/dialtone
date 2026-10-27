@@ -462,15 +462,15 @@ mod tests {
 
     #[test]
     fn tailnet_ip_filter_strips_cgnat_and_ula_while_preserving_physical_addrs() {
-        assert!(is_tailnet_ip("100.87.0.37".parse().unwrap()));
-        assert!(is_tailnet_ip("100.67.101.57".parse().unwrap()));
-        assert!(is_tailnet_ip("fd7a:115c:a1e0::3833:26".parse().unwrap()));
+        assert!(is_tailnet_ip("100.64.0.1".parse().unwrap()));
+        assert!(is_tailnet_ip("100.127.255.254".parse().unwrap()));
+        assert!(is_tailnet_ip("fd7a:115c:a1e0::1".parse().unwrap()));
         assert!(!is_tailnet_ip("192.168.1.212".parse().unwrap()));
-        assert!(!is_tailnet_ip("72.34.124.189".parse().unwrap()));
+        assert!(!is_tailnet_ip("203.0.113.7".parse().unwrap()));
 
         let id = SecretKey::generate().public();
         let addr = EndpointAddr::new(id)
-            .with_ip_addr("100.87.0.37:41641".parse().unwrap())
+            .with_ip_addr("100.64.0.1:41641".parse().unwrap())
             .with_ip_addr("192.168.1.212:57987".parse().unwrap());
         let filtered = advertised_endpoint_addr(&addr, &IrohTransportConfig::default());
         let ips: Vec<String> = filtered.ip_addrs().map(|a| a.to_string()).collect();
