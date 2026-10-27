@@ -11,7 +11,8 @@
 //! - **Paths** reads QUIC's Rtt estimate and selected path (direct or relay) from each
 //!   gossip neighbor's open connection, without sending anything.
 //! - **Allowlist** reloads the allowlist when `config.json` changes.
-//! - **Deploy** pulls, verifies and starts programs that allowlisted peers run.
+//! - **Deploy** pulls, verifies and starts the programs allowlisted peers announce to this
+//!   node (`Deploy` messages), and removes copies their origin no longer announces.
 //! - **Probe** checks the gossip mesh every 30s, and runs full probes (store, pulls,
 //!   programs) on request (see `probe.rs`).
 //!
@@ -29,10 +30,10 @@ use dialtone::blob::Blobs;
 use dialtone::fetch;
 use dialtone::mesh::{
     beat_fresh_secs, beat_interval_for, build_mesh_rtt_matrix, cached_local_public_ip_geo,
-    default_seeds, events_topic_id, is_valid_node_name, merge_beat, merge_inventory,
-    node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
+    default_seeds, events_topic_id, is_valid_node_name, merge_beat, merge_inventory, mesh_offer,
+    monotonic_now_ms, node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
     observe_peer_remote_addrs, open_message, prune_stale_peers, seal_message, try_load_mesh_config,
-    Beat, ChannelKeys, Inventory, LiveAllowlist, MeshControlCommand, Message, NeighborLink,
+    Beat, ChannelKeys, Deploy, Inventory, LiveAllowlist, MeshControlCommand, Message, NeighborLink,
     NodeDetails, PeerScores, ReplayGuard, SeedList, BEAT_INTERVAL_SECS, DEFAULT_PEER_TTL_SECS,
     SUMMARY_INTERVAL_SECS,
 };
@@ -90,13 +91,6 @@ impl Ctx {
 
 /// Sent to Mesh when this node's inventory (processes, services) changed.
 pub(crate) struct InventoryChanged;
-
-/// The programs a peer says it runs, sent by Mesh to Deploy for every admitted inventory.
-pub(crate) struct PeerPrograms {
-    node: String,
-    node_id: String,
-    processes: Vec<ProcessSpec>,
-}
 
 /// Everything Mesh needs at start; the rest it builds itself.
 pub(crate) struct MeshStart {
@@ -486,133 +480,212 @@ async fn sample_probe_blobs(ctx: &Ctx) -> HashMap<String, Result<String, String>
 // Deploy
 // ---------------------------------------------------------------------------------------
 
-/// Run the programs allowlisted peers offer: pull each from its ticket (only from an
-/// allowlisted provider), verify its SHA-256, stage it and start it. A copy follows its
-/// origin: when the origin's inventory stops offering a program, the copy is removed.
-async fn deploy_actor(ctx: Ctx, mut offers: mpsc::UnboundedReceiver<PeerPrograms>) {
-    let mut attempted: HashSet<(String, String)> = HashSet::new();
+/// An origin re-announces each program it deploys this often, for nodes that missed it.
+const REANNOUNCE_EVERY: Duration = Duration::from_secs(600);
+/// A copy whose origin is in the mesh but has not announced it for this long is removed.
+const DEPLOY_EXPIRY_SECS: u64 = 3 * REANNOUNCE_EVERY.as_secs();
+/// A program whose pull failed is tried again no sooner than this.
+const DEPLOY_RETRY_SECS: u64 = 120;
+/// Peers that already run a program, asked for its blob before its origin.
+const DEPLOY_PEER_PROVIDERS: usize = 3;
+
+/// Run what allowlisted peers announce to this node: pull each program (from a peer that
+/// already runs it when there is one, else from its origin), verify its SHA-256, stage it and
+/// start it, after a random delay of up to one beat interval so a large mesh does not pull
+/// at once. A copy follows its origin: it is removed when the origin announces it removed or
+/// no longer targets this node, or stops announcing it while still in the mesh.
+async fn deploy_actor(ctx: Ctx, mut deploys: mpsc::UnboundedReceiver<Deploy>) {
+    // (origin NodeId, program name) -> when the origin last announced it to this node.
+    let mut heard: HashMap<(String, String), u64> = HashMap::new();
+    // (origin NodeId, program name, digest) -> when this node last tried to pull it.
+    let mut attempted: HashMap<(String, String, String), u64> = HashMap::new();
+    let mut tick = every(Duration::from_secs(60));
     loop {
-        let offer = tokio::select! {
+        let deploy = tokio::select! {
             _ = ctx.cancel.cancelled() => break,
-            offer = offers.recv() => match offer {
-                Some(offer) => offer,
+            _ = tick.tick() => {
+                expire_copies(&ctx, &mut heard);
+                continue;
+            }
+            deploy = deploys.recv() => match deploy {
+                Some(deploy) => deploy,
                 None => break,
             },
         };
-        let offered: HashSet<(String, String)> = offer
+        let (origin, name) = (deploy.node_id.clone(), deploy.process.name.clone());
+        if !deploy.targets(&ctx.node_id) {
+            heard.remove(&(origin.clone(), name.clone()));
+            remove_copy(&ctx, &origin, &name, &deploy.node);
+            continue;
+        }
+        let now = now_unix();
+        heard.insert((origin.clone(), name.clone()), now);
+        let Some((running, store, providers, delay)) = ctx.with_state(|st| {
+            let running = st.processes.iter().any(|p| {
+                p.name == name
+                    && p.digest == deploy.process.digest
+                    && p.deployed_from.as_deref() == Some(origin.as_str())
+            });
+            (
+                running,
+                st.store.clone(),
+                peer_providers(st, &ctx.node_id, &origin, &deploy.process.digest),
+                st.nodes
+                    .iter()
+                    .find(|n| n.node_id == ctx.node_id)
+                    .map(|me| me.beat_interval_secs)
+                    .unwrap_or(BEAT_INTERVAL_SECS),
+            )
+        }) else {
+            continue;
+        };
+        let Some(store) = store else { continue };
+        let key = (origin.clone(), name.clone(), deploy.process.digest.clone());
+        if running
+            || attempted
+                .get(&key)
+                .is_some_and(|at| now.saturating_sub(*at) < DEPLOY_RETRY_SECS)
+        {
+            continue;
+        }
+        attempted.insert(key, now);
+        let state = ctx.state.clone();
+        let delay = Duration::from_millis(random_below(delay * 1000));
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let _ = tokio::task::spawn_blocking(move || {
+                install_copy(state, store, deploy, providers);
+            })
+            .await;
+        });
+    }
+}
+
+/// Up to `DEPLOY_PEER_PROVIDERS` peers, other than the origin, whose inventory says they run
+/// the program with `digest`: gossip neighbors first, the rest at random.
+fn peer_providers(st: &NodeState, own: &str, origin: &str, digest: &str) -> Vec<EndpointId> {
+    let mut holders: Vec<&Beat> = st
+        .nodes
+        .iter()
+        .filter(|n| n.node_id != own && n.node_id != origin)
+        .filter(|n| n.processes.iter().any(|p| p.digest == digest))
+        .collect();
+    shuffle(&mut holders);
+    holders.sort_by_key(|n| !st.gossip_neighbors.contains(&n.node_id));
+    holders
+        .iter()
+        .filter_map(|n| n.node_id.parse().ok())
+        .take(DEPLOY_PEER_PROVIDERS)
+        .collect()
+}
+
+/// Pull, verify, stage and start one announced program (blocking).
+fn install_copy(
+    state: Option<Arc<Mutex<NodeState>>>,
+    store: dialtone::blob::Store,
+    deploy: Deploy,
+    providers: Vec<EndpointId>,
+) {
+    let program = deploy.process;
+    let report = match store.pull_blob_from(&deploy.ticket, false, providers) {
+        Ok(report) => report,
+        Err(err) => {
+            eprintln!(
+                "[deploy] could not pull '{}' from '{}': {err}",
+                program.name, deploy.node
+            );
+            return;
+        }
+    };
+    let Ok((digest, staged)) =
+        dialtone::supervisor::stage_program(&store.blobs, &program.name, &report.digest)
+    else {
+        return;
+    };
+    let Some(Ok(mut st)) = state.as_ref().map(|s| s.lock()) else {
+        return;
+    };
+    if !st
+        .blob_fetches
+        .iter()
+        .any(|f| f.ticket_uri == report.ticket_uri)
+    {
+        st.blob_fetches.push(report);
+    }
+    let mut spec = program.clone();
+    spec.digest = digest;
+    spec.path = staged.to_string_lossy().to_string();
+    spec.pid = None;
+    spec.status = None;
+    spec.deploy_ticket = None;
+    spec.deployed_from = Some(deploy.node_id.clone());
+    match st.processes.iter_mut().find(|p| p.name == spec.name) {
+        Some(existing) => *existing = spec,
+        None => st.processes.push(spec),
+    }
+    st.reconcile_processes();
+    st.record_log(
+        "blob-supervisor",
+        "INFO",
+        "stdout",
+        format!(
+            "deployed '{}' from peer '{}' and started it",
+            program.name, deploy.node
+        ),
+    );
+}
+
+/// Remove the copy of `name` deployed from `origin`, if this node runs one.
+fn remove_copy(ctx: &Ctx, origin: &str, name: &str, origin_name: &str) {
+    ctx.with_state(|st| {
+        let is_copy = st
             .processes
             .iter()
-            .filter(|p| p.desired_state == "running" && p.deploy_ticket.is_some())
-            .map(|p| (p.name.clone(), p.digest.clone()))
-            .collect();
-        let origin = offer.node.clone();
-        ctx.with_state(|st| {
-            let stale: Vec<String> = st
-                .processes
-                .iter()
-                .filter(|p| p.deployed_from.as_deref() == Some(offer.node_id.as_str()))
-                .filter(|p| !offered.contains(&(p.name.clone(), p.digest.clone())))
-                .map(|p| p.name.clone())
-                .collect();
-            for name in stale {
-                if st.remove_process(&name) {
-                    st.record_log(
-                        "blob-supervisor",
-                        "INFO",
-                        "stdout",
-                        format!("removed '{name}': peer '{origin}' no longer offers it"),
-                    );
-                }
-            }
-        });
-        attempted.retain(|(node_id, digest)| {
-            *node_id != offer.node_id || offered.iter().any(|(_, d)| d == digest)
-        });
-        for program in offer.processes {
-            if program.desired_state != "running"
-                || dialtone::supervisor::is_probe_program(&program.name)
-            {
-                continue;
-            }
-            let Some(ticket) = program.deploy_ticket.clone() else {
-                continue;
-            };
-            let provider_listed = dialtone::blob::parse_blob_ticket_uri(&ticket)
-                .map(|(t, _)| ctx.allowlist.contains(&t.addr().id))
-                .unwrap_or(false);
-            if !provider_listed {
-                continue;
-            }
-            let Some((running, store)) = ctx.with_state(|st| {
-                let running = st.processes.iter().any(|p| {
-                    p.name == program.name
-                        && p.digest == program.digest
-                        && p.status.as_deref() == Some("running")
-                });
-                (running, st.store.clone())
-            }) else {
-                continue;
-            };
-            let Some(store) = store else { continue };
-            if running || !attempted.insert((offer.node_id.clone(), program.digest.clone())) {
-                continue;
-            }
-            let state = ctx.state.clone();
-            let provider = offer.node.clone();
-            let origin_id = offer.node_id.clone();
-            tokio::task::spawn_blocking(move || {
-                let Ok(report) = store.pull_blob(&ticket, false) else {
-                    return;
-                };
-                let Ok((digest, staged)) = dialtone::supervisor::stage_program(
-                    &store.blobs,
-                    &program.name,
-                    &report.digest,
-                ) else {
-                    return;
-                };
-                let Some(Ok(mut st)) = state.as_ref().map(|s| s.lock()) else {
-                    return;
-                };
-                if !st
-                    .blob_fetches
-                    .iter()
-                    .any(|f| f.ticket_uri == report.ticket_uri)
-                {
-                    st.blob_fetches.push(report);
-                }
-                let up_to_date = st.processes.iter().any(|p| {
-                    p.name == program.name
-                        && p.digest == digest
-                        && p.status.as_deref() == Some("running")
-                });
-                if up_to_date {
-                    return;
-                }
-                let mut spec = program.clone();
-                spec.digest = digest;
-                spec.path = staged.to_string_lossy().to_string();
-                spec.pid = None;
-                spec.status = None;
-                spec.deploy_ticket = None;
-                spec.deployed_from = Some(origin_id);
-                match st.processes.iter_mut().find(|p| p.name == spec.name) {
-                    Some(existing) => *existing = spec,
-                    None => st.processes.push(spec),
-                }
-                st.reconcile_processes();
-                st.record_log(
-                    "blob-supervisor",
-                    "INFO",
-                    "stdout",
-                    format!(
-                        "auto-deployed & executed process blob '{}' from peer '{}'",
-                        program.name, provider
-                    ),
-                );
-            });
+            .any(|p| p.name == name && p.deployed_from.as_deref() == Some(origin));
+        if is_copy && st.remove_process(name) {
+            st.record_log(
+                "blob-supervisor",
+                "INFO",
+                "stdout",
+                format!("removed '{name}': peer '{origin_name}' no longer deploys it here"),
+            );
         }
+    });
+}
+
+/// Remove copies whose origin is in the mesh but has not announced them for
+/// `DEPLOY_EXPIRY_SECS`. A copy this node has not heard about yet (it was installed before
+/// a restart) gets the full time from now.
+fn expire_copies(ctx: &Ctx, heard: &mut HashMap<(String, String), u64>) {
+    let now = now_unix();
+    let stale: Vec<(String, String, String)> = ctx
+        .with_state(|st| {
+            st.processes
+                .iter()
+                .filter_map(|p| {
+                    let origin = p.deployed_from.clone()?;
+                    let at = *heard.entry((origin.clone(), p.name.clone())).or_insert(now);
+                    let origin_beat = st.nodes.iter().find(|n| n.node_id == origin)?;
+                    let origin_live = now.saturating_sub(origin_beat.updated_at_unix)
+                        <= beat_fresh_secs(origin_beat);
+                    (origin_live && now.saturating_sub(at) > DEPLOY_EXPIRY_SECS)
+                        .then(|| (origin, p.name.clone(), origin_beat.node.clone()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    for (origin, name, origin_name) in stale {
+        heard.remove(&(origin.clone(), name.clone()));
+        remove_copy(ctx, &origin, &name, &origin_name);
     }
+}
+
+/// A random number of milliseconds below `max` (0 when `max` is 0).
+fn random_below(max: u64) -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u64(max);
+    h.finish() % max.max(1)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -628,6 +701,10 @@ const ONE_SIDED_BEATS: u32 = 2;
 /// Every this many beats, Mesh rebuilds its inventory to catch details that drift slowly
 /// (the public-IP lookup, addresses); it is broadcast only when it changed.
 const INVENTORY_REFRESH_EVERY: u64 = 6;
+/// When new nodes join, an origin re-announces its deploys at most this often.
+const NEW_NODE_ANNOUNCE_GAP: Duration = Duration::from_secs(60);
+/// How long an origin keeps announcing a program it removed (for nodes that missed it).
+const REMOVED_ANNOUNCE_FOR: Duration = Duration::from_secs(3600);
 
 /// Why `admit` dropped a frame.
 enum Rejected {
@@ -665,12 +742,19 @@ struct Mesh {
     own_inventory_version: u64,
     /// Neighbors by how many beats in a row did not list this node (see `on_beat`).
     one_sided: HashMap<EndpointId, u32>,
+    /// What this node last announced for each program it deploys, by name, with when it was
+    /// removed (monotonic ms) for programs it no longer deploys.
+    announced: HashMap<String, (Deploy, Option<u64>)>,
+    /// When every deploy was last announced again (monotonic ms).
+    announced_all_at: u64,
+    /// A node joined since then: announce again soon, so it hears what runs on the mesh.
+    new_node_seen: bool,
     control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
     /// QUIC's Rtt to each gossip neighbor, by NodeId (from Paths).
     rtt_rx: watch::Receiver<BTreeMap<String, f64>>,
     summary_rx: watch::Receiver<Option<StatsSummary>>,
     inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
-    deploy_tx: mpsc::UnboundedSender<PeerPrograms>,
+    deploy_tx: mpsc::UnboundedSender<Deploy>,
 }
 
 /// The next event on a topic, or never when not subscribed.
@@ -701,7 +785,7 @@ impl Mesh {
         rtt_rx: watch::Receiver<BTreeMap<String, f64>>,
         summary_rx: watch::Receiver<Option<StatsSummary>>,
         inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
-        deploy_tx: mpsc::UnboundedSender<PeerPrograms>,
+        deploy_tx: mpsc::UnboundedSender<Deploy>,
     ) -> Self {
         Mesh {
             ctx,
@@ -726,6 +810,9 @@ impl Mesh {
             inventories: HashMap::new(),
             own_inventory_version: 0,
             one_sided: HashMap::new(),
+            announced: HashMap::new(),
+            announced_all_at: 0,
+            new_node_seen: false,
             control_rx: start.control_rx,
             rtt_rx,
             summary_rx,
@@ -750,7 +837,10 @@ impl Mesh {
                     }
                 }
                 Some(cmd) = self.control_rx.recv() => self.on_control(cmd).await,
-                Some(InventoryChanged) = self.inventory_rx.recv() => self.refresh_own_inventory(true).await,
+                Some(InventoryChanged) = self.inventory_rx.recv() => {
+                    self.refresh_own_inventory(true).await;
+                    self.announce_deploys().await;
+                }
                 _ = beat_tick.tick() => {
                     self.on_beat_tick().await;
                     // Larger meshes beat less often (`beat_interval_for`).
@@ -1080,6 +1170,106 @@ impl Mesh {
         }
     }
 
+    /// The programs this node deploys to the mesh, as announcements. Targets named by node
+    /// name are announced by NodeId.
+    fn own_deploys(&self) -> HashMap<String, Deploy> {
+        self.ctx
+            .with_state(|st| {
+                st.processes
+                    .iter()
+                    .filter(|p| p.desired_state == "running")
+                    .filter_map(|p| {
+                        let (ticket, targets) = mesh_offer(p)?;
+                        let targets = targets
+                            .into_iter()
+                            .map(|t| match st.nodes.iter().find(|n| n.node == t) {
+                                Some(n) => n.node_id.clone(),
+                                None => t,
+                            })
+                            .collect();
+                        let deploy = Deploy {
+                            node: self.node.clone(),
+                            node_id: self.ctx.node_id.clone(),
+                            process: p.clone(),
+                            ticket,
+                            targets,
+                            sent_unix_ms: 0,
+                        };
+                        Some((p.name.clone(), deploy))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Announce what changed in this node's deploys: new or changed programs, and removed
+    /// ones. Every `REANNOUNCE_EVERY`, and soon after a node joins, announce them all again
+    /// (removed ones for `REMOVED_ANNOUNCE_FOR`), so nodes that missed one catch up through
+    /// gossip alone.
+    async fn announce_deploys(&mut self) {
+        if self.events_sender.is_none() {
+            return;
+        }
+        let now = monotonic_now_ms();
+        let current = self.own_deploys();
+        let mut send = Vec::new();
+        for (name, deploy) in &current {
+            let changed = match self.announced.get(name) {
+                Some((last, removed)) => {
+                    removed.is_some()
+                        || last.process.digest != deploy.process.digest
+                        || last.targets != deploy.targets
+                        || last.ticket != deploy.ticket
+                }
+                None => true,
+            };
+            if changed {
+                send.push(deploy.clone());
+                self.announced.insert(name.clone(), (deploy.clone(), None));
+            }
+        }
+        for (name, (last, removed)) in self.announced.iter_mut() {
+            if removed.is_none() && !current.contains_key(name) {
+                last.process.desired_state = "removed".to_string();
+                *removed = Some(now);
+                send.push(last.clone());
+            }
+        }
+        self.announced.retain(|_, (_, removed)| {
+            removed
+                .is_none_or(|at| now.saturating_sub(at) < REMOVED_ANNOUNCE_FOR.as_millis() as u64)
+        });
+        let since_all = now.saturating_sub(self.announced_all_at);
+        let again = since_all >= REANNOUNCE_EVERY.as_millis() as u64
+            || (self.new_node_seen && since_all >= NEW_NODE_ANNOUNCE_GAP.as_millis() as u64);
+        if again && !self.announced.is_empty() {
+            send = self.announced.values().map(|(d, _)| d.clone()).collect();
+        }
+        if again {
+            self.announced_all_at = now;
+            self.new_node_seen = false;
+        }
+        for deploy in send {
+            println!(
+                "[deploy] announcing '{}' ({}) to {}",
+                deploy.process.name,
+                deploy.process.desired_state,
+                if deploy.targets.is_empty() {
+                    "every node".to_string()
+                } else {
+                    format!("{} node(s)", deploy.targets.len())
+                }
+            );
+            if let (Some((wire, _)), Some(tx)) =
+                (self.seal(&Message::Deploy(deploy)), &self.events_sender)
+            {
+                self.ctx.net.count_out(wire.len());
+                let _ = tokio::time::timeout(Duration::from_millis(600), tx.broadcast(wire.into()))
+                    .await;
+            }
+        }
+    }
+
     /// Seal a message; returns the frame and the `sent_unix_ms` stamped in it.
     fn seal(&self, msg: &Message) -> Option<(Vec<u8>, u64)> {
         let keys = self.keys.as_ref()?;
@@ -1162,6 +1352,7 @@ impl Mesh {
         }
         self.broadcast(&Message::Beat(beat)).await;
         self.counter += 1;
+        self.announce_deploys().await;
     }
 
     /// Admit a message only if it opens with the channel key, its signature matches a
@@ -1254,6 +1445,9 @@ impl Mesh {
         match msg {
             Message::Inventory(inventory) => self.on_inventory(inventory),
             Message::Beat(beat) => self.on_beat(beat).await,
+            Message::Deploy(deploy) => {
+                let _ = self.deploy_tx.send(deploy);
+            }
         }
     }
 
@@ -1261,11 +1455,6 @@ impl Mesh {
         if !self.ctx.allowlist.contains_str(&inventory.node_id) {
             return;
         }
-        let _ = self.deploy_tx.send(PeerPrograms {
-            node: inventory.node.clone(),
-            node_id: inventory.node_id.clone(),
-            processes: inventory.processes.clone(),
-        });
         self.ctx
             .with_state(|st| merge_inventory(&mut st.nodes, &inventory));
         self.inventories
@@ -1318,7 +1507,7 @@ impl Mesh {
     fn merge_peer_beat(&mut self, mut beat: Beat) {
         let peer = beat.node.clone();
         let inventory = self.inventories.get(&beat.node_id).cloned();
-        self.ctx.with_state(|st| {
+        let joined = self.ctx.with_state(|st| {
             // The beat names its neighbors by NodeId prefix; the HUD wants names.
             beat.peer_rtt_ms = beat
                 .neighbors
@@ -1351,6 +1540,10 @@ impl Mesh {
                     format!("peer '{peer}' joined the gossip mesh"),
                 );
             }
+            first_seen
         });
+        if joined == Some(true) {
+            self.new_node_seen = true;
+        }
     }
 }

@@ -29,6 +29,7 @@ const ENVELOPE_MAGIC: &[u8; 4] = b"dt6\0";
 /// The type byte that starts a signed message.
 const BEAT_TYPE: u8 = 1;
 const INVENTORY_TYPE: u8 = 2;
+const DEPLOY_TYPE: u8 = 3;
 /// Beats sent more than this far from local time (either direction) are rejected.
 pub const REPLAY_WINDOW_MS: u64 = 5 * 60 * 1000;
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
@@ -1304,6 +1305,66 @@ impl Inventory {
     }
 }
 
+/// The env entry that offers a process to the mesh, and the one that names its targets
+/// (comma-separated node names or NodeId prefixes; none for every node).
+pub const MESH_DEPLOY_ENV: &str = "DIALTONE_MESH_DEPLOY=1";
+pub const MESH_TARGETS_ENV: &str = "DIALTONE_MESH_TARGETS=";
+
+/// An origin's announcement that a program should run on the mesh, or no longer: sent on
+/// the events topic when the origin starts, changes or removes it, and again now and then
+/// for nodes that missed it. Only targeted nodes pull the program.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Deploy {
+    /// The origin.
+    pub node: String,
+    pub node_id: String,
+    /// The program as it runs on the origin, as a process advert (`process_advert`);
+    /// `desired_state` is `running` or `removed`.
+    pub process: crate::service::ProcessSpec,
+    /// The origin's ticket for the program's blob.
+    pub ticket: String,
+    /// NodeId prefixes of the nodes that should run it; empty for every node.
+    #[serde(default)]
+    pub targets: Vec<String>,
+    #[serde(default)]
+    pub sent_unix_ms: u64,
+}
+
+impl Deploy {
+    /// Whether the node with `node_id` should run the program.
+    pub fn targets(&self, node_id: &str) -> bool {
+        self.process.desired_state == "running"
+            && (self.targets.is_empty() || self.targets.iter().any(|t| node_id.starts_with(t)))
+    }
+}
+
+/// The ticket and targets a process is offered to the mesh with: a process this node
+/// started with `MESH_DEPLOY_ENV` (a copy deployed from a peer is never offered again).
+pub fn mesh_offer(spec: &crate::service::ProcessSpec) -> Option<(String, Vec<String>)> {
+    if spec.deployed_from.is_some() || !spec.env.iter().any(|kv| kv == MESH_DEPLOY_ENV) {
+        return None;
+    }
+    let ticket = spec.deploy_ticket.clone().or_else(|| {
+        spec.env
+            .iter()
+            .find_map(|kv| kv.strip_prefix("DIALTONE_BLOB_TICKET="))
+            .map(str::to_string)
+    })?;
+    let targets = spec
+        .env
+        .iter()
+        .find_map(|kv| kv.strip_prefix(MESH_TARGETS_ENV))
+        .map(|t| {
+            t.split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some((ticket, targets))
+}
+
 /// What nodes say to each other on a channel. Every message is signed by its sender.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
@@ -1311,6 +1372,8 @@ pub enum Message {
     Beat(Beat),
     /// On the events topic, when it changes: the sender's programs, services and details.
     Inventory(Inventory),
+    /// On the events topic: a program the sender deploys to the mesh, or removes from it.
+    Deploy(Deploy),
 }
 
 impl Message {
@@ -1318,6 +1381,7 @@ impl Message {
         match self {
             Message::Beat(b) => &b.node_id,
             Message::Inventory(i) => &i.node_id,
+            Message::Deploy(d) => &d.node_id,
         }
     }
 
@@ -1325,6 +1389,7 @@ impl Message {
         match self {
             Message::Beat(b) => &b.node,
             Message::Inventory(i) => &i.node,
+            Message::Deploy(d) => &d.node,
         }
     }
 
@@ -1332,6 +1397,7 @@ impl Message {
         match self {
             Message::Beat(b) => b.sent_unix_ms,
             Message::Inventory(i) => i.sent_unix_ms,
+            Message::Deploy(d) => d.sent_unix_ms,
         }
     }
 
@@ -1342,6 +1408,10 @@ impl Message {
             Message::Inventory(i) => (
                 INVENTORY_TYPE,
                 serde_json::to_vec(i).map_err(|e| e.to_string())?,
+            ),
+            Message::Deploy(d) => (
+                DEPLOY_TYPE,
+                serde_json::to_vec(d).map_err(|e| e.to_string())?,
             ),
         };
         let mut out = Vec::with_capacity(1 + body.len());
@@ -1356,17 +1426,22 @@ impl Message {
             Some((&INVENTORY_TYPE, body)) => Ok(Message::Inventory(
                 serde_json::from_slice(body).map_err(|e| format!("invalid inventory: {e}"))?,
             )),
+            Some((&DEPLOY_TYPE, body)) => Ok(Message::Deploy(
+                serde_json::from_slice(body).map_err(|e| format!("invalid deploy: {e}"))?,
+            )),
             Some((kind, _)) => Err(format!("unknown message type {kind}")),
             None => Err("empty message".to_string()),
         }
     }
 
-    /// Replay-check stream: beats of all kinds share one, inventories have their own, so a
-    /// late inventory is not rejected for arriving after a newer beat.
+    /// Replay-check stream: beats share one, inventories have their own, and so does each
+    /// deployed program, so a late message of one kind is not rejected for arriving after a
+    /// newer one of another.
     pub fn replay_key(&self) -> String {
         match self {
             Message::Inventory(i) => format!("{}#inventory", i.node_id),
-            _ => self.node_id().to_string(),
+            Message::Deploy(d) => format!("{}#deploy#{}", d.node_id, d.process.name),
+            Message::Beat(b) => b.node_id.clone(),
         }
     }
 
@@ -1374,7 +1449,7 @@ impl Message {
     pub fn into_beat(self) -> Option<Beat> {
         match self {
             Message::Beat(b) => Some(b),
-            Message::Inventory(_) => None,
+            Message::Inventory(_) | Message::Deploy(_) => None,
         }
     }
 
@@ -1387,6 +1462,10 @@ impl Message {
             Message::Inventory(i) => {
                 *i = i.for_wire();
                 i.sent_unix_ms = sent_unix_ms;
+            }
+            Message::Deploy(d) => {
+                d.process = process_advert(&d.process);
+                d.sent_unix_ms = sent_unix_ms;
             }
         }
         msg
@@ -1422,27 +1501,13 @@ fn next_sent_unix_ms() -> u64 {
     }
 }
 
-/// The form of a process that leaves this node in an inventory: no `env` or `args` (they may
-/// hold secrets), no pid, status or restart count (they change on every restart, and the
-/// focused node's come with its details), and an explicit `deploy_ticket` when the process
-/// is offered for mesh deploy.
+/// The form of a process that leaves this node in an inventory or a `Deploy`: no `env` or
+/// `args` (they may hold secrets), no pid, status or restart count (they change on every
+/// restart, and the focused node's come with its details), and no ticket (a `Deploy`
+/// carries its own).
 pub fn process_advert(spec: &crate::service::ProcessSpec) -> crate::service::ProcessSpec {
     let mut advert = spec.clone();
-    let offered = spec.env.iter().any(|kv| kv == "DIALTONE_MESH_DEPLOY=1");
-    advert.deploy_ticket = spec.deploy_ticket.clone().or_else(|| {
-        offered
-            .then(|| {
-                spec.env
-                    .iter()
-                    .find_map(|kv| kv.strip_prefix("DIALTONE_BLOB_TICKET="))
-                    .map(str::to_string)
-            })
-            .flatten()
-    });
-    if spec.deployed_from.is_some() {
-        // Only the node that deployed a program offers it; copies never spread it further.
-        advert.deploy_ticket = None;
-    }
+    advert.deploy_ticket = None;
     advert.env.clear();
     advert.args.clear();
     advert.pid = None;
@@ -2516,7 +2581,7 @@ mod tests {
     }
 
     #[test]
-    fn process_env_never_leaves_the_node_and_offers_become_deploy_tickets() {
+    fn process_env_never_leaves_the_node_and_deploys_are_announced_apart() {
         let keys = derive_channel_keys_v2("dialtone", "dt-Process_Advert_Test_Secret_2026!");
         let alice = iroh::SecretKey::generate();
         let beat = test_beat(&alice);
@@ -2582,24 +2647,88 @@ mod tests {
                 p.name
             );
         }
+        // Inventories offer nothing: a deploy is announced by a `Deploy` message.
+        assert!(opened
+            .processes
+            .iter()
+            .all(|p| p.deploy_ticket.is_none() && p.pid.is_none() && p.status.is_none()));
         assert_eq!(
-            opened.processes[0].deploy_ticket.as_deref(),
-            Some("iroh-blobs://ticket/x")
+            mesh_offer(&opened_spec(&inventory_processes(&inventory), "offered")),
+            None,
+            "an advert is never an offer"
         );
-        assert_eq!(opened.processes[1].deploy_ticket, None);
+        let offered = spec(
+            "offered",
+            vec![
+                "DIALTONE_MESH_DEPLOY=1",
+                "DIALTONE_BLOB_TICKET=iroh-blobs://ticket/x",
+                "DIALTONE_MESH_TARGETS=node-beta, 0123abcd",
+            ],
+        );
+        assert_eq!(
+            mesh_offer(&offered),
+            Some((
+                "iroh-blobs://ticket/x".to_string(),
+                vec!["node-beta".to_string(), "0123abcd".to_string()]
+            ))
+        );
+        assert_eq!(
+            mesh_offer(&spec("private", vec!["DIALTONE_BLOB_TICKET=t"])),
+            None
+        );
 
         // A copy deployed from a peer is never offered again, whatever its env says, so a
         // program removed at its origin cannot spread back through the copies.
-        let mut copy = spec(
-            "copy",
-            vec![
-                "DIALTONE_MESH_DEPLOY=1",
-                "DIALTONE_BLOB_TICKET=iroh-blobs://ticket/z",
-            ],
-        );
-        copy.deploy_ticket = Some("iroh-blobs://ticket/z".to_string());
+        let mut copy = offered.clone();
         copy.deployed_from = Some("origin-node-id".to_string());
-        assert_eq!(process_advert(&copy).deploy_ticket, None);
+        assert_eq!(mesh_offer(&copy), None);
+
+        // The announcement: signed, without env or args, its own replay stream per program,
+        // and only targeted nodes run it.
+        let deploy = Message::Deploy(Deploy {
+            node: beat.node.clone(),
+            node_id: beat.node_id.clone(),
+            process: offered.clone(),
+            ticket: "iroh-blobs://ticket/x".to_string(),
+            targets: vec!["0123abcd".to_string()],
+            sent_unix_ms: 0,
+        });
+        let Message::Deploy(opened) =
+            open_message(&seal_message(&deploy, &keys, &alice).unwrap(), &keys).unwrap()
+        else {
+            panic!("expected a deploy");
+        };
+        assert!(opened.process.env.is_empty() && opened.process.args.is_empty());
+        assert_eq!(opened.ticket, "iroh-blobs://ticket/x");
+        assert!(opened.sent_unix_ms > 0);
+        assert_eq!(
+            Message::Deploy(opened.clone()).replay_key(),
+            format!("{}#deploy#offered", beat.node_id)
+        );
+        assert!(opened.targets("0123abcdef"));
+        assert!(!opened.targets("ffff0000"));
+        let mut everyone = opened.clone();
+        everyone.targets.clear();
+        assert!(everyone.targets("ffff0000"));
+        everyone.process.desired_state = "removed".to_string();
+        assert!(
+            !everyone.targets("ffff0000"),
+            "a removed program runs nowhere"
+        );
+    }
+
+    fn inventory_processes(msg: &Message) -> Vec<crate::service::ProcessSpec> {
+        match msg {
+            Message::Inventory(i) => i.for_wire().processes,
+            _ => Vec::new(),
+        }
+    }
+
+    fn opened_spec(
+        processes: &[crate::service::ProcessSpec],
+        name: &str,
+    ) -> crate::service::ProcessSpec {
+        processes.iter().find(|p| p.name == name).cloned().unwrap()
     }
 
     #[test]

@@ -97,10 +97,8 @@ pub fn ensure_probe_program(
     let digest = blobs.put_blocking(payload, None)?;
     let (verified_sha, staged_path) = stage_program(blobs, PROBE_PROGRAM_NAME, &digest)?;
 
-    let mut env_vars = vec![
-        "DIALTONE_MESH_DEPLOY=1".to_string(),
-        format!("PROCESS_ROLE={PROBE_PROGRAM_NAME}"),
-    ];
+    // Every node runs its own probe program; it is never deployed to the mesh.
+    let mut env_vars = vec![format!("PROCESS_ROLE={PROBE_PROGRAM_NAME}")];
     if let Some(t_uri) = ticket_uri.map(str::trim).filter(|s| !s.is_empty()) {
         env_vars.push(format!("DIALTONE_BLOB_TICKET={t_uri}"));
     } else if let Some(existing) = specs.iter().find(|p| p.name == PROBE_PROGRAM_NAME) {

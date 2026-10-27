@@ -266,6 +266,19 @@ sys.exit(not any(p["name"] == "e2e-program" and p.get("status") == "running" for
   for i in 0 1 2; do until_ok 60 "${names[$i]} removed the program" lacks_program "$i"; done
   echo "    3. Deploy: ran on all 3 nodes, removing it on the origin removed every copy"
 
+  # A deploy announced to one node runs only there.
+  runs_named() { get "$1" /api/processes | python3 -c '
+import sys, json
+sys.exit(not any(p["name"] == sys.argv[1] and p.get("status") == "running" for p in json.load(sys.stdin)["processes"]))' "$2"; }
+  e2e_post 0 /api/processes/blob "{\"name\":\"e2e-targeted\",\"bytes_base64\":\"$program\",\"desired_state\":\"running\",\"deploy_to_mesh\":true,\"deploy_targets\":[\"${names[1]}\"]}" >/dev/null
+  until_ok 60 "${names[1]} runs the targeted program" runs_named 1 e2e-targeted
+  sleep 5
+  ! runs_named 2 e2e-targeted || fail "${names[2]} ran a program deployed only to ${names[1]}"
+  e2e_post 0 /api/processes '{"name":"e2e-targeted","desired_state":"removed"}' >/dev/null
+  lacks_named() { ! runs_named "$1" "$2"; }
+  until_ok 60 "${names[1]} removed the targeted program" lacks_named 1 e2e-targeted
+  echo "    Targeted deploy: ran on ${names[1]} only, removed with its origin"
+
     kill "${E2E_PIDS##* }"
   a_sees_c_silent() { e2e_post 0 /api/probe | python3 -c '
 import sys, json

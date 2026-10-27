@@ -19,7 +19,7 @@ use crate::mesh::{
     default_os, default_state_dir, node_capabilities_for, node_role_for, normalize_channel_name,
     now_unix, prune_stale_peers, save_mesh_config, validate_secret, Beat, BootStageStatus,
     MeshConfig, MeshControlCommand, ProbeReport, BEAT_INTERVAL_SECS, DEFAULT_CHANNEL_NAME,
-    DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
+    DEFAULT_PEER_TTL_SECS, MESH_DEPLOY_ENV, MESH_TARGETS_ENV, SUMMARY_INTERVAL_SECS,
 };
 use crate::node::IrohTransportDiagnostics;
 use crate::record::{AlertRecord, EventRecord, ServiceLogRecord};
@@ -1389,8 +1389,20 @@ fn route_request(
                 .and_then(Value::as_bool)
                 .unwrap_or_else(|| {
                     parsed.get("scope").and_then(Value::as_str) == Some("mesh")
-                        || env_vars.iter().any(|kv| kv == "DIALTONE_MESH_DEPLOY=1")
+                        || env_vars.iter().any(|kv| kv == MESH_DEPLOY_ENV)
                 });
+            // The nodes to deploy to (names or NodeId prefixes); none means every node.
+            let deploy_targets: Vec<String> = parsed
+                .get("deploy_targets")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(|t| t.trim().replace(',', ""))
+                        .filter(|t| !t.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
             let cwd = parsed
                 .get("cwd")
                 .and_then(Value::as_str)
@@ -1487,8 +1499,12 @@ fn route_request(
                     }
                 }
             }
-            if deploy_to_mesh && !env_vars.iter().any(|kv| kv == "DIALTONE_MESH_DEPLOY=1") {
-                env_vars.push("DIALTONE_MESH_DEPLOY=1".to_string());
+            if deploy_to_mesh && !env_vars.iter().any(|kv| kv == MESH_DEPLOY_ENV) {
+                env_vars.push(MESH_DEPLOY_ENV.to_string());
+            }
+            if deploy_to_mesh && !deploy_targets.is_empty() {
+                env_vars.retain(|kv| !kv.starts_with(MESH_TARGETS_ENV));
+                env_vars.push(format!("{MESH_TARGETS_ENV}{}", deploy_targets.join(",")));
             }
             if let Some(ref t_uri) = resolved_ticket_uri {
                 env_vars.retain(|kv| !kv.starts_with("DIALTONE_BLOB_TICKET="));

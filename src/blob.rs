@@ -558,6 +558,17 @@ impl Store {
         ticket_uri: &str,
         force_network: bool,
     ) -> Result<BlobTransportReport, String> {
+        self.pull_blob_from(ticket_uri, force_network, Vec::new())
+    }
+
+    /// Like `pull_blob`, but ask `others` first, in order, and the ticket's provider last:
+    /// a blob is content-addressed, so any node that holds it can serve it.
+    pub fn pull_blob_from(
+        &self,
+        ticket_uri: &str,
+        force_network: bool,
+        others: Vec<iroh::EndpointId>,
+    ) -> Result<BlobTransportReport, String> {
         let (ticket, expected_digest) = parse_blob_ticket_uri(ticket_uri)?;
         let provider_id = ticket.addr().id;
         let report = |bytes: u64, transferred: u64, mode: &str, status: &str| BlobTransportReport {
@@ -597,10 +608,19 @@ impl Store {
         let endpoint = self.endpoint.clone();
         let hash = ticket.hash();
         let digest = expected_digest.clone();
+        let own = self.endpoint.id();
+        let mut providers: Vec<iroh::EndpointId> = others
+            .into_iter()
+            .filter(|p| *p != provider_id && *p != own)
+            .collect();
+        providers.push(provider_id);
+        // Each provider that does not answer costs up to the connect timeout.
+        let timeout =
+            Duration::from_secs(15) + DOWNLOAD_CONNECT_TIMEOUT * (providers.len() as u32 - 1);
         let (len, active, known, status) = self.run(async move {
             // Fetched over this node's own endpoint, so the provider sees our NodeId and its
             // allowlist decides.
-            tokio::time::timeout(Duration::from_secs(15), downloader.download(hash, Some(provider_id)))
+            tokio::time::timeout(timeout, downloader.download(hash, providers))
                 .await
                 .map_err(|_| format!("iroh-blobs download from peer {provider_id} timed out"))?
                 .map_err(|e| {
