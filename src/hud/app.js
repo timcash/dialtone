@@ -2814,9 +2814,11 @@ function renderFrame(nowMs) {
   requestAnimationFrame(renderFrame);
 }
 
-// The focused node's devices and full probe (with per-peer results) are fetched when it is
-// focused (`/api/details`, which asks the node itself), not gossiped to every node.
-const nodeDetails = new Map(); // node_id -> { at, pending, devices, probe }
+// Beats carry only what every node needs. The focused node's details (devices, full probe,
+// processes with their status, services, rolling summary, store, full stats and transport)
+// are fetched when it is focused (`/api/details`, which asks the node itself).
+const nodeDetails = new Map(); // node_id -> { at, pending, ...details }
+const DETAIL_FIELDS = ["devices", "processes", "service_endpoints", "summary_stats", "store", "stats", "iroh_transport", "os", "arch"];
 const DETAILS_REFRESH_MS = 10000;
 
 async function refreshFocusDetails() {
@@ -2839,7 +2841,11 @@ function withDetails(node) {
   const d = node && nodeDetails.get(node.node_id);
   if (!d) return node;
   const probe = d.probe && (!node.probe || (d.probe.cycle || 0) >= (node.probe.cycle || 0)) ? d.probe : node.probe;
-  return { ...node, devices: Array.isArray(d.devices) ? d.devices : node.devices, probe };
+  const out = { ...node, probe };
+  for (const k of DETAIL_FIELDS) {
+    if (d[k] !== undefined && d[k] !== null) out[k] = d[k];
+  }
+  return out;
 }
 
 async function pollGossipState() {

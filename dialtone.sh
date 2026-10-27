@@ -220,6 +220,18 @@ cmd_e2e() {
   for i in 0 1 2; do until_ok 60 "${names[$i]} sees 3 nodes" sees_all "$i"; done
   echo "    1. Mesh: 3 nodes see each other"
 
+  # Once the mesh has formed, a node talks to it only through gossip: no new connections.
+  conns() { get "$1" /api/net | python3 -c 'import sys,json; print(json.load(sys.stdin)["socket"]["conns_opened"])'; }
+  local before=() after
+  sleep 10
+  for i in 0 1 2; do before[$i]=$(conns "$i"); done
+  sleep 20
+  for i in 0 1 2; do
+    after=$(conns "$i")
+    [ "$after" = "${before[$i]}" ] || fail "${names[$i]} opened $((after - before[$i])) connection(s) in 20s of steady state"
+  done
+  echo "    Gossip only: no node opened a connection in 20s of steady state"
+
   # The gossip probe passes on every node, then a full probe pulls a fresh blob from each peer.
   gossip_passes() { e2e_post "$1" /api/probe | python3 -c '
 import sys, json
@@ -570,7 +582,8 @@ for name in sys.argv[2].split():
     p = (nodes.get(name) or {}).get("probe") or {}
     build = p.get("build", "").replace("sha256:", "")
     fails = "; ".join("%s: %s" % (c["code"], c["detail"]) for c in p.get("checks", []) if not c["ok"])
-    on_build = name not in builds or build == builds[name]
+    # Beats carry the first bytes of the build digest.
+    on_build = name not in builds or (build != "" and builds[name].startswith(build))
     passed = name in nodes and on_build and p.get("total_count") and p.get("passed_count") == p.get("total_count")
     ok = ok and bool(passed)
     pulls = " ".join("%s %.0fms" % (x["peer"], x["ms"]) for x in p.get("pulls", []) if x["ok"])

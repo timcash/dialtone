@@ -427,6 +427,7 @@ fn self_beat(
         heard: 0,
         inventory_version: 0,
         peer_rtt_ms: std::collections::BTreeMap::new(),
+        neighbors: Vec::new(),
         summary_stats: None,
         os: default_os(),
         arch: default_arch(),
@@ -827,10 +828,15 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     // Enforced at the QUIC handshake for every protocol, and for beats and deploys below.
     let live_allowlist = LiveAllowlist::new(&saved_cfg.allowlist);
     let memory_lookup = MemoryLookup::new();
+    // Weak handles to the open gossip connections: their QUIC Rtt and path, read for free.
+    let gossip_conns = dialtone::node::GossipConnections::default();
     let endpoint = build_endpoint_builder(&opts.transport)?
         .address_lookup(memory_lookup.clone())
         .secret_key(secret_key)
-        .hooks(AllowlistHook::new(live_allowlist.clone()))
+        .hooks(
+            AllowlistHook::new(live_allowlist.clone())
+                .with_gossip_connections(gossip_conns.clone()),
+        )
         .bind()
         .await
         .map_err(|e| format!("bind iroh endpoint: {e}"))?;
@@ -840,8 +846,15 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         let _ = tokio::time::timeout(Duration::from_secs(4), endpoint.online()).await;
     }
 
+    // Remember message ids for three of the longest beat intervals: a beat still travelling
+    // after iroh-gossip forgot its id would be delivered again (the default is 90s).
+    let broadcast_config = iroh_gossip::proto::PlumtreeConfig {
+        message_id_retention: Duration::from_secs(3 * dialtone::mesh::MAX_BEAT_INTERVAL_SECS),
+        ..Default::default()
+    };
     let gossip = Gossip::builder()
         .max_message_size(65_536)
+        .broadcast_config(broadcast_config)
         .spawn(endpoint.clone());
     if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
         st.gossip_metrics = Some(gossip.metrics().clone());
@@ -852,7 +865,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         .accept(iroh_blobs::ALPN, blobs_proto)
         .accept(
             dialtone::fetch::ALPN,
-            dialtone::fetch::FetchHandler::new(shared_state.clone(), node_id.clone()),
+            dialtone::fetch::FetchHandler::new(shared_state.clone()),
         )
         .spawn();
 
@@ -1104,7 +1117,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         let json = serde_json::to_string_pretty(&initial_self_beat).map_err(|e| e.to_string())?;
         println!("{json}");
         if let Some(ref keys) = active_keys {
-            let msg = dialtone::mesh::Message::Summary(initial_self_beat.clone());
+            let msg = dialtone::mesh::Message::Beat(initial_self_beat.clone());
             if let Ok(enc) = dialtone::mesh::seal_message(&msg, keys, &node_key) {
                 let _ = sender.broadcast(enc.into()).await;
             }
@@ -1130,10 +1143,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             .as_ref()
             .and_then(|s| s.lock().ok().map(|st| st.net.clone()))
             .unwrap_or_default(),
-        frames: shared_state
-            .as_ref()
-            .and_then(|s| s.lock().ok().map(|st| st.frames.clone()))
-            .unwrap_or_default(),
+        gossip_conns,
         scores: shared_state
             .as_ref()
             .and_then(|s| s.lock().ok().map(|st| st.scores.clone()))

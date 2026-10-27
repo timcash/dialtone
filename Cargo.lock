@@ -620,6 +620,7 @@ dependencies = [
  "iroh-mainline-address-lookup",
  "iroh-mdns-address-lookup",
  "libc",
+ "postcard",
  "serde",
  "serde_json",
  "sha2",

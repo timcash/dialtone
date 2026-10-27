@@ -1,15 +1,15 @@
 //! The running node as actors: one task per job, joined by channels and stopped by one
 //! cancellation token.
 //!
-//! - **Mesh** owns the gossip subscriptions: beats and summaries on the beats topic,
-//!   inventories on the events topic (see `Message`), a few neighbors per topic, and
-//!   inventory fetches when a beat announces one this node has not seen.
+//! - **Mesh** owns the gossip subscriptions: beats on the beats topic, inventories on the
+//!   events topic (see `Message`), and a few neighbors per topic. It sends nothing outside
+//!   gossip: a node learns the mesh from beats, and fetches only what someone asks for.
 //! - **Stats** samples the host every second and keeps the rolling summary.
 //! - **Supervisor** reconciles processes every second and tells Mesh when they change.
 //! - **Devices** lists the cameras, microphones, keyboards and other devices connected to
 //!   the node every minute and tells Mesh when they change.
-//! - **Links** times the Rtt to each gossip neighbor and observes how it is reached
-//!   (direct, relay, tailnet).
+//! - **Paths** reads QUIC's Rtt estimate and selected path (direct or relay) from each
+//!   gossip neighbor's open connection, without sending anything.
 //! - **Allowlist** reloads the allowlist when `config.json` changes.
 //! - **Deploy** pulls, verifies and starts programs that allowlisted peers run.
 //! - **Probe** checks the gossip mesh every 30s, and runs full probes (store, pulls,
@@ -30,16 +30,19 @@ use dialtone::fetch;
 use dialtone::mesh::{
     beat_fresh_secs, beat_interval_for, build_mesh_rtt_matrix, cached_local_public_ip_geo,
     default_seeds, events_topic_id, is_valid_node_name, merge_beat, merge_inventory,
-    monotonic_now_ms, node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
+    node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
     observe_peer_remote_addrs, open_message, prune_stale_peers, seal_message, try_load_mesh_config,
-    Beat, CatchUpHave, ChannelKeys, FrameCache, Inventory, LiveAllowlist, MeshControlCommand,
-    Message, NodeDetails, PeerScores, ReplayGuard, SeedList, BEAT_INTERVAL_SECS,
-    DEFAULT_PEER_TTL_SECS, SUMMARY_EVERY_N_BEATS, SUMMARY_INTERVAL_SECS,
+    Beat, ChannelKeys, Inventory, LiveAllowlist, MeshControlCommand, Message, NeighborLink,
+    NodeDetails, PeerScores, ReplayGuard, SeedList, BEAT_INTERVAL_SECS, DEFAULT_PEER_TTL_SECS,
+    SUMMARY_INTERVAL_SECS,
 };
-use dialtone::node::{advertised_endpoint_addr, build_diagnostics, IrohTransportConfig};
+use dialtone::node::{
+    advertised_endpoint_addr, build_diagnostics, GossipConnections, IrohTransportConfig,
+};
 use dialtone::probe::{ProbeRequest, PULL_SAMPLE};
 use dialtone::service::ProcessSpec;
 use dialtone::stats::{sample_stats, StatsSummary, StatsWindow};
+use dialtone::wire::{neighbor_prefix, MAX_NEIGHBORS};
 use futures_lite::StreamExt;
 use iroh::address_lookup::memory::MemoryLookup;
 use iroh::{EndpointAddr, EndpointId};
@@ -65,8 +68,8 @@ pub(crate) struct Ctx {
     pub allowlist: LiveAllowlist,
     pub state: Option<Arc<Mutex<NodeState>>>,
     pub net: Arc<dialtone::mesh::NetCounters>,
-    /// Every node's latest sealed frames, served to neighbors catching up.
-    pub frames: Arc<Mutex<FrameCache>>,
+    /// The open gossip connections, read by the Paths actor.
+    pub gossip_conns: GossipConnections,
     /// Peer scores (GossipSub-style).
     pub scores: Arc<Mutex<PeerScores>>,
     pub cancel: CancellationToken,
@@ -118,7 +121,6 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
     let (inventory_tx, inventory_rx) = mpsc::unbounded_channel();
     let (deploy_tx, deploy_rx) = mpsc::unbounded_channel();
     let (probe_tx, probe_rx) = mpsc::unbounded_channel();
-    let (rejoin_tx, rejoin_rx) = mpsc::unbounded_channel();
     ctx.with_state(|st| {
         st.probe_tx = Some(probe_tx);
         st.runtime = Some(tokio::runtime::Handle::current());
@@ -130,14 +132,13 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
         summary_rx,
         inventory_rx,
         deploy_tx,
-        rejoin_rx,
     );
     vec![
         tokio::spawn(mesh.run()),
         tokio::spawn(stats_actor(ctx.clone(), rtt_rx, summary_tx)),
         tokio::spawn(supervisor_actor(ctx.clone(), inventory_tx.clone())),
         tokio::spawn(devices_actor(ctx.clone())),
-        tokio::spawn(links_actor(ctx.clone(), rtt_tx, rejoin_tx)),
+        tokio::spawn(paths_actor(ctx.clone(), rtt_tx)),
         tokio::spawn(allowlist_actor(ctx.clone())),
         tokio::spawn(probe_actor(ctx.clone(), probe_rx)),
         tokio::spawn(deploy_actor(ctx, deploy_rx)),
@@ -189,9 +190,16 @@ async fn stats_actor(
 
         ctx.with_state(|st| {
             st.stats = stats.clone();
+            let by_name: BTreeMap<String, f64> = rtt
+                .iter()
+                .filter_map(|(id, ms)| {
+                    let peer = st.nodes.iter().find(|n| &n.node_id == id)?;
+                    Some((peer.node.clone(), *ms))
+                })
+                .collect();
             if let Some(me) = st.self_entry_mut() {
                 me.stats = stats;
-                me.peer_rtt_ms = rtt;
+                me.peer_rtt_ms = by_name;
                 me.summary_stats = Some(summary);
                 if let Some(geo) = cached_local_public_ip_geo() {
                     me.geo_location = Some(geo);
@@ -272,92 +280,37 @@ async fn devices_actor(ctx: Ctx) {
 }
 
 // ---------------------------------------------------------------------------------------
-// Links
+// Paths
 // ---------------------------------------------------------------------------------------
 
-/// How often Links times the Rtt to each gossip neighbor.
-const LINKS_INTERVAL: Duration = Duration::from_secs(10);
-/// How long Links waits for a neighbor: a relayed link with a 200ms Rtt still stalls for
-/// seconds now and then (3s timeouts failed about one request in five across machines).
-const LINKS_TIMEOUT: Duration = Duration::from_secs(10);
+/// How often Paths reads the gossip neighbors' connections.
+const PATHS_INTERVAL: Duration = Duration::from_secs(5);
 
-/// A neighbor that answers this many Rtt requests in a row without counting this node as
-/// its neighbor is joined again (see `links_actor`).
-const ONE_SIDED_ROUNDS: u32 = 2;
-
-/// Every `LINKS_INTERVAL`, time the Rtt to each gossip neighbor over a fetch connection kept open
-/// for it, and record how it is reached (direct IP, relay, tailnet). Only neighbors: the
-/// rest of the mesh is reached through them, and each node reports its own neighbors'
-/// Rtts in its beats, so the HUD's Rtt matrix still covers the mesh.
-///
-/// The answer also says whether the neighbor counts this node as its neighbor. iroh-gossip's
-/// HyParView can lose the one `Neighbor` reply that completes a link and never send it
-/// again, leaving this node with a neighbor that does not know it; a Join sent to that
-/// neighbor (`rejoin_tx`, to Mesh) completes the link on both sides.
-async fn links_actor(
-    ctx: Ctx,
-    rtt_tx: watch::Sender<BTreeMap<String, f64>>,
-    rejoin_tx: mpsc::UnboundedSender<EndpointId>,
-) {
-    let mut tick = every(LINKS_INTERVAL);
-    let mut conns: HashMap<EndpointId, iroh::endpoint::Connection> = HashMap::new();
-    let mut rtt: BTreeMap<String, f64> = BTreeMap::new();
-    let mut one_sided: HashMap<EndpointId, u32> = HashMap::new();
+/// Every `PATHS_INTERVAL`, read QUIC's Rtt estimate and selected path to each gossip
+/// neighbor from the connection iroh-gossip already has open (`GossipConnections`), and how
+/// iroh reaches it (direct IP, relay, tailnet). Nothing is sent: QUIC measures the Rtt from
+/// the acknowledgements of the gossip itself. The Rtts, by NodeId, go into this node's beats.
+async fn paths_actor(ctx: Ctx, rtt_tx: watch::Sender<BTreeMap<String, f64>>) {
+    let mut tick = every(PATHS_INTERVAL);
     loop {
         tokio::select! {
             _ = ctx.cancel.cancelled() => break,
             _ = tick.tick() => {}
         }
-        let neighbors: Vec<(EndpointId, String)> = ctx
+        ctx.gossip_conns.prune();
+        let neighbors: Vec<EndpointId> = ctx
             .with_state(|st| {
                 st.gossip_neighbors
                     .iter()
-                    .filter_map(|id| {
-                        let name = st.nodes.iter().find(|n| &n.node_id == id)?.node.clone();
-                        Some((id.parse().ok()?, name))
-                    })
+                    .filter_map(|id| id.parse().ok())
                     .collect()
             })
             .unwrap_or_default();
-        conns.retain(|id, conn| {
-            let keep = neighbors.iter().any(|(n, _)| n == id);
-            if !keep {
-                conn.close(0u32.into(), b"no longer a neighbor");
-            }
-            keep
-        });
-        rtt.retain(|name, _| neighbors.iter().any(|(_, n)| n == name));
-        one_sided.retain(|id, _| neighbors.iter().any(|(n, _)| n == id));
-        for (pid, name) in &neighbors {
-            if !conns.contains_key(pid) {
-                match fetch::connect(&ctx.endpoint, *pid, LINKS_TIMEOUT).await {
-                    Ok(conn) => {
-                        conns.insert(*pid, conn);
-                    }
-                    Err(err) => {
-                        ctx.scores(|s| s.fetched(*pid, Some(&err)));
-                        continue;
-                    }
-                }
-            }
-            match fetch::rtt(&conns[pid], LINKS_TIMEOUT).await {
-                Ok((ms, counts_us)) => {
-                    let rounds = one_sided.entry(*pid).or_default();
-                    *rounds = if counts_us { 0 } else { *rounds + 1 };
-                    if *rounds >= ONE_SIDED_ROUNDS {
-                        *rounds = 0;
-                        println!("[links] neighbor '{name}' does not count this node as its neighbor; joining it again");
-                        let _ = rejoin_tx.send(*pid);
-                    }
-                    let smoothed = match rtt.get(name) {
-                        Some(&prev) => ((prev * 0.6 + ms * 0.4) * 10.0).round() / 10.0,
-                        None => ms,
-                    };
-                    rtt.insert(name.clone(), smoothed);
-                }
-                Err(err) => {
-                    ctx.scores(|s| s.fetched(*pid, Some(&err)));
-                    conns.remove(pid);
+        let mut rtt = BTreeMap::new();
+        for pid in &neighbors {
+            if let Some(path) = ctx.gossip_conns.path(pid) {
+                if path.rtt_ms > 0.0 {
+                    rtt.insert(pid.to_string(), path.rtt_ms);
                 }
             }
             let observed = tokio::time::timeout(
@@ -377,10 +330,7 @@ async fn links_actor(
                 }
             }
         }
-        rtt_tx.send_replace(rtt.clone());
-    }
-    for conn in conns.values() {
-        conn.close(0u32.into(), b"shutting down");
+        rtt_tx.send_replace(rtt);
     }
 }
 
@@ -673,20 +623,11 @@ async fn deploy_actor(ctx: Ctx, mut offers: mpsc::UnboundedReceiver<PeerPrograms
 const MIN_NEIGHBORS: usize = 2;
 /// How many known peers, chosen at random, Mesh joins when it is short of neighbors.
 const JOIN_SAMPLE: usize = 3;
-/// Inventory fetches in flight at once (a node that just joined fetches every inventory).
-const FETCH_SLOTS: usize = 4;
-/// Ask a peer for its inventory again no sooner than this.
-const FETCH_RETRY: Duration = Duration::from_secs(10);
-/// Every this many beats, Mesh catches up from one neighbor (anti-entropy).
-const CATCH_UP_EVERY: u64 = 12;
-
-/// Frames fetched from peers, to be admitted like gossip: a peer's own inventory, or what
-/// a neighbor sent this node to catch up (beats with their age in seconds there).
-struct Fetched {
-    catch_up: bool,
-    beats: Vec<(u64, Vec<u8>)>,
-    inventories: Vec<Vec<u8>>,
-}
+/// A neighbor whose beats this many times in a row do not list this node is joined again.
+const ONE_SIDED_BEATS: u32 = 2;
+/// Every this many beats, Mesh rebuilds its inventory to catch details that drift slowly
+/// (the public-IP lookup, addresses); it is broadcast only when it changed.
+const INVENTORY_REFRESH_EVERY: u64 = 6;
 
 /// Why `admit` dropped a frame.
 enum Rejected {
@@ -721,24 +662,15 @@ struct Mesh {
     replay_guard: ReplayGuard,
     /// Latest inventory per peer NodeId, applied again when its entry is first created.
     inventories: HashMap<String, Inventory>,
-    /// Peer NodeId -> when Mesh last asked it for its inventory (monotonic ms).
-    inventory_asked: HashMap<String, u64>,
-    fetch_slots: Arc<tokio::sync::Semaphore>,
-    fetched_tx: mpsc::UnboundedSender<Fetched>,
-    fetched_rx: mpsc::UnboundedReceiver<Fetched>,
     own_inventory_version: u64,
-    /// A catch-up is in flight.
-    catching_up: bool,
-    /// The first catch-up finished (or there was nobody to catch up from); until then,
-    /// beats announcing unknown inventories do not each start a fetch.
-    caught_up: bool,
+    /// Neighbors by how many beats in a row did not list this node (see `on_beat`).
+    one_sided: HashMap<EndpointId, u32>,
     control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
+    /// QUIC's Rtt to each gossip neighbor, by NodeId (from Paths).
     rtt_rx: watch::Receiver<BTreeMap<String, f64>>,
     summary_rx: watch::Receiver<Option<StatsSummary>>,
     inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
     deploy_tx: mpsc::UnboundedSender<PeerPrograms>,
-    /// Neighbors that do not count this node as theirs (from Links), to join again.
-    rejoin_rx: mpsc::UnboundedReceiver<EndpointId>,
 }
 
 /// The next event on a topic, or never when not subscribed.
@@ -770,9 +702,7 @@ impl Mesh {
         summary_rx: watch::Receiver<Option<StatsSummary>>,
         inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
         deploy_tx: mpsc::UnboundedSender<PeerPrograms>,
-        rejoin_rx: mpsc::UnboundedReceiver<EndpointId>,
     ) -> Self {
-        let (fetched_tx, fetched_rx) = mpsc::unbounded_channel();
         Mesh {
             ctx,
             node: start.node,
@@ -794,19 +724,13 @@ impl Mesh {
             print_first_beat: start.print_first_beat,
             replay_guard: ReplayGuard::default(),
             inventories: HashMap::new(),
-            inventory_asked: HashMap::new(),
-            fetch_slots: Arc::new(tokio::sync::Semaphore::new(FETCH_SLOTS)),
-            fetched_tx,
-            fetched_rx,
             own_inventory_version: 0,
-            catching_up: false,
-            caught_up: false,
+            one_sided: HashMap::new(),
             control_rx: start.control_rx,
             rtt_rx,
             summary_rx,
             inventory_rx,
             deploy_tx,
-            rejoin_rx,
         }
     }
 
@@ -827,14 +751,6 @@ impl Mesh {
                 }
                 Some(cmd) = self.control_rx.recv() => self.on_control(cmd).await,
                 Some(InventoryChanged) = self.inventory_rx.recv() => self.refresh_own_inventory(true).await,
-                Some(fetched) = self.fetched_rx.recv() => self.on_fetched(fetched),
-                Some(peer) = self.rejoin_rx.recv() => {
-                    let _ = tokio::time::timeout(
-                        Duration::from_millis(600),
-                        self.sender.join_peers(vec![peer]),
-                    )
-                    .await;
-                }
                 _ = beat_tick.tick() => {
                     self.on_beat_tick().await;
                     // Larger meshes beat less often (`beat_interval_for`).
@@ -851,11 +767,8 @@ impl Mesh {
                 }
                 event = self.receiver.next(), if self.subscribed => {
                     let ended = match event {
-                        Some(Ok(GossipEvent::NeighborUp(peer))) => {
+                        Some(Ok(GossipEvent::NeighborUp(_))) => {
                             self.neighbors_changed();
-                            if !self.caught_up {
-                                self.catch_up(peer);
-                            }
                             None
                         }
                         Some(Ok(GossipEvent::NeighborDown(_))) => {
@@ -865,7 +778,7 @@ impl Mesh {
                         }
                         Some(Ok(GossipEvent::Received(msg))) => {
                             self.ctx.net.count_in(msg.content.len());
-                            self.on_received(&msg.content, msg.delivered_from);
+                            self.on_received(&msg.content, msg.delivered_from).await;
                             None
                         }
                         Some(Ok(GossipEvent::Lagged)) => {
@@ -886,7 +799,7 @@ impl Mesh {
                 event = next_event(&mut self.events_receiver) => match event {
                     Some(Ok(GossipEvent::Received(msg))) => {
                         self.ctx.net.count_in(msg.content.len());
-                        self.on_received(&msg.content, msg.delivered_from);
+                        self.on_received(&msg.content, msg.delivered_from).await;
                     }
                     Some(Ok(_)) => {}
                     // Joined again on the next beat tick.
@@ -1008,7 +921,7 @@ impl Mesh {
         }
     }
 
-    /// Publish the beats topic's neighbors for the probe, the Links actor and `/api/net`.
+    /// Publish the beats topic's neighbors for the probe, the Paths actor and `/api/net`.
     fn neighbors_changed(&mut self) {
         let neighbors: Vec<String> = self.receiver.neighbors().map(|id| id.to_string()).collect();
         self.ctx
@@ -1076,7 +989,7 @@ impl Mesh {
         }
     }
 
-    /// A beat about this node, with its stats, summary and neighbor Rtts.
+    /// A beat about this node, with its stats, summary and gossip neighbors.
     fn fresh_beat(&self) -> Beat {
         let adv = advertised_endpoint_addr(&self.ctx.endpoint.addr(), &self.ctx.transport);
         let diag = build_diagnostics(
@@ -1102,7 +1015,19 @@ impl Mesh {
         );
         beat.beat_interval_secs = self.beat_interval_secs;
         beat.inventory_version = self.own_inventory_version;
-        beat.peer_rtt_ms = self.rtt_rx.borrow().clone();
+        let rtt = self.rtt_rx.borrow().clone();
+        beat.neighbors = self
+            .receiver
+            .neighbors()
+            .take(MAX_NEIGHBORS)
+            .map(|id| {
+                let id = id.to_string();
+                NeighborLink {
+                    node_id_prefix: neighbor_prefix(&id),
+                    rtt_ms: rtt.get(&id).copied().unwrap_or(0.0),
+                }
+            })
+            .collect();
         beat.summary_stats = self.summary_rx.borrow().clone();
         beat
     }
@@ -1135,9 +1060,8 @@ impl Mesh {
         }
     }
 
-    /// Rebuild this node's inventory; when it changed, seal it (the frame peers fetch and
-    /// neighbors relay), broadcast it on the events topic (if `broadcast`) and announce the
-    /// new version in the next beat.
+    /// Rebuild this node's inventory; when it changed, broadcast it on the events topic (if
+    /// `broadcast`) and announce the new version in the next beat.
     async fn refresh_own_inventory(&mut self, broadcast: bool) {
         let inventory = self.own_inventory().for_wire();
         if inventory.version == self.own_inventory_version {
@@ -1147,9 +1071,6 @@ impl Mesh {
             return;
         };
         self.own_inventory_version = inventory.version;
-        if let Ok(mut frames) = self.ctx.frames.lock() {
-            frames.put_inventory(&self.ctx.node_id, wire.clone(), inventory.version);
-        }
         if broadcast {
             if let Some(tx) = &self.events_sender {
                 self.ctx.net.count_out(wire.len());
@@ -1167,112 +1088,15 @@ impl Mesh {
         Some((wire, sent_ms))
     }
 
-    /// Broadcast a beat on the beats topic and keep its frame for neighbors catching up.
+    /// Broadcast a beat on the beats topic.
     async fn broadcast(&mut self, msg: &Message) {
-        if let Some((wire, sent_ms)) = self.seal(msg) {
-            if let Ok(mut frames) = self.ctx.frames.lock() {
-                frames.put_beat(&self.ctx.node_id, wire.clone(), sent_ms, now_unix());
-            }
+        if let Some((wire, _)) = self.seal(msg) {
             self.ctx.net.count_out(wire.len());
             let _ = tokio::time::timeout(
                 Duration::from_millis(600),
                 self.sender.broadcast(wire.into()),
             )
             .await;
-        }
-    }
-
-    /// Ask `neighbor` for every beat and inventory this node lacks (Scuttlebutt-style
-    /// anti-entropy). The digest names, for each node this node knows, its latest beat (or
-    /// that the beat is fresh) and its inventory version; the neighbor answers with the
-    /// frames that are newer or different. Run on the first link to the mesh, then every
-    /// `CATCH_UP_EVERY` beats, it repairs what gossip lost, and a node that joins gets the
-    /// whole mesh from one neighbor instead of fetching every inventory from its author.
-    fn catch_up(&mut self, neighbor: EndpointId) {
-        if self.catching_up || self.keys.is_none() {
-            return;
-        }
-        let now = now_unix();
-        let own = self.ctx.node_id.clone();
-        let mut have: CatchUpHave = self
-            .ctx
-            .with_state(|st| {
-                st.nodes
-                    .iter()
-                    .filter(|n| n.node_id != own)
-                    .map(|n| {
-                        let fresh = now.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n);
-                        let beat = if fresh { u64::MAX } else { n.sent_unix_ms };
-                        (n.node_id.clone(), [beat, 0])
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        for (id, inventory) in &self.inventories {
-            have.entry(id.clone()).or_insert([0, 0])[1] = inventory.version;
-        }
-        self.catching_up = true;
-        let (ctx, fetched) = (self.ctx.clone(), self.fetched_tx.clone());
-        tokio::spawn(async move {
-            let result =
-                fetch::catch_up(&ctx.endpoint, neighbor, have, Duration::from_secs(20)).await;
-            ctx.scores(|s| s.fetched(neighbor, result.as_ref().err().map(String::as_str)));
-            let caught = result.unwrap_or_else(|err| {
-                eprintln!("[catch-up] {err}");
-                Default::default()
-            });
-            let _ = fetched.send(Fetched {
-                catch_up: true,
-                beats: caught.beats,
-                inventories: caught.inventories,
-            });
-        });
-    }
-
-    /// Admit fetched frames like gossip: beats first (so inventories find their node), then
-    /// inventories.
-    fn on_fetched(&mut self, fetched: Fetched) {
-        if fetched.catch_up {
-            self.catching_up = false;
-            self.caught_up = true;
-            if !fetched.beats.is_empty() || !fetched.inventories.is_empty() {
-                println!(
-                    "[catch-up] {} beat(s) and {} inventory frame(s) from a neighbor",
-                    fetched.beats.len(),
-                    fetched.inventories.len()
-                );
-            }
-        }
-        let now = now_unix();
-        for (age, frame) in fetched.beats {
-            if let Ok(msg) = self.admit(&frame, true) {
-                let received = now.saturating_sub(age);
-                self.keep_frame(&msg, frame, received);
-                if let Some(mut beat) = msg.into_beat() {
-                    self.learn_addresses(&beat);
-                    beat.updated_at_unix = received;
-                    self.merge_peer_beat(beat);
-                }
-            }
-        }
-        for frame in fetched.inventories {
-            if let Ok(msg) = self.admit(&frame, true) {
-                self.keep_frame(&msg, frame, now);
-                if let Message::Inventory(inventory) = msg {
-                    self.on_inventory(inventory);
-                }
-            }
-        }
-    }
-
-    /// Keep an admitted frame for neighbors catching up.
-    fn keep_frame(&self, msg: &Message, frame: Vec<u8>, received_unix: u64) {
-        let Ok(mut frames) = self.ctx.frames.lock() else {
-            return;
-        };
-        match msg {
-            Message::Inventory(i) => frames.put_inventory(&i.node_id, frame, i.version),
-            _ => frames.put_beat(msg.node_id(), frame, msg.sent_unix_ms(), received_unix),
         }
     }
 
@@ -1290,47 +1114,21 @@ impl Mesh {
         if let Some((pruned, live_ids)) = pruned {
             if pruned > 0 {
                 self.inventories.retain(|id, _| live_ids.contains(id));
-                self.inventory_asked.retain(|id, _| live_ids.contains(id));
-                if let Ok(mut frames) = self.ctx.frames.lock() {
-                    frames.retain(&live_ids);
-                }
+                // A peer that went silent is no longer a join candidate (seeds stay).
+                let seeds = self.seed_ids.clone();
+                self.known_peer_addrs
+                    .retain(|id, _| seeds.contains(id) || live_ids.contains(&id.to_string()));
                 println!("[mesh] pruned {pruned} peer(s) silent for over {ttl}s");
             }
         }
         self.ctx.scores(PeerScores::decay);
         self.keep_neighbors().await;
-        // Catch up from a random good neighbor now and then; with no neighbor after a few
-        // beats, stop waiting for the first catch-up.
-        let mut neighbors: Vec<EndpointId> = self
-            .ctx
-            .scores(|s| {
-                self.receiver
-                    .neighbors()
-                    .filter(|id| !s.avoid_fetching(id))
-                    .collect()
-            })
-            .unwrap_or_default();
-        shuffle(&mut neighbors);
-        match neighbors.first() {
-            Some(&n) if !self.caught_up || self.counter.is_multiple_of(CATCH_UP_EVERY) => {
-                self.catch_up(n)
-            }
-            None if self.counter >= 3 => self.caught_up = true,
-            _ => {}
-        }
 
         let counter = self.counter;
-        let is_summary = counter <= 2 || counter.is_multiple_of(SUMMARY_EVERY_N_BEATS);
-        if is_summary {
-            // Details drift slowly (the public-IP lookup, addresses): catch them here.
+        if counter <= 2 || counter.is_multiple_of(INVENTORY_REFRESH_EVERY) {
             self.refresh_own_inventory(true).await;
         }
         let mut beat = self.fresh_beat();
-        let local_summary = beat.summary_stats.clone();
-        beat.kind = if is_summary { "summary" } else { "regular" }.to_string();
-        if !is_summary {
-            beat.summary_stats = None;
-        }
         let node_id = self.ctx.node_id.clone();
         self.ctx.with_state(|st| {
             st.reconcile_processes();
@@ -1338,35 +1136,23 @@ impl Mesh {
                 .nodes
                 .iter()
                 .filter(|n| {
-                    n.node_id != node_id && now.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n)
+                    n.node_id != node_id
+                        && now.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n)
                 })
                 .count() as u32;
             beat.processes = st.processes.clone();
             beat.service_endpoints = st.service_endpoints.clone();
             beat.devices = st.devices.clone();
             beat.probe = st.probe.clone();
+            beat.peer_rtt_ms = st
+                .nodes
+                .iter()
+                .find(|n| n.node_id == node_id)
+                .map(|me| me.peer_rtt_ms.clone())
+                .unwrap_or_default();
             st.iroh_runtime = beat.iroh_transport.clone();
             st.stats = beat.stats.clone();
-            let mut local_copy = beat.clone();
-            local_copy.summary_stats = local_summary.clone();
-            merge_beat(&mut st.nodes, local_copy);
-            if let (true, Some(s)) = (is_summary, &local_summary) {
-                st.record_log(
-                    "gossip-beat",
-                    "INFO",
-                    "stdout",
-                    format!(
-                        "published 30s summary beat #{} (cpu {:.1}% ±{:.1}%, mem {:.1}% ±{:.1}%, thrashing={}, heard={})",
-                        counter,
-                        s.cpu_pct.mean,
-                        s.cpu_pct.stddev,
-                        s.mem_pct.mean,
-                        s.mem_pct.stddev,
-                        s.thrashing_detected,
-                        beat.heard
-                    ),
-                );
-            }
+            merge_beat(&mut st.nodes, beat.clone());
         });
         if counter == 1 && self.print_first_beat {
             println!(
@@ -1374,20 +1160,13 @@ impl Mesh {
                 serde_json::to_string_pretty(&beat).unwrap_or_default()
             );
         }
-        let msg = if is_summary {
-            Message::Summary(beat)
-        } else {
-            Message::Beat(beat)
-        };
-        self.broadcast(&msg).await;
+        self.broadcast(&Message::Beat(beat)).await;
         self.counter += 1;
     }
 
     /// Admit a message only if it opens with the channel key, its signature matches a
-    /// listed node, its name is valid and it is not a replay. A `fetched` frame skips the
-    /// replay window (a relayed inventory can be hours old) but must still be newer than
-    /// anything admitted from its author.
-    fn admit(&mut self, content: &[u8], fetched: bool) -> Result<Message, Rejected> {
+    /// listed node, its name is valid and it is not a replay.
+    fn admit(&mut self, content: &[u8]) -> Result<Message, Rejected> {
         let keys = self.keys.as_ref().ok_or(Rejected::Ignored)?;
         let msg = match open_message(content, keys) {
             Ok(msg) => msg,
@@ -1417,25 +1196,18 @@ impl Mesh {
             );
             return Err(Rejected::Invalid);
         }
-        let now_ms = if fetched {
-            msg.sent_unix_ms()
-        } else {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0)
-        };
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
         if let Err(reason) = self
             .replay_guard
             .admit(&msg.replay_key(), msg.sent_unix_ms(), now_ms)
         {
-            // A fetched frame this node already has is expected; a gossip replay is not.
-            if !fetched {
-                eprintln!(
-                    "[gossip-replay-reject] dropped message from node={} node_id={node_id}: {reason}",
-                    msg.node()
-                );
-            }
+            eprintln!(
+                "[gossip-replay-reject] dropped message from node={} node_id={node_id}: {reason}",
+                msg.node()
+            );
             return Err(Rejected::Ignored);
         }
         Ok(msg)
@@ -1460,60 +1232,9 @@ impl Mesh {
         self.learn_peer(&addr);
     }
 
-    /// Fetch a peer's inventory when its beat announces a version this node does not have
-    /// (it missed the broadcast, or joined after it).
-    fn want_inventory(&mut self, beat: &Beat) {
-        if !self.caught_up
-            || beat.inventory_version == 0
-            || self.inventories.get(&beat.node_id).map(|i| i.version)
-                == Some(beat.inventory_version)
-        {
-            return;
-        }
-        let now = monotonic_now_ms();
-        if let Some(&at) = self.inventory_asked.get(&beat.node_id) {
-            if now.saturating_sub(at) < FETCH_RETRY.as_millis() as u64 {
-                return;
-            }
-        }
-        let Ok(peer) = beat.node_id.parse::<EndpointId>() else {
-            return;
-        };
-        if self
-            .ctx
-            .scores(|s| s.avoid_fetching(&peer))
-            .unwrap_or(false)
-        {
-            return;
-        }
-        self.inventory_asked.insert(beat.node_id.clone(), now);
-        let (ctx, slots, fetched) = (
-            self.ctx.clone(),
-            self.fetch_slots.clone(),
-            self.fetched_tx.clone(),
-        );
-        tokio::spawn(async move {
-            let Ok(_slot) = slots.acquire_owned().await else {
-                return;
-            };
-            let result = fetch::inventory(&ctx.endpoint, peer, Duration::from_secs(10)).await;
-            ctx.scores(|s| s.fetched(peer, result.as_ref().err().map(String::as_str)));
-            match result {
-                Ok(frame) => {
-                    let _ = fetched.send(Fetched {
-                        catch_up: false,
-                        beats: Vec::new(),
-                        inventories: vec![frame],
-                    });
-                }
-                Err(err) => eprintln!("[fetch] inventory: {err}"),
-            }
-        });
-    }
-
     /// A gossip message `delivered_from` a neighbor: dropped when that neighbor is
     /// graylisted (GossipSub's graylist), otherwise admitted, scored and kept.
-    fn on_received(&mut self, content: &[u8], delivered_from: EndpointId) {
+    async fn on_received(&mut self, content: &[u8], delivered_from: EndpointId) {
         if self
             .ctx
             .scores(|s| s.graylisted(&delivered_from))
@@ -1521,7 +1242,7 @@ impl Mesh {
         {
             return;
         }
-        let admitted = self.admit(content, false);
+        let admitted = self.admit(content);
         match &admitted {
             Ok(_) => self.ctx.scores(|s| s.delivered(delivered_from, true)),
             Err(Rejected::Invalid) => self.ctx.scores(|s| s.delivered(delivered_from, false)),
@@ -1530,14 +1251,9 @@ impl Mesh {
         let Ok(msg) = admitted else {
             return;
         };
-        self.keep_frame(&msg, content.to_vec(), now_unix());
         match msg {
             Message::Inventory(inventory) => self.on_inventory(inventory),
-            beat => {
-                if let Some(beat) = beat.into_beat() {
-                    self.on_beat(beat);
-                }
-            }
+            Message::Beat(beat) => self.on_beat(beat).await,
         }
     }
 
@@ -1556,20 +1272,66 @@ impl Mesh {
             .insert(inventory.node_id.clone(), inventory);
     }
 
-    fn on_beat(&mut self, mut beat: Beat) {
+    async fn on_beat(&mut self, mut beat: Beat) {
         self.learn_addresses(&beat);
-        self.want_inventory(&beat);
+        self.rejoin_if_one_sided(&beat).await;
         // Stamp with our clock once admitted, so clock skew between hosts cannot cause
         // early TTL pruning.
         beat.updated_at_unix = now_unix();
         self.merge_peer_beat(beat);
     }
 
+    /// iroh-gossip's HyParView can lose the one `Neighbor` reply that completes a link and
+    /// never send it again, leaving this node with a neighbor that does not know it. Each
+    /// beat lists its sender's neighbors: when a neighbor's beats leave this node out
+    /// `ONE_SIDED_BEATS` times in a row, a Join sent to it completes the link on both sides.
+    async fn rejoin_if_one_sided(&mut self, beat: &Beat) {
+        let Ok(peer) = beat.node_id.parse::<EndpointId>() else {
+            return;
+        };
+        if !self.receiver.neighbors().any(|n| n == peer) {
+            self.one_sided.remove(&peer);
+            return;
+        }
+        let own = neighbor_prefix(&self.ctx.node_id);
+        let rounds = self.one_sided.entry(peer).or_default();
+        *rounds = if beat.neighbors.iter().any(|n| n.node_id_prefix == own) {
+            0
+        } else {
+            *rounds + 1
+        };
+        if *rounds >= ONE_SIDED_BEATS {
+            *rounds = 0;
+            println!(
+                "[mesh] neighbor '{}' does not list this node as its neighbor; joining it again",
+                beat.node
+            );
+            let _ = tokio::time::timeout(
+                Duration::from_millis(600),
+                self.sender.join_peers(vec![peer]),
+            )
+            .await;
+        }
+    }
+
     /// Merge an admitted peer beat into the node state (with its inventory, the first time).
-    fn merge_peer_beat(&mut self, beat: Beat) {
+    fn merge_peer_beat(&mut self, mut beat: Beat) {
         let peer = beat.node.clone();
         let inventory = self.inventories.get(&beat.node_id).cloned();
         self.ctx.with_state(|st| {
+            // The beat names its neighbors by NodeId prefix; the HUD wants names.
+            beat.peer_rtt_ms = beat
+                .neighbors
+                .iter()
+                .filter(|l| l.rtt_ms > 0.0)
+                .filter_map(|l| {
+                    let n = st
+                        .nodes
+                        .iter()
+                        .find(|n| n.node_id.starts_with(&l.node_id_prefix))?;
+                    Some((n.node.clone(), l.rtt_ms))
+                })
+                .collect();
             let first_seen = !st.nodes.iter().any(|n| n.node_id == beat.node_id);
             merge_beat(&mut st.nodes, beat);
             if let (true, Some(inv)) = (first_seen, &inventory) {

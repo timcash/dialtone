@@ -183,11 +183,7 @@ pub struct NodeState {
     /// Gossip traffic counters (see `GET /api/net`).
     #[serde(skip)]
     pub net: Arc<crate::mesh::NetCounters>,
-    /// Every node's latest sealed beat and inventory, this node's own included, served to
-    /// fetches (`fetch.rs`). Kept by the Mesh actor.
-    #[serde(skip)]
-    pub frames: Arc<Mutex<crate::mesh::FrameCache>>,
-    /// Peer scores (GossipSub-style), kept by the Mesh, Links and Probe actors.
+    /// Peer scores (GossipSub-style), kept by the Mesh and Probe actors.
     #[serde(skip)]
     pub scores: Arc<Mutex<crate::mesh::PeerScores>>,
     /// iroh-gossip's own counters (data and control messages), for `GET /api/net`.
@@ -208,6 +204,37 @@ pub struct NodeState {
 }
 
 impl NodeState {
+    /// What this node tells a peer's HUD that focuses it (`fetch.rs` `details`), and its own
+    /// HUD: everything beats leave out. Its devices, full probe, processes with their status,
+    /// services, rolling summary, store, full stats and transport.
+    pub fn details_json(&self) -> Value {
+        let me = self
+            .nodes
+            .iter()
+            .find(|n| n.node_id == self.iroh_runtime.node_id);
+        json!({
+            "node_id": self.iroh_runtime.node_id,
+            "devices": self.devices,
+            "probe": self.probe,
+            "processes": self.processes.iter().map(|p| {
+                let mut p = p.clone();
+                p.env.clear();
+                p.args.clear();
+                p
+            }).collect::<Vec<_>>(),
+            "service_endpoints": self.service_endpoints,
+            "summary_stats": me.and_then(|m| m.summary_stats.clone()),
+            "store": me.and_then(|m| m.store.clone()),
+            "stats": self.stats,
+            "iroh_transport": IrohTransportDiagnostics {
+                identity_key_path: None,
+                ..self.iroh_runtime.clone()
+            },
+            "os": me.map(|m| m.os.clone()),
+            "arch": me.map(|m| m.arch.clone()),
+        })
+    }
+
     /// This node's own entry in `nodes`, found by NodeId (a peer may reuse our name).
     pub fn self_entry_mut(&mut self) -> Option<&mut Beat> {
         let id = self.iroh_runtime.node_id.clone();
@@ -551,6 +578,7 @@ impl NodeState {
             heard: 0,
             inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
+            neighbors: Vec::new(),
             summary_stats: None,
             sent_unix_ms: 0,
             os: default_os(),
@@ -629,7 +657,6 @@ impl NodeState {
             probe: None,
             probe_blobs: Vec::new(),
             net: Arc::default(),
-            frames: Arc::default(),
             scores: Arc::default(),
             gossip_metrics: None,
             runtime: None,
@@ -1123,12 +1150,12 @@ fn route_request(
             write_json(&mut stream, 200, &body)
         }
         ("GET", "/api/details") => {
-            // The focused node's devices and full probe: this node's own, or fetched from the
+            // The focused node's details (`NodeState::details_json`): this node's own, or fetched from the
             // peer and kept for `DETAILS_TTL_SECS` (the HUD asks every few seconds).
             let node_id = query.get("node_id").cloned().unwrap_or_default();
             let own = st.iroh_runtime.node_id.clone();
             if node_id.is_empty() || node_id == own {
-                let body = json!({ "node_id": own, "devices": st.devices, "probe": st.probe });
+                let body = st.details_json();
                 return write_json(&mut stream, 200, &body);
             }
             let now = now_unix();

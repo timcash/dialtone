@@ -256,16 +256,87 @@ fn write_secret_key(path: &Path, secret_key: &SecretKey) -> Result<(), String> {
 /// QUIC close code sent to a node that is not on the allowlist.
 pub const NOT_ALLOWLISTED_CLOSE_CODE: u32 = 403;
 
+/// How this node reaches one gossip peer, read from the open QUIC connection: no packets
+/// are sent to learn it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GossipPath {
+    /// QUIC's Rtt estimate on the selected path, in milliseconds.
+    pub rtt_ms: f64,
+    /// The selected path is a direct IP path (not the relay).
+    pub direct: bool,
+}
+
+/// The gossip connections iroh-gossip has open, by peer, kept as weak handles (they never
+/// keep a connection alive). Filled by `AllowlistHook`, read by the Paths actor.
+#[derive(Clone, Debug, Default)]
+pub struct GossipConnections(
+    std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<iroh::EndpointId, Vec<iroh::endpoint::WeakConnectionHandle>>,
+        >,
+    >,
+);
+
+impl GossipConnections {
+    fn add(&self, conn: &Connection) {
+        if let Ok(mut map) = self.0.lock() {
+            let handles = map.entry(conn.remote_id()).or_default();
+            handles.retain(|h| h.upgrade().is_some());
+            handles.push(conn.weak_handle());
+        }
+    }
+
+    /// The selected path to `peer` on its open gossip connection with the lowest Rtt.
+    pub fn path(&self, peer: &iroh::EndpointId) -> Option<GossipPath> {
+        let mut map = self.0.lock().ok()?;
+        let handles = map.get_mut(peer)?;
+        handles.retain(|h| h.upgrade().is_some());
+        handles
+            .iter()
+            .filter_map(|h| {
+                let conn = h.upgrade()?;
+                let paths = conn.paths();
+                let selected = paths.iter().find(|p| p.is_selected())?;
+                Some(GossipPath {
+                    rtt_ms: (selected.rtt().as_secs_f64() * 10_000.0).round() / 10.0,
+                    direct: selected.is_ip(),
+                })
+            })
+            .min_by(|a, b| a.rtt_ms.total_cmp(&b.rtt_ms))
+    }
+
+    /// Forget peers whose gossip connections have all closed.
+    pub fn prune(&self) {
+        if let Ok(mut map) = self.0.lock() {
+            map.retain(|_, handles| {
+                handles.retain(|h| h.upgrade().is_some());
+                !handles.is_empty()
+            });
+        }
+    }
+}
+
 /// Endpoint hook that closes every connection (gossip and blobs, in and out) right after
-/// the TLS handshake unless the remote NodeId is on the live allowlist.
+/// the TLS handshake unless the remote NodeId is on the live allowlist, and keeps a weak
+/// handle to each admitted gossip connection (`GossipConnections`).
 #[derive(Clone, Debug)]
 pub struct AllowlistHook {
     allowlist: crate::mesh::LiveAllowlist,
+    gossip: GossipConnections,
 }
 
 impl AllowlistHook {
     pub fn new(allowlist: crate::mesh::LiveAllowlist) -> Self {
-        Self { allowlist }
+        Self {
+            allowlist,
+            gossip: GossipConnections::default(),
+        }
+    }
+
+    /// Record admitted gossip connections in `gossip`.
+    pub fn with_gossip_connections(mut self, gossip: GossipConnections) -> Self {
+        self.gossip = gossip;
+        self
     }
 }
 
@@ -273,6 +344,9 @@ impl EndpointHooks for AllowlistHook {
     async fn after_handshake<'a>(&'a self, conn: &'a Connection) -> AfterHandshakeOutcome {
         let remote = conn.remote_id();
         if self.allowlist.contains(&remote) {
+            if conn.alpn() == iroh_gossip::net::GOSSIP_ALPN {
+                self.gossip.add(conn);
+            }
             return AfterHandshakeOutcome::accept();
         }
         eprintln!(

@@ -20,11 +20,15 @@ use crate::service::Service;
 use crate::stats::{Stats, StatsSummary};
 
 pub const BEAT_SCHEMA: &str = "dialtone.iroh.beat.v1";
-/// v5: a binary frame, `ENVELOPE_MAGIC` + 24-byte nonce + ciphertext; the plaintext is the
-/// sender Key's 64-byte Ed25519 signature followed by the signed `Message` JSON. v4 wrapped
-/// the same in JSON with hex and base64, a third larger.
-pub const DIALTONE_ENVELOPE_SCHEMA_V5: &str = "dialtone.iroh.envelope.v5";
-const ENVELOPE_MAGIC: &[u8; 4] = b"dt5\0";
+/// v6: a binary frame, `ENVELOPE_MAGIC` + 24-byte nonce + ciphertext; the plaintext is the
+/// sender Key's 64-byte Ed25519 signature followed by the signed message: one type byte,
+/// then a compact beat (`wire.rs`) or an inventory's JSON. v5 sent beats as JSON, about
+/// five times larger.
+pub const DIALTONE_ENVELOPE_SCHEMA_V6: &str = "dialtone.iroh.envelope.v6";
+const ENVELOPE_MAGIC: &[u8; 4] = b"dt6\0";
+/// The type byte that starts a signed message.
+const BEAT_TYPE: u8 = 1;
+const INVENTORY_TYPE: u8 = 2;
 /// Beats sent more than this far from local time (either direction) are rejected.
 pub const REPLAY_WINDOW_MS: u64 = 5 * 60 * 1000;
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
@@ -33,10 +37,16 @@ pub const DEFAULT_CHANNEL_NAME: &str = "dialtone";
 pub const DEFAULT_PEER_TTL_SECS: u64 = 300;
 /// The shortest beat interval; larger meshes beat less often (`beat_interval_for`).
 pub const BEAT_INTERVAL_SECS: u64 = 5;
-/// The longest beat interval, reached at 600 nodes.
-pub const MAX_BEAT_INTERVAL_SECS: u64 = 60;
+/// The longest beat interval, reached at about 1,000 nodes.
+pub const MAX_BEAT_INTERVAL_SECS: u64 = 120;
+/// The rolling stats summary's window. Summaries are not gossiped: the HUD fetches the
+/// focused node's (`fetch.rs`).
 pub const SUMMARY_INTERVAL_SECS: u64 = 30;
-pub const SUMMARY_EVERY_N_BEATS: u64 = SUMMARY_INTERVAL_SECS / BEAT_INTERVAL_SECS;
+/// Incoming beat traffic each node aims for, in bytes per second.
+pub const BEAT_BUDGET_BYTES_PER_SEC: u64 = 4096;
+/// What one beat costs a node that hears it: the sealed frame plus gossip's framing and the
+/// duplicates Plumtree sends (about two data frames per message delivered).
+pub const BEAT_COST_BYTES: u64 = 500;
 
 /// Documented Argon2id parameters (OWASP recommended: 19 MiB memory, 2 iterations, 1 lane).
 pub const ARGON2ID_M_COST_KIB: u32 = 19_456;
@@ -880,9 +890,12 @@ pub fn monotonic_now_ms() -> u64 {
 }
 
 /// Seconds between beats in a mesh of `nodes`: every node hears every beat, so the interval
-/// grows with the mesh to keep each node's incoming beats at about 10 per second.
+/// grows with the mesh to keep each node's incoming beats within `BEAT_BUDGET_BYTES_PER_SEC`
+/// (5s up to 40 nodes, 13s at 100, 120s at 1,000).
 pub fn beat_interval_for(nodes: usize) -> u64 {
-    (nodes.div_ceil(10) as u64).clamp(BEAT_INTERVAL_SECS, MAX_BEAT_INTERVAL_SECS)
+    (nodes as u64 * BEAT_COST_BYTES)
+        .div_ceil(BEAT_BUDGET_BYTES_PER_SEC)
+        .clamp(BEAT_INTERVAL_SECS, MAX_BEAT_INTERVAL_SECS)
 }
 
 /// How long a peer's beat stays fresh: three of the peer's own beat intervals.
@@ -1159,6 +1172,14 @@ pub struct StoreStats {
     pub latest_digest: Option<String>,
 }
 
+/// One of a node's gossip neighbors, as its beat names it: a NodeId prefix
+/// (`wire::NEIGHBOR_PREFIX_BYTES`) and QUIC's Rtt estimate to it (0 when unknown).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NeighborLink {
+    pub node_id_prefix: String,
+    pub rtt_ms: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Beat {
     pub schema: String,
@@ -1180,9 +1201,13 @@ pub struct Beat {
     /// The version of the node's inventory; a peer holding another version fetches it.
     #[serde(default)]
     pub inventory_version: u64,
-    /// Rtt to the node's gossip neighbors, measured by the Links actor.
+    /// Rtt to the node's gossip neighbors by name: QUIC's estimate on the gossip connection
+    /// (see the Paths actor), resolved from `neighbors` when the beat is admitted.
     #[serde(default)]
     pub peer_rtt_ms: std::collections::BTreeMap<String, f64>,
+    /// The node's gossip neighbors, as the beat names them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub neighbors: Vec<NeighborLink>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_stats: Option<StatsSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1220,39 +1245,11 @@ pub struct Beat {
 }
 
 impl Beat {
-    /// The fixed-size form a beat takes on the wire: nothing that grows with the mesh (seed
-    /// lists, per-peer probe results), and none of the node's details or inventory, which
-    /// travel in the `Inventory`. Peers keep those from the last inventory (`merge_beat`).
-    pub fn for_wire(&self) -> Beat {
-        let mut b = self.clone();
-        b.ticket.clear();
-        b.processes.clear();
-        b.service_endpoints.clear();
-        b.devices.clear();
-        b.role.clear();
-        b.capabilities.clear();
-        b.geo_location = None;
-        b.observed_remote_addrs.clear();
-        b.tailnet_used = false;
-        b.stats.stats_line.clear();
-        b.stats.interfaces.truncate(1);
-        b.iroh_transport = IrohTransportDiagnostics {
-            advertised_relay_urls: self.iroh_transport.advertised_relay_urls.clone(),
-            advertised_ip_addrs: self.iroh_transport.advertised_ip_addrs.clone(),
-            ..Default::default()
-        };
-        if let Some(p) = &mut b.probe {
-            // A passing check needs no explanation; a failing one keeps it.
-            for check in p.checks.iter_mut().filter(|c| c.ok) {
-                check.detail.clear();
-            }
-            p.blob_digest.clear();
-            p.pulls.clear();
-            p.beats.clear();
-            p.program_digest.clear();
-            p.staged_path.clear();
-        }
-        b
+    /// The beat as peers see it: what survives the compact wire form (`wire.rs`), a fixed
+    /// size. Nothing that grows with the mesh, and none of the node's details or inventory;
+    /// peers keep those from the last inventory or fetched details (`merge_beat`).
+    pub fn for_wire(&self) -> Result<Beat, String> {
+        crate::wire::decode_beat(&crate::wire::encode_beat(self)?)
     }
 }
 
@@ -1299,46 +1296,68 @@ impl Inventory {
         inv.version = 0;
         let json = serde_json::to_vec(&inv).unwrap_or_default();
         let digest = Sha256::digest(&json);
-        let mut first = [0u8; 8];
-        first.copy_from_slice(&digest[..8]);
-        // 0 means "no inventory yet".
-        inv.version = u64::from_be_bytes(first).max(1);
+        let mut first = [0u8; 4];
+        first.copy_from_slice(&digest[..4]);
+        // 32 bits tell versions apart and keep beats small; 0 means "no inventory yet".
+        inv.version = (u32::from_be_bytes(first) as u64).max(1);
         inv
     }
 }
 
 /// What nodes say to each other on a channel. Every message is signed by its sender.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Message {
-    /// Every beat interval, on the beats topic: liveness and stats, a fixed size.
+    /// Every beat interval, on the beats topic: liveness and load, about 250 bytes sealed.
     Beat(Beat),
-    /// Every sixth beat: a beat with the rolling stats summary.
-    Summary(Beat),
-    /// On the events topic, when it changes: the sender's programs, services, devices and
-    /// details.
+    /// On the events topic, when it changes: the sender's programs, services and details.
     Inventory(Inventory),
 }
 
 impl Message {
     pub fn node_id(&self) -> &str {
         match self {
-            Message::Beat(b) | Message::Summary(b) => &b.node_id,
+            Message::Beat(b) => &b.node_id,
             Message::Inventory(i) => &i.node_id,
         }
     }
 
     pub fn node(&self) -> &str {
         match self {
-            Message::Beat(b) | Message::Summary(b) => &b.node,
+            Message::Beat(b) => &b.node,
             Message::Inventory(i) => &i.node,
         }
     }
 
     pub fn sent_unix_ms(&self) -> u64 {
         match self {
-            Message::Beat(b) | Message::Summary(b) => b.sent_unix_ms,
+            Message::Beat(b) => b.sent_unix_ms,
             Message::Inventory(i) => i.sent_unix_ms,
+        }
+    }
+
+    /// The signed bytes: a type byte, then the compact beat or the inventory JSON.
+    fn encode(&self) -> Result<Vec<u8>, String> {
+        let (kind, body) = match self {
+            Message::Beat(b) => (BEAT_TYPE, crate::wire::encode_beat(b)?),
+            Message::Inventory(i) => (
+                INVENTORY_TYPE,
+                serde_json::to_vec(i).map_err(|e| e.to_string())?,
+            ),
+        };
+        let mut out = Vec::with_capacity(1 + body.len());
+        out.push(kind);
+        out.extend_from_slice(&body);
+        Ok(out)
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Message, String> {
+        match bytes.split_first() {
+            Some((&BEAT_TYPE, body)) => Ok(Message::Beat(crate::wire::decode_beat(body)?)),
+            Some((&INVENTORY_TYPE, body)) => Ok(Message::Inventory(
+                serde_json::from_slice(body).map_err(|e| format!("invalid inventory: {e}"))?,
+            )),
+            Some((kind, _)) => Err(format!("unknown message type {kind}")),
+            None => Err("empty message".to_string()),
         }
     }
 
@@ -1351,26 +1370,20 @@ impl Message {
         }
     }
 
-    /// The beat this message carries, with `kind` named after the message type.
+    /// The beat this message carries.
     pub fn into_beat(self) -> Option<Beat> {
-        let (mut beat, kind) = match self {
-            Message::Beat(b) => (b, "regular"),
-            Message::Summary(b) => (b, "summary"),
-            Message::Inventory(_) => return None,
-        };
-        beat.kind = kind.to_string();
-        Some(beat)
+        match self {
+            Message::Beat(b) => Some(b),
+            Message::Inventory(_) => None,
+        }
     }
 
-    /// Prepare for the wire: stamp `sent_unix_ms`, keep beats small (`Beat::for_wire`) and
-    /// strip process `env` / `args` (they may hold secrets).
+    /// Prepare for the wire: stamp `sent_unix_ms` and strip process `env` / `args` (they
+    /// may hold secrets). Beats shrink to their compact form when encoded.
     fn for_wire(&self, sent_unix_ms: u64) -> Message {
         let mut msg = self.clone();
         match &mut msg {
-            Message::Beat(b) | Message::Summary(b) => {
-                *b = b.for_wire();
-                b.sent_unix_ms = sent_unix_ms;
-            }
+            Message::Beat(b) => b.sent_unix_ms = sent_unix_ms,
             Message::Inventory(i) => {
                 *i = i.for_wire();
                 i.sent_unix_ms = sent_unix_ms;
@@ -1409,8 +1422,10 @@ fn next_sent_unix_ms() -> u64 {
     }
 }
 
-/// The form of a process that leaves this node in a beat: no `env` or `args` (they may hold
-/// secrets), and an explicit `deploy_ticket` when the process is offered for mesh deploy.
+/// The form of a process that leaves this node in an inventory: no `env` or `args` (they may
+/// hold secrets), no pid, status or restart count (they change on every restart, and the
+/// focused node's come with its details), and an explicit `deploy_ticket` when the process
+/// is offered for mesh deploy.
 pub fn process_advert(spec: &crate::service::ProcessSpec) -> crate::service::ProcessSpec {
     let mut advert = spec.clone();
     let offered = spec.env.iter().any(|kv| kv == "DIALTONE_MESH_DEPLOY=1");
@@ -1430,23 +1445,25 @@ pub fn process_advert(spec: &crate::service::ProcessSpec) -> crate::service::Pro
     }
     advert.env.clear();
     advert.args.clear();
+    advert.pid = None;
+    advert.status = None;
+    advert.restart_count = 0;
     advert
 }
 
 /// Sign a `Message` with this node's Key, then encrypt it with XChaCha20-Poly1305 (random
-/// 24-byte nonce, `DIALTONE_ENVELOPE_SCHEMA_V5` as AAD). Process `env` / `args` never
+/// 24-byte nonce, `DIALTONE_ENVELOPE_SCHEMA_V6` as AAD). Process `env` / `args` never
 /// leave the node, and `sent_unix_ms` is stamped here so every frame is unique.
 pub fn seal_message(
     msg: &Message,
     keys: &ChannelKeys,
     key: &iroh::SecretKey,
 ) -> Result<Vec<u8>, String> {
-    let wire = msg.for_wire(next_sent_unix_ms());
-    let msg_json = serde_json::to_vec(&wire).map_err(|e| e.to_string())?;
-    let sig = key.sign(&msg_json);
-    let mut plaintext = Vec::with_capacity(64 + msg_json.len());
+    let signed = msg.for_wire(next_sent_unix_ms()).encode()?;
+    let sig = key.sign(&signed);
+    let mut plaintext = Vec::with_capacity(64 + signed.len());
     plaintext.extend_from_slice(&sig.to_bytes());
-    plaintext.extend_from_slice(&msg_json);
+    plaintext.extend_from_slice(&signed);
 
     let rand_bytes = iroh::SecretKey::generate().to_bytes();
     let nonce_bytes = &rand_bytes[..24];
@@ -1457,7 +1474,7 @@ pub fn seal_message(
             nonce,
             Payload {
                 msg: &plaintext,
-                aad: DIALTONE_ENVELOPE_SCHEMA_V5.as_bytes(),
+                aad: DIALTONE_ENVELOPE_SCHEMA_V6.as_bytes(),
             },
         )
         .map_err(|_| "XChaCha20-Poly1305 encryption failed".to_string())?;
@@ -1475,7 +1492,7 @@ pub fn seal_message(
 pub fn open_message(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Message, String> {
     let Some(rest) = raw_frame.strip_prefix(ENVELOPE_MAGIC.as_slice()) else {
         return Err(format!(
-            "gossip frame is not a {DIALTONE_ENVELOPE_SCHEMA_V5} envelope"
+            "gossip frame is not a {DIALTONE_ENVELOPE_SCHEMA_V6} envelope"
         ));
     };
     if rest.len() < 24 {
@@ -1489,7 +1506,7 @@ pub fn open_message(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Message, Str
             nonce,
             Payload {
                 msg: ciphertext,
-                aad: DIALTONE_ENVELOPE_SCHEMA_V5.as_bytes(),
+                aad: DIALTONE_ENVELOPE_SCHEMA_V6.as_bytes(),
             },
         )
         .map_err(|_| {
@@ -1498,9 +1515,8 @@ pub fn open_message(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Message, Str
     if plaintext.len() < 64 {
         return Err("signed message too short".to_string());
     }
-    let (sig_bytes, msg_json) = plaintext.split_at(64);
-    let msg: Message = serde_json::from_slice(msg_json)
-        .map_err(|e| format!("invalid decrypted message JSON: {e}"))?;
+    let (sig_bytes, signed) = plaintext.split_at(64);
+    let msg = Message::decode(signed)?;
     let signer: iroh::PublicKey = msg
         .node_id()
         .parse()
@@ -1509,7 +1525,7 @@ pub fn open_message(raw_frame: &[u8], keys: &ChannelKeys) -> Result<Message, Str
         .try_into()
         .map_err(|_| "message signature must be 64 bytes".to_string())?;
     signer
-        .verify(msg_json, &iroh::Signature::from_bytes(&sig_bytes))
+        .verify(signed, &iroh::Signature::from_bytes(&sig_bytes))
         .map_err(|_| format!("message signature does not match node_id {}", msg.node_id()))?;
     Ok(msg)
 }
@@ -1628,82 +1644,6 @@ impl PeerScores {
                 })
                 .collect(),
         )
-    }
-}
-
-/// The latest sealed beat and inventory of one node, exactly as its author signed them.
-#[derive(Clone, Debug, Default)]
-pub struct CachedFrames {
-    /// The beat frame, its `sent_unix_ms`, and when this node received it (unix seconds).
-    pub beat: Option<(Vec<u8>, u64, u64)>,
-    /// The inventory frame and its version.
-    pub inventory: Option<(Vec<u8>, u64)>,
-}
-
-/// Every node's latest sealed frames, this node's own included: what a neighbor serves to a
-/// node catching up (Scuttlebutt-style anti-entropy, `fetch.rs`). Frames stay signed by
-/// their authors, so the node catching up verifies them as if they came by gossip.
-#[derive(Clone, Debug, Default)]
-pub struct FrameCache {
-    pub nodes: HashMap<String, CachedFrames>,
-}
-
-/// What a node catching up already holds of one node: the `sent_unix_ms` of its latest
-/// beat (`u64::MAX` when that beat is fresh, so no newer one is sent) and its inventory
-/// version.
-pub type CatchUpHave = HashMap<String, [u64; 2]>;
-
-/// What a neighbor sends a node catching up: beat frames with their age in seconds, and
-/// inventory frames.
-pub type CatchUpDeltas<'a> = (Vec<(u64, &'a [u8])>, Vec<&'a [u8]>);
-
-impl FrameCache {
-    pub fn put_beat(&mut self, node_id: &str, frame: Vec<u8>, sent_ms: u64, rx_unix: u64) {
-        let entry = self.nodes.entry(node_id.to_string()).or_default();
-        if entry.beat.as_ref().is_none_or(|(_, ms, _)| sent_ms > *ms) {
-            entry.beat = Some((frame, sent_ms, rx_unix));
-        }
-    }
-
-    pub fn put_inventory(&mut self, node_id: &str, frame: Vec<u8>, version: u64) {
-        self.nodes.entry(node_id.to_string()).or_default().inventory = Some((frame, version));
-    }
-
-    /// Forget nodes that are no longer in the mesh.
-    pub fn retain(&mut self, live: &std::collections::HashSet<String>) {
-        self.nodes.retain(|id, _| live.contains(id));
-    }
-
-    /// What the asker lacks, given what it `have`s: beat frames newer than its own (with
-    /// their age in seconds) and inventory frames of another version. Beats older than
-    /// `max_age_secs` are left out; so is the asker itself.
-    pub fn deltas(
-        &self,
-        asker: &str,
-        have: &CatchUpHave,
-        now_unix: u64,
-        max_age_secs: u64,
-    ) -> CatchUpDeltas<'_> {
-        let mut beats = Vec::new();
-        let mut inventories = Vec::new();
-        for (id, frames) in &self.nodes {
-            if id == asker {
-                continue;
-            }
-            let [have_ms, have_version] = have.get(id).copied().unwrap_or([0, 0]);
-            if let Some((frame, ms, rx)) = &frames.beat {
-                let age = now_unix.saturating_sub(*rx);
-                if *ms > have_ms && age <= max_age_secs {
-                    beats.push((age, frame.as_slice()));
-                }
-            }
-            if let Some((frame, version)) = &frames.inventory {
-                if *version != have_version {
-                    inventories.push(frame.as_slice());
-                }
-            }
-        }
-        (beats, inventories)
     }
 }
 
@@ -1878,11 +1818,21 @@ pub fn merge_beat(nodes: &mut Vec<Beat>, mut beat: Beat) {
         if beat.summary_stats.is_none() {
             beat.summary_stats = existing.summary_stats.clone();
         }
-        if beat.geo_location.is_none() {
-            beat.geo_location = existing.geo_location.clone();
+        match (&mut beat.geo_location, &existing.geo_location) {
+            (None, _) => beat.geo_location = existing.geo_location.clone(),
+            // A beat carries coordinates only; the inventory names the place.
+            (Some(geo), Some(old)) if geo.label.is_empty() => geo.label = old.label.clone(),
+            _ => {}
         }
         if beat.probe.is_none() {
             beat.probe = existing.probe.clone();
+        }
+        // Beats leave these out; they come with the inventory or the fetched details.
+        if beat.store.is_none() {
+            beat.store = existing.store.take();
+        }
+        if beat.arch.is_empty() {
+            beat.arch = std::mem::take(&mut existing.arch);
         }
         // The inventory and details arrive in their own message; a beat never changes them
         // (see `Beat::for_wire`), and how the node is reached is observed locally.
@@ -2060,6 +2010,7 @@ mod tests {
             heard: 0,
             inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
+            neighbors: Vec::new(),
             summary_stats: None,
             sent_unix_ms: 0,
             os: default_os(),
@@ -2092,7 +2043,7 @@ mod tests {
         let received_beat: Beat = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let encrypted_payload_a =
-                    seal_message(&Message::Summary(beat_a.clone()), &keys, &key_a)?;
+                    seal_message(&Message::Beat(beat_a.clone()), &keys, &key_a)?;
                 let _ = sender_a.broadcast(encrypted_payload_a.into()).await;
                 while let Ok(Some(event)) =
                     tokio::time::timeout(Duration::from_millis(120), receiver_b.next()).await
@@ -2126,6 +2077,7 @@ mod tests {
             heard: 0,
             inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
+            neighbors: Vec::new(),
             summary_stats: None,
             sent_unix_ms: 0,
             os: default_os(),
@@ -2288,6 +2240,7 @@ mod tests {
             heard: 0,
             inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
+            neighbors: Vec::new(),
             summary_stats: None,
             sent_unix_ms: 0,
             os: default_os(),
@@ -2343,6 +2296,7 @@ mod tests {
             heard: 0,
             inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::new(),
+            neighbors: Vec::new(),
             summary_stats: None,
             sent_unix_ms: 0,
             os: default_os(),
@@ -2373,25 +2327,50 @@ mod tests {
         let keys = derive_channel_keys_v2("dialtone", "dt-Beat_Size_Test_Secret_2026!");
         let alice = iroh::SecretKey::generate();
         let mut beat = test_beat(&alice);
+        beat.node = "build-node-alpha".to_string();
+        beat.counter = 123_456;
+        beat.heard = 999;
+        beat.inventory_version = u32::MAX as u64;
         beat.stats = sample_stats("node-alpha", None, 1);
         beat.role = node_role_for("node-alpha");
         beat.capabilities = node_capabilities_for("node-alpha");
         beat.ticket = "x".repeat(2_000);
-        beat.peer_rtt_ms = (0..5).map(|i| (format!("peer-{i}"), 12.5)).collect();
-        let mut window = crate::stats::StatsWindow::new(SUMMARY_INTERVAL_SECS);
-        window.record_sample(1, &beat.stats, &beat.peer_rtt_ms, 0);
-        let summary = window.summarize(1);
+        beat.summary_stats =
+            Some(crate::stats::StatsWindow::new(SUMMARY_INTERVAL_SECS).summarize(1));
+        beat.geo_location = Some(NodeGeoLocation {
+            lat: 37.77,
+            lng: -122.42,
+            label: "San Francisco, California".to_string(),
+            source: "public_ip_geo".to_string(),
+            ..Default::default()
+        });
+        beat.iroh_transport.advertised_relay_urls =
+            vec!["https://usw1-1.relay.n0.iroh.link./".to_string()];
+        beat.iroh_transport.advertised_ip_addrs = vec![
+            "203.0.113.7:54691".to_string(),
+            "192.168.1.40:54691".to_string(),
+            "10.0.0.9:54691".to_string(),
+        ];
+        // A full active view, whatever the mesh size.
+        beat.neighbors = (0..9)
+            .map(|i| NeighborLink {
+                node_id_prefix: format!("{i}{i}{i}{i}{i}{i}{i}{i}"),
+                rtt_ms: 107.3,
+            })
+            .collect();
         beat.probe = Some(ProbeReport {
             build: format!("sha256:{}", "b".repeat(64)),
             cycle: 9,
-            passed_count: 3,
+            updated_at_unix: 1_700_000_000,
+            passed_count: 2,
             total_count: 3,
             checks: ["MSH", "NBR", "BEAT"]
                 .iter()
                 .map(|code| ProbeCheck {
                     code: code.to_string(),
-                    ok: true,
-                    detail: "299/299 peers beating, each hears all".to_string(),
+                    ok: *code != "BEAT",
+                    detail: "peer-1 silent 80s, peer-2 silent 982s, and a long tail of other peers"
+                        .to_string(),
                     ms: None,
                 })
                 .collect(),
@@ -2403,20 +2382,73 @@ mod tests {
                 .collect(),
             ..Default::default()
         });
-        let size = |b: &Beat, summary: bool| {
-            let msg = if summary {
-                Message::Summary(b.clone())
-            } else {
-                Message::Beat(b.clone())
-            };
-            seal_message(&msg, &keys, &alice).unwrap().len()
+        let seal = |b: &Beat| {
+            seal_message(&Message::Beat(b.clone()), &keys, &alice)
+                .unwrap()
+                .len()
         };
-        let regular = size(&beat, false);
-        beat.summary_stats = Some(summary);
-        let with_summary = size(&beat, true);
-        println!("sealed beat {regular} bytes, summary {with_summary} bytes");
-        assert!(regular < 1_300, "beat is {regular} bytes");
-        assert!(with_summary < 1_900, "summary is {with_summary} bytes");
+        // The largest a beat gets: a long name, a failing check, a full active view.
+        let largest = seal(&beat);
+        // A healthy node with a short name.
+        let mut healthy = beat.clone();
+        healthy.node = "node-beta".to_string();
+        healthy.stats = crate::stats::Stats {
+            cpu_percent: Some(42.0),
+            mem_percent: Some(61.0),
+            disk_percent: Some(73.0),
+            interfaces: vec![crate::stats::NetStats {
+                rx_bytes_per_sec: 50 << 10,
+                tx_bytes_per_sec: 20 << 10,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        healthy.counter = 5_000;
+        healthy.heard = 40;
+        if let Some(p) = &mut healthy.probe {
+            p.checks.iter_mut().for_each(|c| c.ok = true);
+        }
+        let typical = seal(&healthy);
+        println!("sealed beat {typical} bytes, at most {largest}");
+        assert!(typical <= 256, "a healthy beat is {typical} bytes");
+        assert!(largest <= 320, "the largest beat is {largest} bytes");
+
+        // What a peer sees: the load, place, addresses, neighbors and probe, nothing else.
+        let wire = beat.for_wire().unwrap();
+        assert_eq!(wire.neighbors.len(), crate::wire::MAX_NEIGHBORS);
+        assert_eq!(wire.neighbors[0].rtt_ms, 107.0);
+        assert_eq!(wire.iroh_transport.advertised_ip_addrs.len(), 2);
+        assert_eq!(
+            wire.iroh_transport.advertised_relay_urls,
+            beat.iroh_transport.advertised_relay_urls
+        );
+        let geo = wire.geo_location.unwrap();
+        assert_eq!((geo.lat, geo.lng), (37.77, -122.42));
+        let probe = wire.probe.unwrap();
+        assert_eq!((probe.passed_count, probe.total_count), (2, 3));
+        assert_eq!(probe.build, "b".repeat(8));
+        assert!(probe.check("MSH").unwrap().detail.is_empty());
+        assert!(!probe.check("BEAT").unwrap().detail.is_empty());
+        assert!(wire.summary_stats.is_none() && wire.ticket.is_empty() && wire.role.is_empty());
+        assert_eq!(
+            wire.stats.cpu_percent.is_some(),
+            beat.stats.cpu_percent.is_some()
+        );
+    }
+
+    #[test]
+    fn the_beat_interval_keeps_incoming_beats_within_budget() {
+        assert_eq!(beat_interval_for(1), BEAT_INTERVAL_SECS);
+        assert_eq!(beat_interval_for(40), 5);
+        assert_eq!(beat_interval_for(100), 13);
+        assert_eq!(beat_interval_for(1_000), MAX_BEAT_INTERVAL_SECS);
+        for nodes in [10, 100, 500, 900] {
+            let per_sec = nodes as u64 * BEAT_COST_BYTES / beat_interval_for(nodes);
+            assert!(
+                per_sec <= BEAT_BUDGET_BYTES_PER_SEC,
+                "{nodes} nodes: {per_sec} B/s"
+            );
+        }
     }
 
     #[test]
@@ -2575,15 +2607,11 @@ mod tests {
         let keys = derive_channel_keys_v2("dialtone", "dt-Typed_Message_Test_Secret_2026!");
         let alice = iroh::SecretKey::generate();
         let beat = test_beat(&alice);
-        for (msg, kind) in [
-            (Message::Beat(beat.clone()), "regular"),
-            (Message::Summary(beat.clone()), "summary"),
-        ] {
-            let opened = open_message(&seal_message(&msg, &keys, &alice).unwrap(), &keys).unwrap();
-            assert_eq!(opened.node_id(), alice.public().to_string());
-            assert_eq!(opened.replay_key(), alice.public().to_string());
-            assert_eq!(opened.into_beat().unwrap().kind, kind);
-        }
+        let msg = Message::Beat(beat.clone());
+        let opened = open_message(&seal_message(&msg, &keys, &alice).unwrap(), &keys).unwrap();
+        assert_eq!(opened.node_id(), alice.public().to_string());
+        assert_eq!(opened.replay_key(), alice.public().to_string());
+        assert_eq!(opened.into_beat().unwrap().kind, "regular");
 
         let spec = crate::service::ProcessSpec {
             name: "web".to_string(),
@@ -2631,7 +2659,7 @@ mod tests {
         assert_eq!(nodes[0].processes.len(), 1);
         // The details come from the inventory too: a wire beat leaves them out, and the
         // node's entry keeps them.
-        let wire = beat.for_wire();
+        let wire = beat.for_wire().unwrap();
         assert!(wire.role.is_empty() && wire.iroh_transport.profile.is_empty());
         assert_eq!(
             wire.iroh_transport.advertised_ip_addrs,
@@ -2708,39 +2736,6 @@ mod tests {
             scores.decay();
         }
         assert_eq!(scores.snapshot().as_array().map(Vec::len), Some(0));
-    }
-
-    /// A neighbor answers a catch-up digest with only what the asker lacks.
-    #[test]
-    fn catch_up_deltas_send_only_newer_beats_and_other_inventories() {
-        let mut cache = FrameCache::default();
-        cache.put_beat("a", b"beat-a".to_vec(), 2_000, 100);
-        cache.put_beat("a", b"older".to_vec(), 1_000, 90);
-        cache.put_inventory("a", b"inv-a".to_vec(), 7);
-        cache.put_beat("b", b"beat-b".to_vec(), 5_000, 100);
-        cache.put_beat("stale", b"beat-s".to_vec(), 5_000, 10);
-        cache.put_beat("asker", b"beat-asker".to_vec(), 9_000, 100);
-
-        // Knows nothing: every fresh beat and every inventory, not its own, not the stale.
-        let (beats, inventories) = cache.deltas("asker", &CatchUpHave::new(), 110, 60);
-        let mut got: Vec<&[u8]> = beats.iter().map(|(_, f)| *f).collect();
-        got.sort();
-        assert_eq!(got, vec![b"beat-a".as_slice(), b"beat-b".as_slice()]);
-        assert_eq!(inventories, vec![b"inv-a".as_slice()]);
-        assert!(beats.iter().all(|(age, _)| *age == 10));
-
-        // Holds a's latest beat and inventory, and b's beat is fresh: nothing to send.
-        let have = CatchUpHave::from([
-            ("a".to_string(), [2_000, 7]),
-            ("b".to_string(), [u64::MAX, 0]),
-        ]);
-        let (beats, inventories) = cache.deltas("asker", &have, 110, 60);
-        assert!(beats.is_empty() && inventories.is_empty());
-
-        let mut live = std::collections::HashSet::new();
-        live.insert("a".to_string());
-        cache.retain(&live);
-        assert_eq!(cache.nodes.len(), 1);
     }
 
     #[test]
@@ -2893,11 +2888,9 @@ mod tests {
     fn mesh_matrix_and_beat_interval_scale_with_the_mesh() {
         assert_eq!(BEAT_INTERVAL_SECS, 5);
         assert_eq!(SUMMARY_INTERVAL_SECS, 30);
-        assert_eq!(SUMMARY_EVERY_N_BEATS, 6);
         assert_eq!(beat_interval_for(3), 5);
-        assert_eq!(beat_interval_for(100), 10);
-        assert_eq!(beat_interval_for(300), 30);
-        assert_eq!(beat_interval_for(5000), 60);
+        assert_eq!(beat_interval_for(300), 37);
+        assert_eq!(beat_interval_for(5000), 120);
 
         let cfg = IrohTransportConfig::local_offline();
         let addr = EndpointAddr::new(iroh::SecretKey::generate().public());
@@ -2916,6 +2909,7 @@ mod tests {
             heard: 0,
             inventory_version: 0,
             peer_rtt_ms: std::collections::BTreeMap::from([("node-beta".to_string(), 14.2)]),
+            neighbors: Vec::new(),
             summary_stats: None,
             sent_unix_ms: 0,
             os: default_os(),

@@ -12,6 +12,7 @@ pub mod record;
 pub mod service;
 pub mod stats;
 pub mod supervisor;
+pub mod wire;
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
