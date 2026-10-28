@@ -1851,14 +1851,27 @@ async fn main() {
                 .clone()
                 .or_else(|| load_or_create_api_token().ok())
                 .unwrap_or_default();
-            let resp = local_daemon_http_json(
-                &listen,
-                "POST",
-                "/api/invites",
-                Some(&json!({ "ttl_secs": opts.invite_ttl_secs })),
-                &api_token,
-                10,
-            )
+            // A node that has just started serves its API before its endpoint is up, and
+            // answers "node not running" until then.
+            let started = std::time::Instant::now();
+            let resp = loop {
+                match local_daemon_http_json(
+                    &listen,
+                    "POST",
+                    "/api/invites",
+                    Some(&json!({ "ttl_secs": opts.invite_ttl_secs })),
+                    &api_token,
+                    10,
+                ) {
+                    Err(e)
+                        if e.contains("node not running")
+                            && started.elapsed() < Duration::from_secs(30) =>
+                    {
+                        std::thread::sleep(Duration::from_millis(500))
+                    }
+                    r => break r,
+                }
+            }
             .map_err(|e| format!("{e} (the node must be running: 'dialtone up')"))?;
             if opts.json {
                 println!(

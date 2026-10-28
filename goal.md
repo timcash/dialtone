@@ -124,7 +124,9 @@ and config field names) were accepted for a while after the rename and were remo
    at 200 kbit/s.
 7. **Done — 2026-10-25: One script.** `./dialtone.sh check | lint | e2e | deploy | fleet` replaced `ci.sh`, `e2e.sh`,
    `domain-lint.sh` and the local fleet deploy / test scripts. Fleet hosts live in the uncommitted `fleet.local.env`;
-   `deploy` ends by waiting until every node's probe passes on the new build.
+   `deploy` ends by waiting until every node's probe passes on the new build. **2026-10-28:** the script is now one line,
+   `cargo run -p xtask`: the dev tasks are Rust (`xtask/`), the one-node and three-node tests are `cargo test`
+   integration tests (`tests/node.rs`, `tests/e2e.rs`) that run on every OS, and no Python, jq or curl is needed.
 8. **Done — 2026-10-25: Self-testing mesh and removals.** Every node runs a Probe every 30s against the live mesh:
    it writes a fresh blob, pulls every peer's latest probe blob over QUIC (SHA-256 verified), checks beats both ways,
    mesh membership and the probe program; results travel in beats and show in the HUD. It immediately found that
@@ -172,7 +174,7 @@ and config field names) were accepted for a while after the rename and were remo
 | F7 | **Node runtime & API** | 5-stage boot, six actors with one shutdown token, shared node state, `httparse` API on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `actors.rs`, `api.rs` |
 | F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, focused node's device list, 5-step tour with captions (mesh, blobs and pulls, process, beats, devices), blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
 | F12 | **Devices** | Per-OS listing of connected cameras, microphones, speakers, keyboards, pointers, displays, printers, storage, Bluetooth devices; gossiped in the Inventory | `devices.rs`, Devices actor |
-| F9 | **Verification** | `mesh-test`, `probe`, unit + live iroh tests, `dialtone.sh check` (zero-leak gate, domain-language gate, fmt, tests, one-node and three-node tests), GitHub CI matrix | `lib.rs`, `ci.sh`, `.github/workflows/` |
+| F9 | **Verification** | `mesh-test`, `probe`, unit + live iroh tests, `cargo xtask check` (zero-leak gate, domain-language gate, fmt, tests incl. one-node and three-node tests), GitHub CI matrix | `lib.rs`, `tests/`, `xtask/`, `.github/workflows/` |
 | F10 | **Services & records** | Service refs, Services, key leases, policies, Event / Alert / Log / Kv records with cursor pagination, proof validation | `service.rs`, `record.rs` |
 | F11 | **CLI & fixtures** | Argument parsing, `help`, and the `*-fixture` preview commands | `main.rs` |
 
@@ -285,7 +287,7 @@ When a repository is public, any hardcoded operational defaults become public in
 - **No Hardcoded Seed Keys in Source**: `default_seeds()` returns an empty list by default unless populated from the host's local `~/.dialtone/config.json` (`seeds`).
 - **Hardened `.gitignore`**: Explicitly ignore all local state, config, and secret patterns:
   - `/target`, `/bin`, `.dialtone/`, `.dialtone2/`, `*config.json`, `*mesh*.json`, `*.key`, `*.pem`, `*.secret`, `.env`, `.env.*`.
-- **Automated Leak Gate in `dialtone.sh lint`**: it scans all git-tracked files (`git ls-files`) and fails the build if any forbidden machine name or real `NodeId` appears anywhere in the repository.
+- **Automated Leak Gate in `cargo xtask lint`**: it scans all git-tracked files and fails the build if any forbidden machine name or real `NodeId` appears anywhere in the repository.
 
 ### Pillar B — Out-of-Band Host Provisioning over SSH / Tailnet (`~/.dialtone/config.json`)
 - **Host-Local State Directory**: All runtime identity and mesh membership config is stored in `~/.dialtone/` (`C:\Users\<user>\.dialtone\` on Windows), never inside any git checkout directory.

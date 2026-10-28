@@ -5,6 +5,12 @@ edition = "2021"
 description = "Dialtone — Single-binary Iroh 1.3 mesh control plane, content-addressed deployment, process supervision, and operational evidence runtime"
 license = "MIT OR Apache-2.0"
 
+# xtask/ holds the dev tasks (`cargo xtask ...`, or ./dialtone.sh): lint, check, deploy, fleet
+# and the scale tests. Plain `cargo build` / `cargo test` build only dialtone.
+[workspace]
+members = ["xtask"]
+default-members = ["."]
+
 [lib]
 # No doc examples to run; skipping doctest builds saves a compile on every `cargo test`.
 doctest = false
@@ -15,7 +21,7 @@ path = "src/main.rs"
 # main.rs has no unit tests; its empty test harness would compile the binary a second time.
 test = false
 
-# `--release` is the everyday optimized build used by ci.sh, GitHub CI and fleet deploys:
+# `--release` is the everyday optimized build used by `cargo xtask check`, GitHub CI and fleet deploys:
 # no LTO and parallel, incremental codegen, so a one-file change rebuilds in seconds.
 [profile.release]
 opt-level = 2
@@ -24,6 +30,13 @@ codegen-units = 16
 incremental = true
 panic = "abort"
 strip = "symbols"
+
+# Tests start real nodes from the debug binary; Argon2id key derivation (once per node) is
+# far too slow unoptimized.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
 
 # Published binaries (release.yml): smallest size, built only when a version is tagged.
 [profile.dist]

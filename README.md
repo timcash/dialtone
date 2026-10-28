@@ -454,7 +454,7 @@ A compact report (the checks, without per-peer results) travels in the node's be
 Gossip is routed the way [libp2p GossipSub](https://docs.libp2p.io/concepts/pubsub/overview/) routes it, on top of iroh-gossip's HyParView membership and Plumtree broadcast tree:
 
 - **A few neighbors, not every node.** Each node keeps 2 to 5 gossip neighbors. Below two (GossipSub's `D_lo`) it joins up to three known peers chosen at random; nobody dials every other node. A message reaches the whole mesh along the broadcast tree, each node forwarding it once.
-- **Gossip only.** Once a node has joined, it talks to the mesh only through gossip: no node fetches from another unless someone asks (a HUD focusing a node, a full probe). `./dialtone.sh e2e` checks that no node opens a connection in 20s of steady state.
+- **Gossip only.** Once a node has joined, it talks to the mesh only through gossip: no node fetches from another unless someone asks (a HUD focusing a node, a full probe). The three-node test (`tests/e2e.rs`) checks that no node opens a connection in 20s of steady state.
 - **Small, fixed-size beats.** A beat is a compact binary record (postcard, `wire.rs`), about 255 bytes sealed for a healthy node and at most about 310: name, counter, load (CPU, memory, disk, network), coarse location, home relay and two addresses, the probe's checks, the inventory version and up to five gossip neighbors with their Rtt. No seed lists, no per-peer results, nothing that grows with the mesh. Rolling summaries are not gossiped.
 - **Rtt for free.** Each neighbor's Rtt is QUIC's own estimate on the gossip connection that is already open, read through a weak handle the allowlist hook keeps (the Paths actor); no ping is sent. So is whether the path is direct or through the relay.
 - **Separate topics.** Beats go on the channel's beats topic; inventories are broadcast on its events topic when they change. An inventory leaves out process pids, statuses and restart counts, so a restart does not re-broadcast it.
@@ -609,16 +609,16 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 ---
 
-## 10. Working on dialtone: `./dialtone.sh`
+## 10. Working on dialtone: `cargo xtask` / `./dialtone.sh`
 
-One script builds, tests and deploys. `cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API); the script adds live tests on top.
+Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is a one-line wrapper for `cargo xtask <task>`. Nothing else is needed on the machine (no Python, jq or curl); `deploy` and `scale-fleet` reach other machines with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
+
+`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite).
 
 ```bash
-./dialtone.sh check     # lint, fmt, tests, release build, one-node test, three-node test (about 35s)
+./dialtone.sh check     # lint, fmt, cargo test (one-node and three-node tests included), release build
 ./dialtone.sh lint      # leak gate (no host names / NodeIds in git) and domain language
-./dialtone.sh e2e       # three real nodes on this machine: mesh, gossip probe 3/3, full probe 6/6
-                        # with blob pulls between them, deploy and removal across the mesh, a
-                        # stopped node caught (about 30s)
+cargo test --test e2e   # just the three-node test (about a minute)
 ./dialtone.sh scale 30  # 30 nodes on this machine: convergence time and traffic per node
 ./dialtone.sh scale-fleet 20   # 20 nodes on every fleet machine as one mesh: traffic per machine
 ./dialtone.sh deploy    # check, build, install on every node, wait until every node's probe
@@ -627,11 +627,11 @@ One script builds, tests and deploys. `cargo test` covers each capability with r
 ./dialtone.sh fleet     # each node's latest probe in the live mesh
 ```
 
-`deploy` and `fleet` read your fleet's hosts from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine. Any machine with a node can drive a deploy: macOS (its node runs under launchd), or Windows under Git Bash with Python 3 (`winget install Python.Python.3.12`) and rustup's cargo, where the local build is the Windows binary every Windows node gets. On Windows, `check` runs the lint, format, unit tests and release build; the one-node and three-node tests drive Unix processes and run in CI on Linux.
+`deploy` and `fleet` read your fleet's hosts from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine. Any machine with a node can drive a deploy: macOS (its node runs under launchd) or Windows, where the local build is the Windows binary every Windows node gets.
 
 ```bash
 FLEET_NODES="node-alpha node-beta node-gamma"   # every node; deploy waits for all of their probes
-LOCAL_NODE="node-alpha"                          # this machine (macOS, or Windows under Git Bash)
+LOCAL_NODE="node-alpha"                          # this machine (macOS or Windows)
 LOCAL_LAUNCHD="com.timcash.dialtone"             # macOS only
 WINDOWS_NODES="node-beta node-gamma"             # other Windows nodes; from macOS the first compiles the Windows binary
 SSH_node_beta="node-beta|-J node-gamma user@10.0.0.2"   # SSH alternatives; first that answers wins
@@ -640,4 +640,4 @@ SSH_node_gamma="node-gamma"
 
 To check a single running node by hand, `./dialtone mesh-test --expect-peers 3` verifies its security posture, mesh convergence and a live blob transfer.
 
-**Build profiles.** `cargo build --release` is the everyday optimized build (no LTO, parallel and incremental codegen): `dialtone.sh`, GitHub CI and fleet deploys use it, and a one-file change rebuilds in about a second. Published binaries are built with `cargo build --profile dist` (size-optimized, fat LTO), which takes about a minute and only runs when a version is tagged.
+**Build profiles.** `cargo build --release` is the everyday optimized build (no LTO, parallel and incremental codegen): `cargo xtask`, GitHub CI and fleet deploys use it, and a one-file change rebuilds in about a second. Published binaries are built with `cargo build --profile dist` (size-optimized, fat LTO), which takes about a minute and only runs when a version is tagged.

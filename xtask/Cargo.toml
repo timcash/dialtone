@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Dev tasks for dialtone: lint, check, deploy, fleet, scale (`cargo xtask help`)"
+
+[dependencies]
+base64 = { version = "0.22.1", default-features = false, features = ["std"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+sha2 = { version = "0.11", default-features = false }
