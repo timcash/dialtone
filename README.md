@@ -627,13 +627,13 @@ One script builds, tests and deploys. `cargo test` covers each capability with r
 ./dialtone.sh fleet     # each node's latest probe in the live mesh
 ```
 
-`deploy` and `fleet` read your fleet's hosts from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine:
+`deploy` and `fleet` read your fleet's hosts from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine. Any machine with a node can drive a deploy: macOS (its node runs under launchd), or Windows under Git Bash with Python 3 (`winget install Python.Python.3.12`) and rustup's cargo, where the local build is the Windows binary every Windows node gets. On Windows, `check` runs the lint, format, unit tests and release build; the one-node and three-node tests drive Unix processes and run in CI on Linux.
 
 ```bash
 FLEET_NODES="node-alpha node-beta node-gamma"   # every node; deploy waits for all of their probes
-LOCAL_NODE="node-alpha"                          # this machine (macOS, launchd)
-LOCAL_LAUNCHD="com.timcash.dialtone"
-WINDOWS_NODES="node-beta node-gamma"             # the first compiles the Windows binary
+LOCAL_NODE="node-alpha"                          # this machine (macOS, or Windows under Git Bash)
+LOCAL_LAUNCHD="com.timcash.dialtone"             # macOS only
+WINDOWS_NODES="node-beta node-gamma"             # other Windows nodes; from macOS the first compiles the Windows binary
 SSH_node_beta="node-beta|-J node-gamma user@10.0.0.2"   # SSH alternatives; first that answers wins
 SSH_node_gamma="node-gamma"
 ```

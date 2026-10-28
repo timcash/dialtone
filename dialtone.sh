@@ -15,7 +15,8 @@
 #                                    --tag vX.Y.Z   ... or this release
 #   ./dialtone.sh fleet            probe results of every node in the live mesh
 #
-# `deploy` and `fleet` read this fleet's hosts from fleet.local.env (never committed).
+# `deploy` and `fleet` read this fleet's hosts from fleet.local.env (never committed). They run
+# from macOS or from Windows under Git Bash (with Python 3 and rustup's cargo).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -25,6 +26,23 @@ LIVE_API="http://127.0.0.1:8788"
 
 say() { echo "==> $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# The machine running this script: macOS, or Windows under Git Bash.
+case "$(uname -s)" in
+  Darwin) HOST_OS=macos ;;
+  MINGW*|MSYS*|CYGWIN*) HOST_OS=windows ;;
+  *) HOST_OS=linux ;;
+esac
+if [ "$HOST_OS" = windows ]; then
+  # cargo from rustup, and a real Python: the python3 on PATH can be the Microsoft Store stub.
+  # Python on Windows ends lines with \r\n, which would end up in $(...) values.
+  export PATH="$HOME/.cargo/bin:$PATH"
+  PY=$(ls "${LOCALAPPDATA:-}"/Programs/Python/Python3*/python.exe 2>/dev/null | tail -1 || true)
+  python3() {
+    [ -n "$PY" ] || fail "no Python 3 found (winget install Python.Python.3.12 --scope user)"
+    "$PY" "$@" | tr -d '\r'
+  }
+fi
 # until_ok <seconds> <what> <command...>: retry every second until the command succeeds.
 until_ok() {
   local secs=$1 what=$2; shift 2
@@ -49,8 +67,10 @@ cmd_lint() {
     git grep -niE "$forbidden" -- $(git ls-files) | head -5 >&2
     fail "a host name or NodeId is in a tracked file"
   fi
-  if [ -n "$(git log --all -i -G"$forbidden" --oneline 2>/dev/null)" ] \
-    || [ -n "$(git log --all -i --grep="$forbidden" --oneline 2>/dev/null)" ]; then
+  # The history that is or will be published: this branch and the remotes (a clone's own old
+  # local branches and tags are not pushed).
+  if [ -n "$(git log HEAD --remotes -i -G"$forbidden" --oneline 2>/dev/null)" ] \
+    || [ -n "$(git log HEAD --remotes -i --grep="$forbidden" --oneline 2>/dev/null)" ]; then
     fail "a host name or NodeId is in git history"
   fi
 
@@ -94,8 +114,12 @@ cmd_check() {
   say "Format";  cargo fmt --check
   say "Tests";   cargo test
   say "Release build"; build
-  node_test
-  cmd_e2e
+  if [ "$HOST_OS" = windows ]; then
+    say "One-node and three-node tests: skipped on Windows (they drive Unix processes; CI runs them on Linux)"
+  else
+    node_test
+    cmd_e2e
+  fi
   say "ALL CHECKS PASSED"
 }
 
@@ -504,10 +528,16 @@ pick_routes() {
     printf 'ROUTE_%s=%q\n' "${node//-/_}" "$found"
   done
 }
-route() { local v="ROUTE_${1//-/_}"; echo "${!v}"; }
+# A Windows LOCAL_NODE (this machine) has the route "local".
+route() { [ "$1" = "${LOCAL_NODE:-}" ] && [ "$HOST_OS" = windows ] && { echo local; return; }; local v="ROUTE_${1//-/_}"; echo "${!v}"; }
 # win <node> <powershell>: run PowerShell on a Windows node.
 win() {
-  local b64; b64=$(printf '%s' "\$ProgressPreference = 'SilentlyContinue'; $2" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\r\n')
+  local b64; b64=$(printf '%s' "\$ProgressPreference = 'SilentlyContinue'; $2" \
+    | python3 -c 'import sys, base64; print(base64.b64encode(sys.stdin.buffer.read().decode().encode("utf-16-le")).decode())')
+  if [ "$(route "$1")" = local ]; then
+    powershell.exe -NoProfile -NonInteractive -EncodedCommand "$b64"
+    return
+  fi
   # shellcheck disable=SC2086
     ssh $(route "$1") "powershell -NoProfile -NonInteractive -EncodedCommand $b64"
 }
@@ -523,7 +553,8 @@ copy_from() { scp -q $(scp_args "$1") "$(scp_dest "$1"):$2" "$3"; }
 WIN_INSTALL='
   $d = "$env:USERPROFILE\.dialtone"
   cmd.exe /c "schtasks /End /TN DialtoneDaemon >nul 2>&1"
-  cmd.exe /c "taskkill /IM dialtone.exe /T /F >nul 2>&1"
+  # Only this node: other dialtone.exe on the machine (another state directory) keep running.
+  Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq "$d\bin\dialtone.exe" } | ForEach-Object { cmd.exe /c "taskkill /PID $($_.ProcessId) /T /F >nul 2>&1" }
   Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*start-dialtone.cmd*" -or $_.CommandLine -like "*\.dialtone\run\*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   Start-Sleep -Milliseconds 800
   if (Test-Path "$d\bin\dialtone.exe") { Move-Item "$d\bin\dialtone.exe" "$d\bin\dialtone.exe.bak" -Force }
@@ -558,14 +589,18 @@ cmd_deploy() {
   pick_routes > "$routes_file" &
   local routes_pid=$!
 
-  local binary=target/release/dialtone
+  local binary=target/release/dialtone asset
+  case "$HOST_OS" in
+    macos) [ "$(uname -m)" = arm64 ] || fail "$LOCAL_NODE: only macOS arm64 has a published binary"; asset=dialtone-macos-arm64 ;;
+    windows) binary=target/release/dialtone.exe; asset=dialtone-windows-x86_64.exe ;;
+    *) fail "deploy runs from macOS or Windows (Git Bash)" ;;
+  esac
   if [ -n "$tag" ]; then
     say "Download release $tag for $LOCAL_NODE"
-    [ "$(uname -sm)" = "Darwin arm64" ] || fail "$LOCAL_NODE: only macOS arm64 has a published local binary"
-    binary=/tmp/dialtone-release
-    curl -fsSL "$releases/dialtone-macos-arm64" -o "$binary"
-    [ "$(shasum -a 256 "$binary" | cut -d' ' -f1)" = "$(curl -fsSL "$releases/dialtone-macos-arm64.sha256" | cut -d' ' -f1)" ] \
-      || fail "the downloaded macOS binary does not match its published SHA-256"
+    binary="$(mktemp -d)/$asset"
+    curl -fsSL "$releases/$asset" -o "$binary"
+    [ "$(shasum -a 256 "$binary" | cut -d' ' -f1)" = "$(curl -fsSL "$releases/$asset.sha256" | cut -d' ' -f1)" ] \
+      || fail "the downloaded $asset does not match its published SHA-256"
     chmod +x "$binary"
     echo "    $("$binary" --help | head -1)  (SHA-256 matches the release)"
   elif [ "$skip_check" -eq 0 ]; then
@@ -575,11 +610,16 @@ cmd_deploy() {
   fi
 
   say "Install on $LOCAL_NODE"
-  mkdir -p ~/.dialtone/bin
-  [ -f ~/.dialtone/bin/dialtone ] && cp ~/.dialtone/bin/dialtone ~/.dialtone/bin/dialtone.bak
-  cp "$binary" ~/.dialtone/bin/dialtone.new && mv ~/.dialtone/bin/dialtone.new ~/.dialtone/bin/dialtone
-  launchctl kickstart -k "gui/$(id -u)/$LOCAL_LAUNCHD"
-  sha=$(shasum -a 256 ~/.dialtone/bin/dialtone | cut -d' ' -f1)
+  if [ "$HOST_OS" = windows ]; then
+    sha=$(win_install "$LOCAL_NODE" "Copy-Item '$(cygpath -w "$PWD/$binary")' \"\$env:USERPROFILE\\.dialtone\\deploy-new\\dialtone.exe\";")
+    [ -n "$sha" ] || fail "install on $LOCAL_NODE did not report its binary"
+  else
+    mkdir -p ~/.dialtone/bin
+    [ -f ~/.dialtone/bin/dialtone ] && cp ~/.dialtone/bin/dialtone ~/.dialtone/bin/dialtone.bak
+    cp "$binary" ~/.dialtone/bin/dialtone.new && mv ~/.dialtone/bin/dialtone.new ~/.dialtone/bin/dialtone
+    launchctl kickstart -k "gui/$(id -u)/$LOCAL_LAUNCHD"
+    sha=$(shasum -a 256 ~/.dialtone/bin/dialtone | cut -d' ' -f1)
+  fi
   expect="$expect $LOCAL_NODE=$sha"
   echo "    $LOCAL_NODE ${sha:0:16}"
 
@@ -588,7 +628,19 @@ cmd_deploy() {
   source "$routes_file"; rm -f "$routes_file"
     local builder rest node
   read -r builder rest <<<"$WINDOWS_NODES"
-  if [ -z "$tag" ]; then
+  if [ -z "$tag" ] && [ "$HOST_OS" = windows ]; then
+    # This machine built the Windows binary already.
+    say "Install on $WINDOWS_NODES"
+    tar czf /tmp/dialtone-windows.tgz -C target/release dialtone.exe
+    for node in $WINDOWS_NODES; do
+      copy_to "$node" /tmp/dialtone-windows.tgz .dialtone/dialtone-windows.tgz
+      sha=$(win_install "$node" 'tar.exe -xzf "$env:USERPROFILE\.dialtone\dialtone-windows.tgz" -C "$env:USERPROFILE\.dialtone\deploy-new";')
+      [ -n "$sha" ] || fail "install on $node did not report its binary"
+      expect="$expect $node=$sha"
+      echo "    $node ${sha:0:16}"
+    done
+    rm -f /tmp/dialtone-windows.tgz
+  elif [ -z "$tag" ]; then
     say "Build on $builder, install on $WINDOWS_NODES"
     COPYFILE_DISABLE=1 tar czf /tmp/dialtone-src.tgz Cargo.toml Cargo.lock .cargo src
     copy_to "$builder" /tmp/dialtone-src.tgz .dialtone/dialtone-src.tgz
@@ -644,9 +696,9 @@ PS
   say "Full probe on $LOCAL_NODE"
   local full=""
   for _ in 1 2 3; do
-    "$HOME/.dialtone/bin/dialtone" probe --all > /tmp/dialtone-probe.json && python3 -c '
+    "$HOME/.dialtone/bin/dialtone" probe --all | python3 -c '
 import sys, json
-p = json.load(open("/tmp/dialtone-probe.json"))["probe"]
+p = json.load(sys.stdin)["probe"]
 for c in p["checks"]:
     print("    %-4s %s %s" % (c["code"], "ok  " if c["ok"] else "FAIL", c.get("detail", "")))
 sys.exit(p["passed_count"] != p["total_count"])' && { full=1; break; }
