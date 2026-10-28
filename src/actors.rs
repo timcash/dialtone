@@ -67,6 +67,9 @@ pub(crate) struct Ctx {
     pub config_path: PathBuf,
     pub blobs: Blobs,
     pub allowlist: LiveAllowlist,
+    /// NodeIds this node has had a valid message from: on an open channel (empty allowlist)
+    /// the handshake hook admits only them to fetch, blobs and link.
+    pub members: LiveAllowlist,
     pub state: Option<Arc<Mutex<NodeState>>>,
     pub net: Arc<dialtone::mesh::NetCounters>,
     /// The open gossip connections, read by the Paths actor.
@@ -1383,7 +1386,7 @@ impl Mesh {
         if node_id == self.ctx.node_id {
             return Err(Rejected::Ignored);
         }
-        if !self.ctx.allowlist.contains_str(&node_id) {
+        if !self.ctx.allowlist.admits_str(&node_id) {
             eprintln!(
                 "[gossip-allowlist-reject] dropped message from unlisted node_id={node_id} on channel '{}' (run 'dialtone allowlist add {node_id}' to authorize)",
                 self.channel
@@ -1409,6 +1412,9 @@ impl Mesh {
                 msg.node()
             );
             return Err(Rejected::Ignored);
+        }
+        if let Ok(id) = node_id.parse() {
+            self.ctx.members.insert(id);
         }
         Ok(msg)
     }
@@ -1461,7 +1467,7 @@ impl Mesh {
     }
 
     fn on_inventory(&mut self, inventory: Inventory) {
-        if !self.ctx.allowlist.contains_str(&inventory.node_id) {
+        if !self.ctx.allowlist.admits_str(&inventory.node_id) {
             return;
         }
         self.ctx

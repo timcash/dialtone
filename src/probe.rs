@@ -3,7 +3,7 @@
 //! Every `PROBE_INTERVAL_SECS` the node checks the gossip mesh, which costs no traffic of
 //! its own (it reads what gossip already brought):
 //!
-//! - `MSH`  every allowlisted peer is in the mesh;
+//! - `MSH`  every allowlisted peer is in the mesh (on an open channel, just the count);
 //! - `NBR`  the node has at least two gossip neighbors (one in a two-node mesh);
 //! - `BEAT` every peer's beats are fresh, and every peer hears as many nodes as this one.
 //!
@@ -137,7 +137,12 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
         code: "MSH".to_string(),
         ok: missing.is_empty(),
         detail: if listed.is_empty() {
-            "no peers allowlisted".to_string()
+            let live = inputs
+                .peers
+                .iter()
+                .filter(|p| p.node_id != inputs.node_id && p.age_secs <= DEFAULT_PEER_TTL_SECS)
+                .count();
+            format!("open channel, {live} peers in the mesh")
         } else if missing.is_empty() {
             format!(
                 "{}/{} allowlisted peers in the mesh",

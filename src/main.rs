@@ -16,7 +16,7 @@ use dialtone::deploy::{install_persistent_os_daemon, render_os_service_unit};
 use dialtone::mesh::{
     allow_peer_in_config_with_addrs, cached_local_public_ip_geo, default_arch, default_config_path,
     default_os, default_seeds, default_store_dir, derive_standby_topic_id,
-    detect_default_node_name, is_allowed_peer_in_list, load_mesh_config, new_invite, new_secret,
+    detect_default_node_name, is_allowed_peer_in_list, load_mesh_config, new_secret,
     node_capabilities_for, node_role_for, normalize_channel_name, now_unix, parse_duration_secs,
     redeem_invite, revoke_peer_in_config, save_mesh_config, spawn_background_public_ip_geo_probe,
     validate_secret, Beat, ChannelKeys, LiveAllowlist, MeshControlCommand, SeedList, StoreStats,
@@ -42,14 +42,15 @@ fn print_usage() {
          Running `dialtone` with no arguments boots in dependency order and prints the local Web HUD URL.\n\n\
          actions:\n\
          \x20 up                       Start the node: HUD -> store -> Iroh QUIC -> mesh\n\
-         \x20 join <secret>            Unlock and join a channel with its secret\n\
+         \x20 join <invite>            Join a channel with an invite from any member (dialtone-invite-v2:...)\n\
+         \x20 join <secret>            Unlock (or start) a channel with its secret\n\
          \x20 secret                   Generate a new channel secret (dt-...)\n\
          \x20 allowlist [list|add|remove] [<node_id>] Manage the allowlist in ~/.dialtone/config.json\n\
          \x20 blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket\n\
          \x20 link export <name> --udp|--tcp <ip:port>    Offer a local source to peers over a direct link\n\
          \x20 link import <node>/<name> --udp|--tcp <ip:port>  Open a peer's source and deliver it here\n\
          \x20 link [list|close <id>]   Show links (path direct or relay, Rtt, packets), or close one\n\
-         \x20 invite [--ttl 15m]       Mint a signed, expiring, single-use invite\n\
+         \x20 invite [--ttl 24h]       Make an invite any node can join with until it expires (max 30d)\n\
          \x20 daemon [install|status]  Install or inspect the daemon that starts the node at login\n\
          \x20 probe [--all]            Run one probe now: the gossip checks (MSH, NBR, BEAT; nodes run them\n\
          \x20                          every 30s), and with --all the store, pulls and programs (STO, PUL, PRC)\n\
@@ -67,7 +68,7 @@ fn print_usage() {
          \x20 --channel <name>         Channel name (default: dialtone)\n\
          \x20 --secret <secret>        Channel secret (or set DIALTONE_SECRET)\n\
          \x20 --invite <invite>        Invite to redeem when joining (repeatable)\n\
-         \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 300s; default: 15m)\n\
+         \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 7d; default: 24h)\n\
          \x20 --peer <node_id>         Target NodeId for 'dialtone invite' or 'dialtone allowlist'\n\
          \x20 --addr <ip:port>         Direct address for 'dialtone allowlist add' (repeatable)\n\
          \x20 --expect-peers <count>   Expected peer count for 'dialtone mesh-test'\n\
@@ -172,7 +173,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         json: false,
         expect_peers: None,
         timeout_secs: 15,
-        invite_ttl_secs: 900,
+        invite_ttl_secs: 86_400,
         once: false,
         all: false,
         os_kind: if cfg!(target_os = "macos") {
@@ -281,6 +282,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                                 && !next_arg.starts_with("iroh-gossip-v1:")
                                 && !next_arg.starts_with("dialtone-gossip-v1:")
                                 && !next_arg.starts_with(INVITE_PREFIX)
+                                && !next_arg.starts_with(dialtone::mesh::OPEN_INVITE_PREFIX)
                             {
                                 opts.channel = normalize_channel_name(Some(ch));
                                 opts.secret_key = Some(pass.trim().to_string());
@@ -652,6 +654,48 @@ fn try_join_running_local_daemon(
     .ok()
 }
 
+/// Present an open invite to the members it names, then save the channel keys and seeds they
+/// hand back. Joining by invite makes this node part of an open channel, so any allowlist from
+/// a previous channel is cleared.
+async fn join_with_invite(opts: &CliOptions, raw: &str) -> Result<serde_json::Value, String> {
+    let invite: dialtone::mesh::OpenInvite = raw.parse()?;
+    if invite.expires_at_unix < now_unix() {
+        return Err(
+            "this invite has expired; ask a member for a new one ('dialtone invite')".to_string(),
+        );
+    }
+    let secret_key = load_or_create_secret_key_at(&default_secret_key_path())?;
+    let endpoint = build_endpoint_builder(&opts.transport)?
+        .secret_key(secret_key)
+        .bind()
+        .await
+        .map_err(|e| format!("bind iroh endpoint: {e}"))?;
+    let node_id = endpoint.id().to_string();
+    let answer = dialtone::join::redeem(&endpoint, &invite, Duration::from_secs(20)).await;
+    endpoint.close().await;
+    let answer = answer?;
+
+    let path = default_config_path();
+    let mut cfg = load_mesh_config(&path);
+    cfg.node_name = Some(opts.node.clone());
+    cfg.listen_addr = Some(opts.listen.clone());
+    let keys = cfg.apply_keys(&answer.channel, answer.derived_keys)?;
+    let cleared = std::mem::take(&mut cfg.allowlist).len();
+    cfg.seeds = answer.seeds;
+    cfg.updated_at_unix = now_unix();
+    save_mesh_config(&path, &cfg)?;
+    Ok(json!({
+        "status": "joined",
+        "node": opts.node,
+        "node_id": node_id,
+        "channel": keys.channel,
+        "channel_fingerprint": keys.fingerprint(),
+        "seeds": cfg.seeds.len(),
+        "allowlist_cleared": cleared,
+        "config_path": path
+    }))
+}
+
 async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> {
     let verbose_boot = serve_http || !opts.once;
     let config_path = default_config_path();
@@ -922,6 +966,8 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     let node_key = secret_key.clone();
     // Enforced at the QUIC handshake for every protocol, and for beats and deploys below.
     let live_allowlist = LiveAllowlist::new(&saved_cfg.allowlist);
+    // On an open channel: NodeIds that sent a valid message, admitted to fetch, blobs, link.
+    let members = LiveAllowlist::default();
     let memory_lookup = MemoryLookup::new();
     // Weak handles to the open gossip connections: their QUIC Rtt and path, read for free.
     let gossip_conns = dialtone::node::GossipConnections::default();
@@ -930,6 +976,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         .secret_key(secret_key)
         .hooks(
             AllowlistHook::new(live_allowlist.clone())
+                .with_members(members.clone())
                 .with_gossip_connections(gossip_conns.clone()),
         )
         .bind()
@@ -959,6 +1006,14 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
         st.links = Some(links.clone());
     }
+    let joins = dialtone::join::Joins::new(
+        endpoint.clone(),
+        opts.transport.clone(),
+        config_path.clone(),
+    );
+    if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
+        st.joins = Some(joins.clone());
+    }
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
         .accept(iroh_blobs::ALPN, blobs_proto)
@@ -967,6 +1022,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             dialtone::fetch::FetchHandler::new(shared_state.clone()),
         )
         .accept(dialtone::link::ALPN, links)
+        .accept(dialtone::join::ALPN, joins)
         .spawn();
 
     if let Some(st_arc) = &shared_state {
@@ -1238,6 +1294,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         config_path: config_path.clone(),
         blobs: blobs.clone(),
         allowlist: live_allowlist.clone(),
+        members,
         state: shared_state.clone(),
         net: shared_state
             .as_ref()
@@ -1601,9 +1658,6 @@ async fn main() {
                     "security check failed: expected derived_keys.kdf_version == 'argon2id-v2', got {kdf_ver:?}"
                 ));
             }
-            if cfg_disk.allowlist.is_empty() {
-                return Err("security check failed: allowlist is empty in config.json".to_string());
-            }
 
             let lookup_modes: Vec<String> = config_resp
                 .get("iroh_runtime")
@@ -1786,52 +1840,73 @@ async fn main() {
             Ok(())
         })(),
         "invite" => (|| -> Result<(), String> {
-            let cfg_path = default_config_path();
-            let mut cfg = load_mesh_config(&cfg_path);
-            let channel = normalize_channel_name(Some(&opts.channel));
-            let keys = if let Some(ref raw_pass) = opts.secret_key {
-                let valid = validate_secret(raw_pass)?;
-                cfg.apply_secret(&channel, &valid)
-            } else if let Some(k) = cfg.active_channel_keys() {
-                k
-            } else {
-                return Err(
-                    "cannot mint invite: no channel keys configured (pass --secret <SECRET> or run 'dialtone join <SECRET>' first)"
-                        .to_string(),
-                );
+            // The running node makes the invite: it is the member a new node presents it to.
+            let cfg = load_mesh_config(&default_config_path());
+            let listen = match (&cfg.listen_addr, opts.listen_explicit) {
+                (Some(saved), false) => saved.clone(),
+                _ => opts.listen.clone(),
             };
-
-            let key_path = default_secret_key_path();
-            let secret_key = load_or_create_secret_key_at(&key_path)?;
-            let node_id = secret_key.public().to_string();
-
-            let now = now_unix();
-            let invite = new_invite(
-                &node_id,
-                Some("https://usw1-1.relay.n0.iroh.link./"),
-                &keys,
-                now,
-                opts.invite_ttl_secs,
-                opts.peer_target.as_deref(),
-            )?;
-            let invite_token = invite.to_text()?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&json!({
-                    "schema": "dialtone.invite.v1",
-                    "channel": keys.channel,
-                    "channel_fingerprint": keys.fingerprint(),
-                    "inviter_node_id": node_id,
-                    "bound_node_id": opts.peer_target,
-                    "ttl_secs": opts.invite_ttl_secs,
-                    "expires_at_unix": invite.expires_at_unix,
-                    "invite": invite_token,
-
-                }))
-                .unwrap()
-            );
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+            let resp = local_daemon_http_json(
+                &listen,
+                "POST",
+                "/api/invites",
+                Some(&json!({ "ttl_secs": opts.invite_ttl_secs })),
+                &api_token,
+                10,
+            )
+            .map_err(|e| format!("{e} (the node must be running: 'dialtone up')"))?;
+            if opts.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&resp).unwrap_or_default()
+                );
+            } else {
+                println!(
+                    "{}",
+                    resp.get("invite")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                );
+                eprintln!(
+                    "Invite to channel '{}', valid until {} (unix). Any node joins with:\n  dialtone join <invite>",
+                    resp.get("channel").and_then(|v| v.as_str()).unwrap_or_default(),
+                    resp.get("expires_at_unix").and_then(|v| v.as_u64()).unwrap_or_default()
+                );
+            }
             Ok(())
         })(),
+        "join"
+            if opts
+                .secret_key
+                .as_deref()
+                .is_some_and(|s| s.trim().starts_with(dialtone::mesh::OPEN_INVITE_PREFIX)) =>
+        {
+            let raw = opts.secret_key.clone().unwrap_or_default();
+            match join_with_invite(&opts, &raw).await {
+                Err(err) => {
+                    eprintln!("dialtone: {err}");
+                    std::process::exit(2);
+                }
+                Ok(report) => {
+                    if opts.once {
+                        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+                        Ok(())
+                    } else {
+                        println!(
+                            "[JOIN] Joined channel '{}' ({}) — booting dialtone daemon & local Web HUD...",
+                            report["channel"].as_str().unwrap_or_default(),
+                            report["channel_fingerprint"].as_str().unwrap_or_default()
+                        );
+                        run_node(opts, true).await
+                    }
+                }
+            }
+        }
         "join" => {
             let Some(raw_secret) = opts
                 .secret_key

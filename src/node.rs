@@ -316,12 +316,19 @@ impl GossipConnections {
     }
 }
 
-/// Endpoint hook that closes every connection (gossip and blobs, in and out) right after
-/// the TLS handshake unless the remote NodeId is on the live allowlist, and keeps a weak
-/// handle to each admitted gossip connection (`GossipConnections`).
+/// Endpoint hook that decides, right after the TLS handshake, which connections (in and
+/// out) stay open, and keeps a weak handle to each admitted gossip connection
+/// (`GossipConnections`).
+///
+/// - A listed allowlist admits only its NodeIds, for every protocol.
+/// - An empty allowlist is an open channel. Gossip and join are open to any NodeId: gossip
+///   frames that do not open with the channel keys are dropped, and join hands out the keys
+///   only for a valid invite. Every other protocol (fetch, blobs, link) admits only members,
+///   NodeIds this node has had a valid message from.
 #[derive(Clone, Debug)]
 pub struct AllowlistHook {
     allowlist: crate::mesh::LiveAllowlist,
+    members: crate::mesh::LiveAllowlist,
     gossip: GossipConnections,
 }
 
@@ -329,8 +336,15 @@ impl AllowlistHook {
     pub fn new(allowlist: crate::mesh::LiveAllowlist) -> Self {
         Self {
             allowlist,
+            members: crate::mesh::LiveAllowlist::default(),
             gossip: GossipConnections::default(),
         }
+    }
+
+    /// The members an open channel admits to fetch, blobs and link (filled by the Mesh actor).
+    pub fn with_members(mut self, members: crate::mesh::LiveAllowlist) -> Self {
+        self.members = members;
+        self
     }
 
     /// Record admitted gossip connections in `gossip`.
@@ -343,15 +357,25 @@ impl AllowlistHook {
 impl EndpointHooks for AllowlistHook {
     async fn after_handshake<'a>(&'a self, conn: &'a Connection) -> AfterHandshakeOutcome {
         let remote = conn.remote_id();
-        if self.allowlist.contains(&remote) {
-            if conn.alpn() == iroh_gossip::net::GOSSIP_ALPN {
+        let alpn = conn.alpn();
+        let admitted = if self.allowlist.is_empty() {
+            alpn == iroh_gossip::net::GOSSIP_ALPN
+                || alpn == crate::join::ALPN
+                || self.members.contains(&remote)
+        } else {
+            self.allowlist.contains(&remote)
+        };
+        if admitted {
+            if alpn == iroh_gossip::net::GOSSIP_ALPN {
                 self.gossip.add(conn);
             }
             return AfterHandshakeOutcome::accept();
         }
-        eprintln!(
-            "[allowlist-reject] closed QUIC connection from node_id={remote} (run 'dialtone allowlist add {remote}' to authorize)"
-        );
+        if !self.allowlist.is_empty() {
+            eprintln!(
+                "[allowlist-reject] closed QUIC connection from node_id={remote} (run 'dialtone allowlist add {remote}' to authorize)"
+            );
+        }
         AfterHandshakeOutcome::Reject {
             error_code: VarInt::from_u32(NOT_ALLOWLISTED_CLOSE_CODE),
             reason: b"not on allowlist".to_vec(),

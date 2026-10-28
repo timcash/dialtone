@@ -132,8 +132,8 @@ node_test() {
   "${d[@]}" allowlist list | grep -q "$peer"
   "${d[@]}" allowlist remove "$peer" | grep -q '"status": "revoked"'
   "${d[@]}" allowlist add "$peer" --addr 127.0.0.1:19440 > /dev/null
-  "${d[@]}" invite --ttl 15m --no-dns --no-relay | grep -q '"invite": "dialtone-invite-v1:'
-  echo "    Allowlist add / list / remove, invites"
+  ! "${d[@]}" invite --listen 127.0.0.1:19999 >/dev/null 2>&1 || fail "an invite was made with no node running"
+  echo "    Allowlist add / list / remove; invites need a running node"
 
     "${d[@]}" up --node check-node --listen 127.0.0.1:18794 --private-mesh > "$dir/node.log" 2>&1 &
   NODE_PID=$!
@@ -330,6 +330,35 @@ beat = next(c for c in json.load(sys.stdin)["probe"]["checks"] if c["code"] == "
 sys.exit(beat["ok"] or "e2e-c" not in beat["detail"])'; }
   until_ok 45 "a's probe reports e2e-c as silent" a_sees_c_silent
     echo "    4. Failure: a's probe flagged e2e-c once it stopped"
+
+  # An open channel: o-b joins with nothing but an invite from o-a. Neither lists the other.
+  local o="$root/open" otoken invite
+  mkdir -p "$o/a" "$o/b"
+  DIALTONE_STATE_DIR="$o/a" "$BIN" up --node o-a --listen 127.0.0.1:18914 --private-mesh \
+    --quic-port 19514 --secret "dt-E2E_Open_Channel_Secret_2026!" > "$o/a.log" 2>&1 &
+  E2E_PIDS="$E2E_PIDS $!"
+  until_ok 30 "o-a API up" curl -fsS http://127.0.0.1:18914/api/mesh
+  invite=$(DIALTONE_STATE_DIR="$o/a" "$BIN" invite --listen 127.0.0.1:18914 --ttl 10m 2>/dev/null)
+  [[ "$invite" == dialtone-invite-v2:* ]] || fail "no invite from o-a: $invite"
+  DIALTONE_STATE_DIR="$o/b" "$BIN" join "$invite" --node o-b --listen 127.0.0.1:18915 --private-mesh --once \
+    | grep -q '"status": "joined"' || fail "o-b could not join with the invite"
+  DIALTONE_STATE_DIR="$o/b" "$BIN" up --node o-b --listen 127.0.0.1:18915 --private-mesh --quic-port 19515 \
+    > "$o/b.log" 2>&1 &
+  E2E_PIDS="$E2E_PIDS $!"
+  sees_two() { curl -fsS -m 20 "http://127.0.0.1:$1/api/mesh" | python3 -c 'import sys,json; sys.exit(len(json.load(sys.stdin)["nodes"]) != 2)'; }
+  until_ok 60 "o-a sees o-b" sees_two 18914
+  until_ok 60 "o-b sees o-a" sees_two 18915
+  otoken=$(cat "$o/b/api-token")
+  curl -fsS -m 20 -X POST http://127.0.0.1:18915/api/probe -H "Authorization: Bearer $otoken" -H "Content-Type: application/json" -d '{}' \
+    | grep -q 'open channel, 1 peers in the mesh' || fail "o-b's probe does not report the open channel"
+  local late
+  late=$(python3 -c 'import sys,base64,json
+raw = sys.argv[1].split(":", 1)[1]; inv = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+inv["expires_at_unix"] = 1
+print("dialtone-invite-v2:" + base64.urlsafe_b64encode(json.dumps(inv).encode()).decode().rstrip("="))' "$invite")
+  ! DIALTONE_STATE_DIR="$o/c" "$BIN" join "$late" --node o-c --private-mesh --once >/dev/null 2>&1 \
+    || fail "an expired invite was accepted"
+  echo "    5. Open channel: o-b joined o-a with only an invite (no allowlists); an expired one is refused"
   cleanup
 }
 

@@ -67,6 +67,13 @@ pub fn parse_duration_secs(raw: &str) -> Result<u64, String> {
             .map(|m| m.saturating_mul(60))
             .map_err(|e| e.to_string());
     }
+    if let Some(num) = s.strip_suffix('d') {
+        return num
+            .trim()
+            .parse::<u64>()
+            .map(|d| d.saturating_mul(86_400))
+            .map_err(|e| e.to_string());
+    }
     if let Some(num) = s.strip_suffix('h') {
         return num
             .trim()
@@ -343,31 +350,7 @@ pub struct Seed {
 /// (`seeds` array). No production `EndpointId`s are hardcoded in the repository.
 pub fn default_seeds() -> Vec<EndpointAddr> {
     let cfg = load_mesh_config(&default_config_path());
-    let mut out = Vec::new();
-    for entry in &cfg.seeds {
-        if let Ok(id) = entry.node_id.trim().parse::<iroh::EndpointId>() {
-            let mut addr = EndpointAddr::new(id);
-            let relay_str = entry
-                .relay_url
-                .as_deref()
-                .unwrap_or("https://usw1-1.relay.n0.iroh.link./");
-            if !matches!(
-                relay_str.trim().to_ascii_lowercase().as_str(),
-                "" | "none" | "disabled"
-            ) {
-                if let Ok(relay_url) = relay_str.parse::<iroh::RelayUrl>() {
-                    addr = addr.with_relay_url(relay_url);
-                }
-            }
-            for raw_ip in &entry.ip_addrs {
-                if let Ok(sock) = raw_ip.trim().parse::<std::net::SocketAddr>() {
-                    addr = addr.with_ip_addr(sock);
-                }
-            }
-            out.push(addr);
-        }
-    }
-    out
+    cfg.seeds.iter().filter_map(Seed::to_addr).collect()
 }
 
 /// Evaluate whether `candidate_node_id` is allowed by an allowlist (Issue #3).
@@ -635,6 +618,137 @@ pub fn redeem_invite(
     Ok(addr)
 }
 
+pub const OPEN_INVITE_PREFIX: &str = "dialtone-invite-v2:";
+pub const MAX_OPEN_INVITE_TTL_SECS: u64 = 30 * 86_400;
+
+/// An open invite: any node holding it can join the channel until it expires, and no NodeIds
+/// are exchanged. It carries no keys. The joining node presents it to a member it names
+/// (`seeds`, the issuer first) over `dialtone/join/1` (`join.rs`); the member checks the MAC
+/// and expiry and answers with the channel keys. The QUIC handshake proves the member is the
+/// NodeId the invite names, so the keys are the real ones.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenInvite {
+    pub channel: String,
+    pub expires_at_unix: u64,
+    pub nonce: String,
+    pub seeds: Vec<Seed>,
+    pub mac: String,
+}
+
+impl OpenInvite {
+    pub fn new(
+        keys: &ChannelKeys,
+        seeds: Vec<Seed>,
+        now_unix: u64,
+        ttl_secs: u64,
+    ) -> Result<Self, String> {
+        if ttl_secs == 0 || ttl_secs > MAX_OPEN_INVITE_TTL_SECS {
+            return Err("invite TTL must be between 1s and 30d".to_string());
+        }
+        if seeds.is_empty() {
+            return Err("an invite needs at least one member to present it to".to_string());
+        }
+        let rand_bytes = iroh::SecretKey::generate().to_bytes();
+        let mut invite = OpenInvite {
+            channel: keys.channel.clone(),
+            expires_at_unix: now_unix.saturating_add(ttl_secs),
+            nonce: crate::hex_encode(&rand_bytes[..8]),
+            seeds,
+            mac: String::new(),
+        };
+        invite.mac = invite.compute_mac(&keys.auth_key);
+        Ok(invite)
+    }
+
+    pub fn compute_mac(&self, auth_key: &[u8; 32]) -> String {
+        let mut h = Sha256::new();
+        h.update(b"dialtone.invite.v2:");
+        h.update(auth_key);
+        for part in [
+            self.channel.as_str(),
+            &self.expires_at_unix.to_string(),
+            &self.nonce,
+        ] {
+            h.update(b":");
+            h.update(part.as_bytes());
+        }
+        for seed in &self.seeds {
+            h.update(b":");
+            h.update(seed.node_id.as_bytes());
+        }
+        let digest: [u8; 32] = h.finalize().into();
+        crate::hex_encode(&digest)
+    }
+
+    /// A member's check before it hands out the channel keys.
+    pub fn check(&self, keys: &ChannelKeys, now_unix: u64) -> Result<(), String> {
+        if self.channel != keys.channel {
+            return Err(format!(
+                "invite is for channel '{}', this node is on '{}'",
+                self.channel, keys.channel
+            ));
+        }
+        let expected = self.compute_mac(&keys.auth_key);
+        if !constant_time_eq(self.mac.as_bytes(), expected.as_bytes()) {
+            return Err("invite is not from this channel or was altered".to_string());
+        }
+        if now_unix > self.expires_at_unix {
+            return Err(format!(
+                "invite expired {}s ago",
+                now_unix - self.expires_at_unix
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn to_text(&self) -> Result<String, String> {
+        let bytes = serde_json::to_vec(self).map_err(|e| e.to_string())?;
+        Ok(format!(
+            "{OPEN_INVITE_PREFIX}{}",
+            crate::base64url_encode(&bytes)
+        ))
+    }
+}
+
+impl FromStr for OpenInvite {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        let encoded = raw
+            .trim()
+            .strip_prefix(OPEN_INVITE_PREFIX)
+            .ok_or("not a dialtone-invite-v2 invite")?;
+        let bytes = crate::base64_decode(encoded)?;
+        serde_json::from_slice(&bytes).map_err(|e| format!("invalid invite: {e}"))
+    }
+}
+
+impl Seed {
+    /// The address to dial: the relay (n0's default when none is named) and direct addresses.
+    pub fn to_addr(&self) -> Option<EndpointAddr> {
+        let id = self.node_id.trim().parse::<iroh::EndpointId>().ok()?;
+        let mut addr = EndpointAddr::new(id);
+        let relay_str = self
+            .relay_url
+            .as_deref()
+            .unwrap_or("https://usw1-1.relay.n0.iroh.link./");
+        if !matches!(
+            relay_str.trim().to_ascii_lowercase().as_str(),
+            "" | "none" | "disabled"
+        ) {
+            if let Ok(relay_url) = relay_str.parse::<iroh::RelayUrl>() {
+                addr = addr.with_relay_url(relay_url);
+            }
+        }
+        for raw_ip in &self.ip_addrs {
+            if let Ok(sock) = raw_ip.trim().parse::<std::net::SocketAddr>() {
+                addr = addr.with_ip_addr(sock);
+            }
+        }
+        Some(addr)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BootStageStatus {
     pub step: u8,
@@ -682,6 +796,21 @@ impl MeshConfig {
         self.derived_keys = Some(keys.to_hex_bundle());
         self.channel_fingerprint = keys.fingerprint();
         keys
+    }
+
+    /// Use channel keys a member handed over for an open invite (`join.rs`).
+    pub fn apply_keys(
+        &mut self,
+        channel: &str,
+        bundle: ChannelKeysHex,
+    ) -> Result<ChannelKeys, String> {
+        let keys = ChannelKeys::from_hex_bundle(channel, &bundle)?;
+        self.channel = channel.to_string();
+        self.configured = true;
+        self.secret_key = None;
+        self.derived_keys = Some(bundle);
+        self.channel_fingerprint = keys.fingerprint();
+        Ok(keys)
     }
 
     /// Resolve active `ChannelKeys` from either persisted `derived_keys` or in-memory `secret_key`.
@@ -1366,6 +1495,9 @@ pub fn mesh_offer(spec: &crate::service::ProcessSpec) -> Option<(String, Vec<Str
 }
 
 /// What nodes say to each other on a channel. Every message is signed by its sender.
+/// A Beat is the largest variant; a message lives only while one frame is handled, so it is
+/// not boxed.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
     /// Every beat interval, on the beats topic: liveness and load, about 250 bytes sealed.
@@ -1818,6 +1950,20 @@ impl LiveAllowlist {
             .parse()
             .map(|id| self.contains(&id))
             .unwrap_or(false)
+    }
+
+    pub fn insert(&self, node_id: iroh::EndpointId) {
+        // compat: iroh type
+        if let Ok(mut set) = self.0.write() {
+            set.insert(node_id);
+        }
+    }
+
+    /// An empty allowlist is an open channel: it admits every node that holds the channel
+    /// keys (messages that do not open with them are dropped). A listed one admits only its
+    /// NodeIds.
+    pub fn admits_str(&self, node_id: &str) -> bool {
+        self.is_empty() || self.contains_str(node_id)
     }
 
     pub fn len(&self) -> usize {

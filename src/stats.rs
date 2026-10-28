@@ -597,6 +597,7 @@ fn sample_macos_network(state: &mut StatsSampler, bound_ip: Option<&str>) -> Net
 }
 
 #[cfg(target_os = "windows")]
+#[allow(clippy::upper_case_acronyms)] // Win32 names
 mod win_os {
     #[repr(C)]
     #[derive(Copy, Clone, Default)]

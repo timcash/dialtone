@@ -98,28 +98,29 @@ Invoke-WebRequest -Uri https://github.com/timcash/dialtone/releases/latest/downl
 
 Open **`http://127.0.0.1:8788`** in your browser to view the live 3D mesh topology and terminal `top` stats table.
 
-### 3. Link Two Nodes into an Encrypted Gossip Mesh
+### 3. Join Other Computers with an Invite
+
+On the first node, start a channel and make an invite (valid 24h by default, up to `--ttl 30d`):
 
 ```bash
-# On Node A (node-alpha): generate a 256-bit secret, unlock the channel, and mint a 15m invite
-CHANNEL_PW=$(./dialtone secret)
-echo "Channel secret: $CHANNEL_PW"
-./dialtone join "$CHANNEL_PW" --node node-alpha --once
-./dialtone invite --ttl 15m
+./dialtone join "$(./dialtone secret)" --node node-alpha --once   # a new channel (keep the secret if you want it)
+./dialtone up --node node-alpha                                    # leave it running
+./dialtone invite --ttl 7d                                         # prints dialtone-invite-v2:...
 ```
 
-```bash
-# On Node B (node-beta): inspect NodeId and join using the secret + single-use invite
-./dialtone status --node node-beta
-./dialtone join "<CHANNEL_PW>" --node node-beta --invite "dialtone-invite-v1:<ticket>" --once
-./dialtone up --node node-beta
-```
+Any other computer joins with the invite alone, no build tools and no NodeIds exchanged:
 
 ```bash
-# Back on Node A (node-alpha): allow Node B's NodeId and start
-./dialtone allowlist add <node-beta-node-id>
-./dialtone up --node node-alpha
+# macOS (Apple silicon) / Linux
+curl -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.sh | sh -s -- 'dialtone-invite-v2:...'
 ```
+
+```powershell
+# Windows (PowerShell)
+$env:DIALTONE_INVITE='dialtone-invite-v2:...'; irm https://raw.githubusercontent.com/timcash/dialtone/main/install.ps1 | iex
+```
+
+The script downloads the release binary for the machine, checks its SHA-256, runs `dialtone join <invite>` and installs the node so it starts at login. With the binary already in hand it is just `dialtone join <invite>`.
 
 ### 4. Optional: Install as a Background Login Service & Check the Mesh
 
@@ -185,52 +186,30 @@ Because `dialtone` ships with **zero hardcoded mesh peers** and enforces a **den
 
 Below are the two ways to seed a new multi-node mesh from scratch (using generic example nodes `node-alpha` and `node-beta`).
 
-### Option A: Join with an Expiring Single-Use invite (Fastest)
+### Option A: An Open Channel with Invites (Simplest)
 
-#### Step 1 — Generate a secret & initialize `node-alpha`
-On **Host A** (`node-alpha`), generate a 256-bit channel secret, derive and save the Argon2id channel keys into `~/.dialtone/config.json` (`0600`), and mint a 15-minute single-use invite:
+A channel whose nodes have an **empty allowlist** is open: any node holding the channel keys is a member, and nobody lists anybody's NodeId. Members hand the keys out for **invites**.
 
-```bash
-# 1. Generate a high-entropy channel secret (save this to share with your other nodes)
-CHANNEL_PW=$(./dialtone secret)
-echo "Channel secret: $CHANNEL_PW"
+1. On `node-alpha`, start the channel and the node, then make an invite:
 
-# 2. Derive Argon2id subkeys and save to ~/.dialtone/config.json without starting the long-running loop yet
-./dialtone join "$CHANNEL_PW" --node node-alpha --once
+   ```bash
+   ./dialtone join "$(./dialtone secret)" --node node-alpha --once
+   ./dialtone up --node node-alpha
+   ./dialtone invite --ttl 24h
+   ```
 
-# 3. Mint a signed, single-use invite valid for 15 minutes
-./dialtone invite --ttl 15m
-```
+2. On any other host, join with the invite (or use the install script above):
 
-Copy the `"invite": "dialtone-invite-v1:..."` string from the JSON output.
+   ```bash
+   ./dialtone join "dialtone-invite-v2:..." --node node-beta
+   ```
 
-#### Step 2 — Join `node-beta` using the invite
-On **Host B** (`node-beta`), redeem the invite with the same channel secret. Redeeming a valid `dialtone-invite-v1:` ticket automatically verifies the issuer signature under `auth_key`, records the single-use nonce, adds `node-alpha` to `node-beta`'s `allowlist` and `seeds`, and prints `node-beta`'s `NodeId`:
+**How an invite works.** `dialtone invite` asks the running node for one (`POST /api/invites`). It names the channel, an expiry and that node (its NodeId, home relay and direct addresses), under a MAC with the channel's `auth_key`; it carries **no keys**. `dialtone join <invite>` opens one QUIC stream to that node (ALPN `dialtone/join/1`) and presents it; the node checks the MAC and the expiry and answers with the channel keys and itself as a seed. The QUIC handshake proves the answer comes from the NodeId the invite names. The joining node saves the keys (`config.json`, `0600`), clears any allowlist and starts.
 
-```bash
-# 1. Inspect node-beta's persistent NodeId (created at ~/.dialtone/iroh-secret-key)
-./dialtone status --node node-beta
-
-# 2. Join the channel and redeem the single-use invite from node-alpha
-./dialtone join "<CHANNEL_PW>" \
-  --node node-beta \
-  --invite "dialtone-invite-v1:<ticket-from-node-alpha>" \
-  --once
-```
-
-#### Step 3 — Allow `node-beta` on `node-alpha` & start both nodes
-On **Host A** (`node-alpha`), authorize `node-beta`'s `NodeId` (so both sides permit each other and include each other in `seeds`) and start the daemons:
-
-```bash
-# On Host A (node-alpha): allow node-beta's 64-hex NodeId and start
-./dialtone allowlist add <node-beta-node-id>
-./dialtone up --node node-alpha
-```
-
-```bash
-# On Host B (node-beta): start the daemon
-./dialtone up --node node-beta
-```
+- An invite works for any number of nodes until it expires, then for none. Make a new one with `dialtone invite`.
+- The node that made the invite must be online when someone joins with it.
+- Once joined, a node keeps the keys. To remove members, start a new channel (a new secret) and invite the nodes that should stay.
+- A channel with an allowlist refuses invites; its nodes keep authorizing each other by NodeId (Option B).
 
 ---
 
@@ -284,8 +263,8 @@ Or open **`http://127.0.0.1:8788`** in your browser to view the live 3D topology
 
 **How the mesh is protected**
 
-- **Allowlist at the handshake.** Every QUIC connection (gossip and blobs, in and out) is closed right after the TLS handshake unless the remote NodeId is on the allowlist. `dialtone allowlist add/remove` edits `~/.dialtone/config.json`; a running node picks the change up within 5 seconds, no restart.
-- **Signed messages.** Nodes gossip three typed messages (see [Scaling the mesh](#scaling-the-mesh)): a **Beat** (liveness, load, the node's probe checks and its gossip neighbors with their Rtt), an **Inventory** (the node's processes, services and details) when it changes, and a **Deploy** (a program the node deploys to the mesh, or removes from it). Each message is signed with the sender's Key and encrypted with the channel keys. A node drops messages whose signature does not match the NodeId they claim, messages from NodeIds not on its allowlist, and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
+- **Open channel or allowlist, at the handshake.** With an empty allowlist the channel is open: gossip and join (`dialtone/join/1`) accept any NodeId, gossip frames that do not open with the channel keys are dropped (and cost their sender its score), and fetch, blobs and link accept only members, NodeIds this node has had a valid message from. With NodeIds listed, every QUIC connection (gossip and blobs, in and out) is closed right after the TLS handshake unless the remote NodeId is on the allowlist. `dialtone allowlist add/remove` edits `~/.dialtone/config.json`; a running node picks the change up within 5 seconds, no restart.
+- **Signed messages.** Nodes gossip three typed messages (see [Scaling the mesh](#scaling-the-mesh)): a **Beat** (liveness, load, the node's probe checks and its gossip neighbors with their Rtt), an **Inventory** (the node's processes, services and details) when it changes, and a **Deploy** (a program the node deploys to the mesh, or removes from it). Each message is signed with the sender's Key and encrypted with the channel keys. A node drops messages whose signature does not match the NodeId they claim, messages from NodeIds not on its allowlist (when it has one), and replays (each node's `sent_unix_ms` must increase and be within 5 minutes of local time — keep node clocks roughly in sync).
 - **No process secrets on the wire.** An inventory lists each process without its `env` or `args`.
 - **Deploys are announced, and only targeted nodes pull.** `POST /api/processes/blob` with `"deploy_to_mesh": true` (and optionally `"deploy_targets": ["node-name", "<NodeId prefix>", ...]`) makes the origin gossip a signed **Deploy** naming the program, its blob ticket and its targets (every node when none are named). A targeted node pulls the program, from up to three peers whose inventories say they already run it (gossip neighbors first) and then from the origin, after a random delay of up to one beat interval so a large mesh does not pull at once; it checks the SHA-256, stages and starts it. Nothing auto-deploys from inventories, and no node's probe program is ever deployed.
 - **Deploys follow their origin.** A copy is never announced further. It is removed when the origin announces the program removed (removing it on the origin), no longer targets this node, or stops announcing it for 30 minutes while still in the mesh. The origin announces every change at once, and all its deploys again every 10 minutes and soon after a node joins (removed ones for an hour), so a node that was away catches up through gossip alone.

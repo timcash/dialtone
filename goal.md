@@ -16,8 +16,8 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Mesh** | All nodes in one channel | `mesh` | fleet, swarm, cluster |
 | **Channel** | A named gossip room unlocked by a secret | `Channel`, `channel` | room; *topic* only inside transport code |
 | **Secret** | A channel's password (`dt-…`) | `secret` | password, passphrase |
-| **Allowlist** | NodeIds permitted in the mesh | `allowlist` | allowed endpoint ids, ACL |
-| **Invite** | Signed, expiring, single-use join token | `Invite`, `invite` | bootstrap ticket, gossip ticket |
+| **Allowlist** | NodeIds permitted in the mesh; empty means an open channel (any holder of the channel keys) | `allowlist` | allowed endpoint ids, ACL |
+| **Invite** | Expiring link to join a channel: presented to the member it names, which answers with the channel keys (`OpenInvite`, v2); v1 was single-use with the secret | `OpenInvite`, `Invite`, `invite` | bootstrap ticket, gossip ticket, join link |
 | **Seed** | A peer address used to dial into the mesh | `Seed`, `seeds` | bootstrap peer |
 | **Message** | What nodes gossip on a channel, signed and encrypted: a Beat or an Inventory | `Message` | frame, packet |
 | **Beat** | A node's status (load, probe checks, gossip neighbors with their Rtt), a compact binary record of about 255 bytes sealed, gossiped every 5 to 120s (the interval grows with the mesh) | `Beat`, `beat` | heartbeat, hb, ping, pulse |
@@ -61,6 +61,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | `devices.rs` | Device listing per OS (`system_profiler`, `Get-PnpDevice`, `/sys`) |
 | `fetch.rs` | Fetch: the `dialtone/fetch/1` request–answer protocol |
 | `link.rs` | Links: direct QUIC connections for live media (`dialtone/link/1`) |
+| `join.rs` | Join: open invites and the `dialtone/join/1` protocol that answers them with the channel keys |
 | `probe.rs` | Probe checks and full probes |
 | `hud/` | The HUD's static files and vendored three.js / h3-js |
 

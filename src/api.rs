@@ -201,6 +201,9 @@ pub struct NodeState {
     /// This node's direct links for live media (`link.rs`), when the node runs.
     #[serde(skip)]
     pub links: Option<crate::link::Links>,
+    /// Makes and answers open invites (`join.rs`); set once the node is running.
+    #[serde(skip)]
+    pub joins: Option<crate::join::Joins>,
     /// Asks the Probe actor for a run (`POST /api/probe`), when the node runs actors.
     #[serde(skip)]
     pub probe_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::probe::ProbeRequest>>,
@@ -667,6 +670,7 @@ impl NodeState {
             gossip_neighbors: Vec::new(),
             probe_tx: None,
             links: None,
+            joins: None,
         };
         st.record_event(
             "mesh.boot",
@@ -1198,6 +1202,30 @@ fn route_request(
                     write_json(&mut stream, 200, &details)
                 }
                 Err(err) => write_json(&mut stream, 502, &json!({ "error": err })),
+            }
+        }
+        ("POST", "/api/invites") => {
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let ttl = parsed
+                .get("ttl_secs")
+                .and_then(Value::as_u64)
+                .unwrap_or(86_400);
+            let Some(joins) = st.joins.clone() else {
+                return write_json(&mut stream, 503, &json!({ "error": "node not running" }));
+            };
+            drop(st);
+            match joins.mint(ttl).and_then(|inv| Ok((inv.to_text()?, inv))) {
+                Ok((text, inv)) => write_json(
+                    &mut stream,
+                    200,
+                    &json!({
+                        "invite": text,
+                        "channel": inv.channel,
+                        "expires_at_unix": inv.expires_at_unix,
+                        "seeds": inv.seeds.iter().map(|s| s.node_id.clone()).collect::<Vec<_>>()
+                    }),
+                ),
+                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
         ("GET", "/api/links") => match st.links.clone() {
