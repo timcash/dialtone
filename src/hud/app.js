@@ -1361,8 +1361,8 @@ function rebuildGlobeNodesAndArcs(force = false) {
 }
 
 // ---------------------------------------------------------------------------
-// 6b. Live Event FX: SHA-256 blob downloads (ink particle stream into the node)
-//     & process starts (blue H3 cell highlight + blue particle burst).
+// 6b. Live Event FX: SHA-256 blob downloads (hash-lock ring closing on the node)
+//     & process starts (blue H3 cell highlight + rippling rings).
 //     Fired only from real state changes between gossip polls, or replayed from the
 //     focused node's real process blob/PID during the BLB / PRC tour steps.
 // ---------------------------------------------------------------------------
@@ -1374,27 +1374,6 @@ let activeFx = [];
 let fxLastFiredMs = new Map(); // `${kind}:${node}` -> ms
 let prevNodeFxState = null;    // node -> { blobKeys, shas, procs }
 let lastTourFxKey = "";
-let fxDotTexture = null;
-
-function getFxDotTexture() {
-  if (fxDotTexture) return fxDotTexture;
-  const c = document.createElement("canvas");
-  c.width = 64;
-  c.height = 64;
-  const g = c.getContext("2d");
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, "rgba(255,255,255,1)");
-  grad.addColorStop(0.35, "rgba(255,255,255,0.85)");
-  grad.addColorStop(1, "rgba(255,255,255,0)");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  fxDotTexture = new THREE.CanvasTexture(c);
-  return fxDotTexture;
-}
-
-function fxBlending() {
-  return document.documentElement.dataset.theme === "light" ? THREE.NormalBlending : THREE.AdditiveBlending;
-}
 
 function shortSha(sha) {
   return "sha256:" + String(sha || "").replace("sha256:", "").slice(0, 10);
@@ -1412,23 +1391,6 @@ function createNodeFxFrame(geo) {
   frame.position.copy(surface);
   frame.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, normal, south));
   return frame;
-}
-
-function createFxPoints(count, color, sizePx) {
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
-  const mat = new THREE.PointsMaterial({
-    color,
-    size: sizePx,
-    sizeAttenuation: false,
-    map: getFxDotTexture(),
-    transparent: true,
-    depthWrite: false,
-    blending: fxBlending()
-  });
-  const pts = new THREE.Points(geom, mat);
-  pts.frustumCulled = false;
-  return pts;
 }
 
 function createFxRing(radius, segments, color) {
@@ -1480,7 +1442,7 @@ function disposeFxObject(obj) {
   obj.traverse(o => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) {
-      if (o.material.map && o.material.map !== fxDotTexture) o.material.map.dispose();
+      if (o.material.map) o.material.map.dispose();
       o.material.dispose();
     }
   });
@@ -1503,8 +1465,8 @@ function pushFx(fx) {
   activeFx.push(fx);
 }
 
-// Blob download into the node's SHA-256 store: ink particles stream down and converge into the node,
-// a hexagonal "hash lock" ring closes on it, and a BLB tag names the stored digest.
+// Blob download into the node's SHA-256 store: a hexagonal "hash lock" ring closes on the node,
+// and a BLB tag names the stored digest.
 function spawnBlobDownloadFx(nodeName, label, source = "live") {
   const nowMs = performance.now();
   const sv = siteVisuals.find(s => s.node === nodeName);
@@ -1512,24 +1474,12 @@ function spawnBlobDownloadFx(nodeName, label, source = "live") {
   const inkCol = palette.accent.clone();
   const frame = createNodeFxFrame(sv.geo);
 
-  const N = 84;
-  const seeds = [];
-  for (let i = 0; i < N; i++) {
-    seeds.push({
-      h0: 0.5 + Math.random() * 0.55,
-      r0: 0.1 + Math.random() * 0.32,
-      a: Math.random() * Math.PI * 2,
-      delay: Math.random() * 1.1,
-      fall: 0.65 + Math.random() * 0.45
-    });
-  }
-  const stream = createFxPoints(N, inkCol, 5);
   const hexRing = createFxRing(0.45, 6, inkCol);
   const beam = createFxBeam(1.05, inkCol);
   const tag = createFxTag(`BLB ↓ ${label}`, palette.accentHex);
   // Offset toward screen-north (-south) so the tag stays readable from the overhead tour camera
   tag.position.set(0, 0.5, -0.62);
-  frame.add(stream, hexRing, beam, tag);
+  frame.add(hexRing, beam, tag);
 
   const dur = 3.4;
   pushFx({
@@ -1542,19 +1492,7 @@ function spawnBlobDownloadFx(nodeName, label, source = "live") {
     frame,
     objects: [frame],
     update(t) {
-      const pos = stream.geometry.attributes.position.array;
-      for (let i = 0; i < N; i++) {
-        const s = seeds[i];
-        const p = clamp01((t - s.delay) / s.fall);
-        const e = p * p; // accelerate into the node like a payload landing
-        const r = s.r0 * (1 - e);
-        pos[i * 3] = Math.cos(s.a + p * 1.4) * r;
-        pos[i * 3 + 1] = t < s.delay ? -10 : s.h0 * (1 - e);
-        pos[i * 3 + 2] = Math.sin(s.a + p * 1.4) * r;
-      }
-      stream.geometry.attributes.position.needsUpdate = true;
       const fadeOut = 1 - clamp01((t - (dur - 0.7)) / 0.7);
-      stream.material.opacity = 0.95 * fadeOut;
       beam.material.opacity = 0.35 * clamp01(t / 0.25) * fadeOut;
       const lockP = clamp01((t - 0.9) / 1.3);
       const ringS = 1.0 - 0.72 * easeInOutCubic(lockP);
@@ -1566,8 +1504,7 @@ function spawnBlobDownloadFx(nodeName, label, source = "live") {
   });
 }
 
-// Process start: the node's H3 cell lights up blue, a blue particle burst erupts from the node,
-// two rings ripple outward, and a PRC tag names the process and its PID.
+// Process start: the node's H3 cell lights up blue, two rings ripple outward, and a PRC tag names the process and its PID.
 function spawnProcessStartFx(nodeName, procName, pid, source = "live") {
   const nowMs = performance.now();
   const sv = siteVisuals.find(s => s.node === nodeName);
@@ -1604,26 +1541,14 @@ function spawnProcessStartFx(nodeName, procName, pid, source = "live") {
     objects.push(ringFill, ringOutline, cellFill, cellOutline);
   } catch (_) {}
 
-  const N = 110;
-  const seeds = [];
-  for (let i = 0; i < N; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const spread = 0.25 + Math.random() * 0.75;
-    const v = new THREE.Vector3(Math.cos(a) * spread, 0.55 + Math.random() * 1.0, Math.sin(a) * spread)
-      .normalize()
-      .multiplyScalar(0.45 + Math.random() * 0.75);
-    seeds.push({ v, delay: Math.random() * 0.35, life: 1.4 + Math.random() * 1.1 });
-  }
-  const burst = createFxPoints(N, blue, 5);
   const ringA = createFxRing(0.06, 48, blue);
   const ringB = createFxRing(0.06, 48, blue);
   const beam = createFxBeam(0.85, blue);
   const tag = createFxTag(`PRC ▶ ${procName} PID ${pid}`, palette.blueHex);
   tag.position.set(0, 0.4, -0.62);
-  frame.add(burst, ringA, ringB, beam, tag);
+  frame.add(ringA, ringB, beam, tag);
 
   const dur = 4.2;
-  const drag = 2.2;
   pushFx({
     kind: "spawn",
     node: nodeName,
@@ -1634,22 +1559,7 @@ function spawnProcessStartFx(nodeName, procName, pid, source = "live") {
     frame,
     objects,
     update(t) {
-      const pos = burst.geometry.attributes.position.array;
-      for (let i = 0; i < N; i++) {
-        const s = seeds[i];
-        const lt = t - s.delay;
-        if (lt < 0 || lt > s.life) {
-          pos[i * 3 + 1] = -10;
-          continue;
-        }
-        const travel = (1 - Math.exp(-drag * lt)) / drag; // decelerating sparks
-        pos[i * 3] = s.v.x * travel;
-        pos[i * 3 + 1] = s.v.y * travel;
-        pos[i * 3 + 2] = s.v.z * travel;
-      }
-      burst.geometry.attributes.position.needsUpdate = true;
       const fadeOut = 1 - clamp01((t - (dur - 0.9)) / 0.9);
-      burst.material.opacity = fadeOut;
       [[ringA, 0.0], [ringB, 0.38]].forEach(([ring, off]) => {
         const p = clamp01((t - off) / 1.5);
         const s = 1 + p * 9;
