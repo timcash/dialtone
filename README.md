@@ -108,24 +108,26 @@ On the first node, start a channel and make an invite (valid 24h by default, up 
 ./dialtone invite --ttl 7d                                         # prints dialtone-invite-v2:...
 ```
 
-Any other computer joins with the invite alone, no build tools and no NodeIds exchanged:
+Any other computer joins with the invite alone, no build tools and no NodeIds exchanged: download the one binary for it from the [latest release](https://github.com/timcash/dialtone/releases/latest) and run `join`.
 
 ```bash
-# macOS (Apple silicon) / Linux
-curl -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.sh | sh -s -- 'dialtone-invite-v2:...'
+# Linux x86_64 (arm64: dialtone-linux-arm64; macOS Apple silicon: dialtone-macos-arm64)
+curl -fsSLo dialtone https://github.com/timcash/dialtone/releases/latest/download/dialtone-linux-x86_64
+chmod +x dialtone && ./dialtone join 'dialtone-invite-v2:...'
 ```
 
 ```powershell
-# Windows (PowerShell)
-$env:DIALTONE_INVITE='dialtone-invite-v2:...'; irm https://raw.githubusercontent.com/timcash/dialtone/main/install.ps1 | iex
+# Windows x86_64
+curl.exe -fsSLo dialtone.exe https://github.com/timcash/dialtone/releases/latest/download/dialtone-windows-x86_64.exe
+.\dialtone.exe join 'dialtone-invite-v2:...'
 ```
 
-The script downloads the release binary for the machine, checks its SHA-256, runs `dialtone join <invite>` and installs the node so it starts at login. With the binary already in hand it is just `dialtone join <invite>`.
+`dialtone join <invite>` joins the channel, copies itself to `~/.dialtone/bin`, installs the node as a login service (launchd, systemd `--user`, or a Windows logon task) and starts it, so the downloaded file can be deleted. Run it again with a newer binary and the running node restarts into it. Options: `--node <name>` (default: the hostname), `--listen <addr>`. With `DIALTONE_STATE_DIR` set (a second node on one machine, or a trial) everything stays in that folder and the node starts now but not at login. Each release also has a `.sha256` next to every binary, and once installed a node only ever updates to binaries the release key signed. `dialtone join <invite> --once` only records the channel.
 
 ### 4. Optional: Install as a Background Login Service & Check the Mesh
 
 ```bash
-# Register dialtone as a user-level OS service (launchd / systemd --user / Windows Scheduled Task)
+# Install this binary as a user-level OS service (launchd / systemd --user / Windows logon task) and start it
 ./dialtone daemon install
 
 # Check the running node: security, mesh convergence and a live blob transfer
@@ -596,6 +598,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | `POST /api/processes/blob` | Stage a program blob (or ticket) and run / stop it as a process; `"deploy_to_mesh": true` announces it to the mesh (`"deploy_targets"` to name nodes) |
 | `POST /api/processes` | Same, and `{"name": ..., "desired_state": "removed"}` stops a process and forgets it (mesh-deployed copies follow) |
 | `POST /api/probe` | Run one probe now, `{"all": true}` for a full probe (`GET` returns the latest); nodes check the mesh every 30s |
+| `POST /api/restart` | Exit so the node's service starts it again on the binary now at its path (`dialtone join <invite>` uses it to replace a running node on Windows) |
 | `GET /api/net` | Traffic since boot: socket bytes in and out, connections, gossip messages, neighbors, iroh-gossip data and control frames, and peer scores |
 | `GET /api/details?node_id=…` | A node's devices and full probe report, fetched from that node (kept 10s) |
 

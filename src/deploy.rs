@@ -30,39 +30,155 @@ pub struct DaemonInstallReport {
     pub instructions: String,
 }
 
-/// Install `dialtone` into `~/.dialtone/bin/` and register an OS login/boot daemon
-/// (macOS LaunchAgent, Linux systemd user unit, or Windows HKCU Run + Scheduled Task)
-/// so the daemon automatically survives system restarts.
+const LAUNCHD_LABEL: &str = "com.timcash.dialtone";
+
+/// A state directory other than the default one (`DIALTONE_STATE_DIR`: a second node on one
+/// machine, or a trial). Such a node is never registered to start at login.
+pub fn custom_state_dir() -> bool {
+    std::env::var_os("DIALTONE_STATE_DIR").is_some()
+}
+
+/// Put this binary at `<state>/bin/dialtone`, unless it already runs from there. A binary that
+/// is there already (perhaps running) is renamed aside first, which every OS allows, so a
+/// running node keeps going until it is restarted.
+pub fn place_binary(state_dir: &Path) -> Result<std::path::PathBuf, String> {
+    let bin_dir = state_dir.join("bin");
+    fs::create_dir_all(&bin_dir)
+        .map_err(|e| format!("create bin dir {}: {e}", bin_dir.display()))?;
+    let dest = bin_dir.join(format!("dialtone{}", std::env::consts::EXE_SUFFIX));
+    let cur = std::env::current_exe().map_err(|e| format!("this binary's path: {e}"))?;
+    let same = |a: &Path, b: &Path| match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if same(&cur, &dest) {
+        return Ok(dest);
+    }
+    let staged = dest.with_extension("new");
+    fs::copy(&cur, &staged).map_err(|e| format!("copy to {}: {e}", staged.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("chmod {}: {e}", staged.display()))?;
+    }
+    if dest.exists() {
+        let aside = dest.with_extension("bak");
+        let _ = fs::remove_file(&aside);
+        fs::rename(&dest, &aside).map_err(|e| format!("move {} aside: {e}", dest.display()))?;
+    }
+    fs::rename(&staged, &dest).map_err(|e| format!("install {}: {e}", dest.display()))?;
+    Ok(dest)
+}
+
+/// Start the installed login service now (it restarts a node it already runs).
+pub fn start_service() -> Result<(), String> {
+    let ok = |cmd: &mut std::process::Command| cmd.output().is_ok_and(|o| o.status.success());
+    match std::env::consts::OS {
+        "macos" => {
+            let uid = std::process::Command::new("id")
+                .arg("-u")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .map_err(|e| format!("id -u: {e}"))?;
+            let plist = home_dir()
+                .join("Library/LaunchAgents")
+                .join(format!("{LAUNCHD_LABEL}.plist"));
+            let domain = format!("gui/{uid}");
+            // Unload first so a changed plist is read again.
+            let _ = std::process::Command::new("launchctl")
+                .args(["bootout", &format!("{domain}/{LAUNCHD_LABEL}")])
+                .output();
+            if ok(std::process::Command::new("launchctl").args([
+                "bootstrap", // compat: launchctl's own subcommand
+                &domain,
+                &plist.to_string_lossy(),
+            ])) {
+                Ok(())
+            } else {
+                Err("launchctl could not load the login service".into())
+            }
+        }
+        "windows" => {
+            if ok(std::process::Command::new("schtasks").args(["/Run", "/TN", "DialtoneDaemon"])) {
+                Ok(())
+            } else {
+                Err("schtasks /Run DialtoneDaemon failed".into())
+            }
+        }
+        _ => {
+            let _ = std::process::Command::new("systemctl")
+                .args(["--user", "daemon-reload"])
+                .output();
+            if ok(std::process::Command::new("systemctl").args([
+                "--user",
+                "restart",
+                "dialtone.service",
+            ])) {
+                Ok(())
+            } else {
+                Err("systemctl --user restart dialtone failed (no systemd user session?)".into())
+            }
+        }
+    }
+}
+
+/// Start `bin up` in the background, detached from this terminal, logging to `log`. For nodes
+/// that are not installed at login.
+pub fn start_detached(bin: &Path, node: &str, listen: &str, log: &Path) -> Result<u32, String> {
+    let out = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+        .map_err(|e| format!("open {}: {e}", log.display()))?;
+    let err = out.try_clone().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(bin);
+    cmd.args(["up", "--node", node, "--listen", listen])
+        .stdin(std::process::Stdio::null())
+        .stdout(out)
+        .stderr(err);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+    cmd.spawn()
+        .map(|c| c.id())
+        .map_err(|e| format!("start {}: {e}", bin.display()))
+}
+
+fn home_dir() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Install `dialtone` into `<state>/bin/` and register an OS login/boot daemon (macOS
+/// LaunchAgent, Linux systemd user unit, or Windows HKCU Run + Scheduled Task) so the node
+/// starts at login. Refused for a `DIALTONE_STATE_DIR` other than the default: a login service
+/// is one per user.
 pub fn install_persistent_os_daemon(
     node: &str,
     listen: &str,
     secret_key: Option<&str>,
 ) -> Result<DaemonInstallReport, String> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let state_dir = home.join(".dialtone");
-    let bin_dir = state_dir.join("bin");
-    fs::create_dir_all(&bin_dir)
-        .map_err(|e| format!("create bin dir {}: {e}", bin_dir.display()))?;
-
-    let bin_name = if cfg!(target_os = "windows") {
-        "dialtone.exe"
-    } else {
-        "dialtone"
-    };
-    let dest_bin = bin_dir.join(bin_name);
-    if let Ok(cur_exe) = std::env::current_exe() {
-        if cur_exe != dest_bin {
-            let _ = fs::copy(&cur_exe, &dest_bin);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&dest_bin, fs::Permissions::from_mode(0o755));
-            }
-        }
+    if custom_state_dir() {
+        return Err(
+            "DIALTONE_STATE_DIR is set: a node with its own state directory is not installed at login"
+                .into(),
+        );
     }
+    let home = home_dir();
+    let state_dir = crate::mesh::default_state_dir();
+    let dest_bin = place_binary(&state_dir)?;
 
     let log_path = state_dir.join("daemon.log");
     let os_kind = std::env::consts::OS;

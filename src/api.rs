@@ -1205,6 +1205,16 @@ fn route_request(
                 Err(err) => write_json(&mut stream, 502, &json!({ "error": err })),
             }
         }
+        ("POST", "/api/restart") => {
+            // The node exits with EXIT_RESTART after answering; its service (systemd, launchd or
+            // the Windows loop) starts it again, on whatever binary is at its path now.
+            drop(st);
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                crate::update::request_restart();
+            });
+            write_json(&mut stream, 200, &json!({ "status": "restarting" }))
+        }
         ("POST", "/api/invites") => {
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
             let ttl = parsed

@@ -192,7 +192,10 @@ impl Fleet {
     /// Run `pre` (it puts the new binary at ~/.dialtone/deploy-new/dialtone), then install it
     /// and restart the VM's service; returns the installed binary's SHA-256.
     fn install(&self, node: &str, pre: &str) -> R<String> {
-        let script = format!("set -e\nmkdir -p \"$HOME/.dialtone/deploy-new\"\n{pre}\n{INSTALL}");
+        let install = INSTALL
+            .replace("__NODE__", node)
+            .replace("__API__", &LIVE_API.to_string());
+        let script = format!("set -e\nmkdir -p \"$HOME/.dialtone/deploy-new\"\n{pre}\n{install}");
         self.sh(node, &script)?
             .lines()
             .find_map(|l| l.strip_prefix("SHA256="))
@@ -293,16 +296,14 @@ cd "$HOME/dialtone-src"
 __STEPS__
 "#;
 
-/// Install ~/.dialtone/deploy-new/dialtone, restart the node's service (`dialtone daemon
-/// install` makes it), print its SHA-256.
+/// The new binary installs itself (`dialtone daemon install`: into ~/.dialtone/bin, the login
+/// service rewritten and restarted), then the SHA-256 of what is installed.
 const INSTALL: &str = r#"
-d="$HOME/.dialtone"
-mkdir -p "$d/bin"
-if [ -f "$d/bin/dialtone" ]; then cp "$d/bin/dialtone" "$d/bin/dialtone.bak"; fi
-chmod 755 "$d/deploy-new/dialtone"
-mv "$d/deploy-new/dialtone" "$d/bin/dialtone"
-systemctl --user restart dialtone
-echo "SHA256=$(sha256sum "$d/bin/dialtone" | cut -d' ' -f1)"
+chmod 755 "$HOME/.dialtone/deploy-new/dialtone"
+"$HOME/.dialtone/deploy-new/dialtone" daemon install --node __NODE__ --listen 127.0.0.1:__API__
+# Releases before v0.5.2 install without starting the node.
+systemctl --user start dialtone
+echo "SHA256=$(sha256sum "$HOME/.dialtone/bin/dialtone" | cut -d' ' -f1)"
 "#;
 
 /// On a VM: download the published binary for its architecture and refuse it unless its
@@ -313,6 +314,8 @@ n="$HOME/.dialtone/deploy-new/dialtone"
 curl -fsSL "RELEASES/$a" -o "$n"
 want=$(curl -fsSL "RELEASES/$a.sha256" | cut -d' ' -f1)
 if [ "$want" != "$(sha256sum "$n" | cut -d' ' -f1)" ]; then echo "the download does not match its published SHA-256" >&2; exit 1; fi
+# Releases before v0.5.2 cannot replace a running binary.
+systemctl --user stop dialtone
 "#;
 
 /// The sources the build VM needs, as a .tgz under target/. The path is relative: GNU tar

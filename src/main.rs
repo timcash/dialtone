@@ -42,7 +42,8 @@ fn print_usage() {
          Running `dialtone` with no arguments boots in dependency order and prints the local Web HUD URL.\n\n\
          actions:\n\
          \x20 up                       Start the node: HUD -> store -> Iroh QUIC -> mesh\n\
-         \x20 join <invite>            Join a channel with an invite from any member (dialtone-invite-v2:...)\n\
+         \x20 join <invite>            Join a channel with an invite from any member (dialtone-invite-v2:...),\n\
+         \x20                          install this binary and start the node at login (--once: only join)\n\
          \x20 join <secret>            Unlock (or start) a channel with its secret\n\
          \x20 secret                   Generate a new channel secret (dt-...)\n\
          \x20 allowlist [list|add|remove] [<node_id>] Manage the allowlist in ~/.dialtone/config.json\n\
@@ -51,7 +52,8 @@ fn print_usage() {
          \x20 link import <node>/<name> --udp|--tcp <ip:port>  Open a peer's source and deliver it here\n\
          \x20 link [list|close <id>]   Show links (path direct or relay, Rtt, packets), or close one\n\
          \x20 invite [--ttl 24h]       Make an invite any node can join with until it expires (max 30d)\n\
-         \x20 daemon [install|status]  Install or inspect the daemon that starts the node at login\n\
+         \x20 daemon [install|status]  install: put this binary in ~/.dialtone/bin, register the login\n\
+         \x20                          service and start the node (a running one restarts into it)\n\
          \x20 probe [--all]            Run one probe now: the gossip checks (MSH, NBR, BEAT; nodes run them\n\
          \x20                          every 30s), and with --all the store, pulls and programs (STO, PUL, PRC)\n\
          \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
@@ -695,6 +697,62 @@ async fn join_with_invite(opts: &CliOptions, raw: &str) -> Result<serde_json::Va
         "allowlist_cleared": cleared,
         "config_path": path
     }))
+}
+
+/// `dialtone daemon install`, and `dialtone join <invite>` after joining: put this binary in the
+/// state directory and start the node, so it keeps running after this command and, in the
+/// default state directory, starts at login. A node already running there restarts into the
+/// new binary.
+fn install_and_start(opts: &CliOptions) -> Result<(), String> {
+    use dialtone::deploy::{custom_state_dir, place_binary, start_detached, start_service};
+    let state = dialtone::mesh::default_state_dir();
+    let log = state.join("daemon.log");
+    let bin = if custom_state_dir() {
+        let bin = place_binary(&state)?;
+        let pid = start_detached(&bin, &opts.node, &opts.listen, &log)?;
+        println!(
+            "Started {} (pid {pid}). DIALTONE_STATE_DIR is set, so it does not start at login.",
+            bin.display()
+        );
+        bin
+    } else {
+        let token = load_or_create_api_token().unwrap_or_default();
+        let running =
+            local_daemon_http_json(&opts.listen, "GET", "/api/net", None, &token, 2).is_ok();
+        let rep =
+            install_persistent_os_daemon(&opts.node, &opts.listen, opts.secret_key.as_deref())?;
+        let mut cfg = load_mesh_config(&default_config_path());
+        cfg.daemon_installed = true;
+        cfg.daemon_service_path = Some(rep.service_unit_path.clone());
+        cfg.updated_at_unix = now_unix();
+        save_mesh_config(&default_config_path(), &cfg)?;
+        let bin = std::path::PathBuf::from(&rep.program_path);
+        if running && cfg!(windows) {
+            // The Windows login loop restarts the node it runs; starting the task again would
+            // run a second one.
+            local_daemon_http_json(&opts.listen, "POST", "/api/restart", None, &token, 5)?;
+            println!(
+                "Installed {}; the running node restarts into it.",
+                bin.display()
+            );
+        } else if let Err(e) = start_service() {
+            let pid = start_detached(&bin, &opts.node, &opts.listen, &log)?;
+            println!(
+                "Installed {}, but {e}: started it now (pid {pid}); it may not start at login.",
+                bin.display()
+            );
+        } else {
+            println!(
+                "Installed {}; it runs now and starts at login ({}).",
+                bin.display(),
+                rep.service_unit_path
+            );
+        }
+        bin
+    };
+    println!("  HUD:    http://{}", opts.listen);
+    println!("  Status: {} status", bin.display());
+    Ok(())
 }
 
 async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> {
@@ -1923,11 +1981,11 @@ async fn main() {
                         Ok(())
                     } else {
                         println!(
-                            "[JOIN] Joined channel '{}' ({}) — booting dialtone daemon & local Web HUD...",
+                            "Joined channel '{}' as '{}'.",
                             report["channel"].as_str().unwrap_or_default(),
-                            report["channel_fingerprint"].as_str().unwrap_or_default()
+                            opts.node
                         );
-                        run_node(opts, true).await
+                        install_and_start(&opts)
                     }
                 }
             }
@@ -2057,15 +2115,7 @@ async fn main() {
                 );
                 Ok(())
             } else {
-                install_persistent_os_daemon(&opts.node, &opts.listen, opts.secret_key.as_deref())
-                    .map(|rep| {
-                        let mut cfg = load_mesh_config(&default_config_path());
-                        cfg.daemon_installed = true;
-                        cfg.daemon_service_path = Some(rep.service_unit_path.clone());
-                        cfg.updated_at_unix = now_unix();
-                        let _ = save_mesh_config(&default_config_path(), &cfg);
-                        println!("{}", serde_json::to_string_pretty(&rep).unwrap());
-                    })
+                install_and_start(&opts)
             }
         }
         "status" => collect_node_diagnostics(&opts.transport).await.map(|diag| {
