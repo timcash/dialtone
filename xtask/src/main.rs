@@ -1,6 +1,7 @@
 //! Dev tasks for dialtone. `./dialtone.sh <task>` and `cargo xtask <task>` both run this.
 
 mod fleet;
+mod rejoin;
 mod release;
 mod scale;
 mod test;
@@ -13,12 +14,16 @@ dialtone dev tasks (./dialtone.sh <task>, or cargo xtask <task>)
 
   test [opts]            every test, from one command. With no options, end to end on the VMs:
                          lint here; the build VM runs the whole cargo test suite and the release
-                         build; every VM installs that build and must pass its gossip probe on it,
-                         then a full probe; then scale nodes on every VM as one mesh
+                         build; the rejoin test; every VM installs that build and must pass its
+                         gossip probe on it, then a full probe; then scale nodes on every VM as
+                         one mesh
                            --here         run on this machine instead: lint, cargo test, release
                                           build (what GitHub CI runs)
                            --only lint    just the leak gate, domain language, fmt and clippy
                            --only suite   just cargo test (on the build VM, or --here)
+                           --only rejoin  a node on the previous signed release joins the live
+                                          channel by invite, goes away, rejoins and must update
+                                          itself from what its peers' beats say
                            --only scale   just the scale test: convergence and traffic per node (on
                                           the VMs' installed build, or --here with this machine's
                                           release build, failing above SCALE_BUDGET_KBPS kbit/s)

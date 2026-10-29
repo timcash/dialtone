@@ -6,7 +6,7 @@ use crate::fleet::{self, Fleet};
 use crate::util::{cargo, run, say, R};
 
 /// What `--only` can pick.
-const PARTS: [&str; 4] = ["lint", "suite", "scale", "probes"];
+const PARTS: [&str; 5] = ["lint", "suite", "rejoin", "scale", "probes"];
 
 struct Opts {
     here: bool,
@@ -77,12 +77,17 @@ pub fn test(args: &[String]) -> R<()> {
         }
         (Some("suite"), true) => suite_here(&o.cargo),
         (Some("scale"), true) => crate::scale::local(o.scale.unwrap_or(20), o.secs),
-        (Some("probes"), true) => Err("--only probes reads the VMs' live mesh: drop --here".into()),
+        (Some(part @ ("probes" | "rejoin")), true) => Err(format!(
+            "--only {part} uses the VMs' live mesh: drop --here"
+        )),
         (None, false) => {
             let mut fleet = Fleet::load()?;
             crate::check_static()?;
             fleet.pick_routes()?;
             fleet::on_builder(&fleet, Some(&o.cargo), true)?;
+            // Before the install, which restarts every VM's node: that also makes them forget
+            // the departed test node.
+            crate::rejoin::run(&fleet)?;
             fleet::roll_out(&fleet, None)?;
             let n = o.scale.unwrap_or(10);
             if n > 0 {
@@ -98,6 +103,10 @@ pub fn test(args: &[String]) -> R<()> {
                 "suite" => fleet::on_builder(&fleet, Some(&o.cargo), false),
                 "scale" => crate::scale::on_fleet(&fleet, o.scale.unwrap_or(10), o.secs),
                 "probes" => fleet::probes(&fleet),
+                "rejoin" => {
+                    crate::rejoin::run(&fleet)?;
+                    fleet::restart_nodes(&fleet)
+                }
                 _ => unreachable!("parts are checked when parsed"),
             }
         }

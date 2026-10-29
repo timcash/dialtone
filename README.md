@@ -391,7 +391,7 @@ A node that runs from `~/.dialtone/bin` (every service install does) updates its
 - **A/B install.** The running binary moves aside as `dialtone.prev`, the new one takes its path, and the node exits (code 75) so its service starts the new one.
 - **Trial and rollback.** The new binary is kept once it has run for a minute with gossip joined and, if the old one had neighbors, at least one neighbor. If it is not healthy within 3 minutes, or it fails to start 3 times, `dialtone.prev` takes the path back, the version is marked bad in `~/.dialtone/update.json` (never tried again), and the old binary runs.
 
-`DIALTONE_AUTO_UPDATE=0` turns it off. A binary run from anywhere else (a development build) never replaces itself. `./dialtone.sh test --only probes` shows the version every test VM runs.
+`DIALTONE_AUTO_UPDATE=0` turns it off. A binary run from anywhere else (a development build) never replaces itself. `./dialtone.sh test --only probes` shows the version every test VM runs. `./dialtone.sh test --only rejoin` checks the whole path on the live channel: a node on the previous signed release joins by invite, goes away and rejoins, hears of the newest release in a peer's beat, installs it, restarts and keeps it (about two minutes on the test VMs).
 
 ### Render Service Unit Templates (`service`)
 
@@ -634,15 +634,19 @@ Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./
 
 ```bash
 ./dialtone.sh test                  # everything: lint here; on the build VM the whole cargo test
-                                    # suite and the release build; every VM installs that build and
-                                    # must pass its gossip probe on exactly that binary, then a full
-                                    # probe; then 10 scale nodes per VM as one mesh
+                                    # suite and the release build; the rejoin test; every VM
+                                    # installs that build and must pass its gossip probe on exactly
+                                    # that binary, then a full probe; then 10 scale nodes per VM
+                                    # as one mesh
 ./dialtone.sh test --scale 20       # ... with 20 scale nodes per VM (--scale 0 skips them)
 ./dialtone.sh test --only lint      # leak gate (no host names / NodeIds in git), domain language,
                                     # fmt and clippy
 ./dialtone.sh test --only suite     # just cargo test, on the build VM
 ./dialtone.sh test --only suite -- --test e2e   # just the three-node tests (anything after -- goes
                                                 # to cargo test)
+./dialtone.sh test --only rejoin    # a node on the previous signed release joins the live channel
+                                    # by invite, goes away, rejoins and must update itself to the
+                                    # newest release, having heard of it in a peer's beat
 ./dialtone.sh test --only scale --scale 20 --secs 60   # just the scale test on the VMs' installed
                                     # build: convergence time and traffic per node per VM
 ./dialtone.sh test --only probes    # every VM's latest probe in the live mesh; fails unless all pass

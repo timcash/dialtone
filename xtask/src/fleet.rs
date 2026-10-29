@@ -202,7 +202,7 @@ impl Fleet {
     }
 
     /// The live mesh as the build VM's node sees it.
-    fn mesh(&self) -> Value {
+    pub fn mesh(&self) -> Value {
         let get = format!("curl -s -m 10 http://127.0.0.1:{LIVE_API}/api/mesh");
         self.sh(&self.builder, &get)
             .ok()
@@ -435,21 +435,7 @@ pub fn roll_out(fleet: &Fleet, tag: Option<&str>) -> R<()> {
     }
 
     say("Waiting for every VM's gossip probe to pass on the new build (up to 150s)");
-    let mut last = String::new();
-    let mut passed = false;
-    for _ in 0..30 {
-        let (ok, text) = report(&fleet.nodes, &expect, &fleet.mesh());
-        last = text;
-        if ok {
-            passed = true;
-            break;
-        }
-        crate::util::sleep(5.0);
-    }
-    print!("{last}");
-    if !passed {
-        return Err("not every VM passed its probe within 150s (FAIL lines above)".into());
-    }
+    wait_for_probes(fleet, &expect)?;
 
     // The store, pulls (a fresh blob from each peer) and programs, on every VM. Peers that just
     // restarted can miss a pull or two, so each full probe gets three tries.
@@ -585,4 +571,33 @@ fn report(names: &[String], builds: &HashMap<String, String>, mesh: &Value) -> (
         ));
     }
     (all_ok, text)
+}
+
+/// Wait up to 150s until every VM's gossip probe passes (for each VM in `builds`, on the binary
+/// with that SHA-256), then print each VM's line.
+fn wait_for_probes(fleet: &Fleet, builds: &HashMap<String, String>) -> R<()> {
+    let mut last = String::new();
+    for _ in 0..30 {
+        let (ok, text) = report(&fleet.nodes, builds, &fleet.mesh());
+        if ok {
+            print!("{text}");
+            return Ok(());
+        }
+        last = text;
+        crate::util::sleep(5.0);
+    }
+    print!("{last}");
+    Err("not every VM passed its probe within 150s (FAIL lines above)".into())
+}
+
+/// Restart every VM's node (it forgets peers that went away) and wait for every probe.
+pub fn restart_nodes(fleet: &Fleet) -> R<()> {
+    say(&format!(
+        "Restart the node on {} and wait for every probe (up to 150s)",
+        fleet.nodes.join(" ")
+    ));
+    for (_, r) in fleet.each(|node| fleet.sh(node, "systemctl --user restart dialtone")) {
+        r?;
+    }
+    wait_for_probes(fleet, &HashMap::new())
 }

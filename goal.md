@@ -85,6 +85,10 @@ and config field names) were accepted for a while after the rename and were remo
    `--secs` and `-- ARGS` tune it; the old `check`, `lint`, `scale`, `scale-fleet` and `fleet` tasks are gone and
    `deploy` no longer tests. `./dialtone.sh dev` sets any node up for development (C toolchain, pkg-config, git,
    curl, Rust with rustfmt and clippy). The desktop machines left the test fleet.
+   **Rejoin test** (`--only rejoin`, also in every full `test`): a node on the previous signed release joins the
+   live channel by invite, goes away, rejoins with its updater on and must update itself to the newest release
+   after hearing of it in a peer's beat (not from GitHub); first run: v0.5.0 to v0.5.1 kept 72s after rejoining.
+   A departed node fails peers' `BEAT` probes until pruned (issue #15), so the VMs' nodes restart after it.
 2. **Done — 2026-10-28: Self-update.** Beats carry the version a node runs; a node checks GitHub hourly and
    follows peers whose beats show a newer release, verifies the CI-signed `dialtone-release.json` (release key in
    `src/update.rs`), fetches the binary from same-platform peers (iroh-blobs) or GitHub, installs it A/B
