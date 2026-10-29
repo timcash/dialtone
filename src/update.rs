@@ -11,7 +11,8 @@
 //!   BLAKE3 hash), else from GitHub.
 //! - **A/B.** The running binary moves aside as `dialtone.prev`, the new one takes its path, and
 //!   the node exits with `EXIT_RESTART` so its service (systemd, launchd, the Windows start
-//!   loop) starts the new one.
+//!   loop) starts the new one. A node with no service runs as its own restart loop
+//!   (`supervisor::keep_running`), which does the same.
 //! - **Trial.** The new binary must become healthy within `TRIAL_DEADLINE`: gossip joined, and a
 //!   neighbor if the old one had any, after running `TRIAL_MIN_UP`. If it does not, or it fails
 //!   to start `MAX_TRIAL_STARTS` times, `dialtone.prev` takes the path back, the version is
@@ -37,6 +38,30 @@ pub const MANIFEST_NAME: &str = "dialtone-release.json";
 pub const MANIFEST_SCHEMA: &str = "dialtone.release.v1";
 /// The exit code a node stops with to have its service start the binary now at its path.
 pub const EXIT_RESTART: i32 = 75;
+/// `1`: something starts this node again when it exits (the services dialtone installs set
+/// it, and so does the restart loop a node without one runs). `0`: nothing does.
+pub const SUPERVISED_ENV: &str = "DIALTONE_SUPERVISED";
+/// The LaunchAgent label `dialtone daemon install` uses on macOS.
+pub const LAUNCHD_LABEL: &str = "com.timcash.dialtone";
+
+/// Whether a service starts the node in `state_dir` (process `pid`, environment `var`) again
+/// when it exits. Without one, `up` keeps the node running itself (`supervisor::keep_running`)
+/// so an update or a crash does not leave it down.
+pub fn has_service(state_dir: &Path, pid: u32, var: impl Fn(&str) -> Option<String>) -> bool {
+    match var(SUPERVISED_ENV).as_deref().map(str::trim) {
+        Some("1") => return true,
+        Some("0") => return false,
+        _ => {}
+    }
+    // Services installed before SUPERVISED_ENV existed. systemd names its unit's main process
+    // (a shell in a desktop session inherits another unit's variables).
+    if let Some(main) = var("SYSTEMD_EXEC_PID") {
+        return main.trim() == pid.to_string();
+    }
+    var("INVOCATION_ID").is_some()
+        || var("XPC_SERVICE_NAME").as_deref() == Some(LAUNCHD_LABEL)
+        || (cfg!(windows) && state_dir.join("start-dialtone.cmd").exists())
+}
 /// A trial binary that has started this many times without becoming healthy is rolled back.
 pub const MAX_TRIAL_STARTS: u32 = 3;
 /// A trial binary must have run this long, healthy, to be kept.
@@ -656,6 +681,33 @@ mod tests {
         let altered = s.manifest.replace("0.5.0", "9.5.0");
         assert!(verify_manifest(altered.as_bytes(), &s.sig, &key.public()).is_err());
         assert!(verify_manifest(s.manifest.as_bytes(), "zz", &key.public()).is_err());
+    }
+
+    /// A node knows whether a service starts it again: from the variable dialtone's services
+    /// set, else from what systemd, launchd or the Windows login loop leave behind.
+    #[test]
+    fn a_node_knows_whether_a_service_restarts_it() {
+        let dir = std::env::temp_dir().join("dialtone-no-such-state-dir");
+        let has = |vars: &[(&str, &str)]| {
+            let vars: Vec<(String, String)> = vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            has_service(&dir, 42, move |name| {
+                vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+            })
+        };
+        assert!(!has(&[]), "a bare `nohup dialtone up &`");
+        assert!(has(&[(SUPERVISED_ENV, "1")]));
+        assert!(!has(&[(SUPERVISED_ENV, "0"), ("INVOCATION_ID", "x")]));
+        assert!(has(&[("SYSTEMD_EXEC_PID", "42"), ("INVOCATION_ID", "x")]));
+        assert!(
+            !has(&[("SYSTEMD_EXEC_PID", "7"), ("INVOCATION_ID", "x")]),
+            "a shell that inherited another unit's variables"
+        );
+        assert!(has(&[("INVOCATION_ID", "x")]), "systemd before v248");
+        assert!(has(&[("XPC_SERVICE_NAME", LAUNCHD_LABEL)]));
+        assert!(!has(&[("XPC_SERVICE_NAME", "0")]), "a macOS terminal");
     }
 
     #[test]

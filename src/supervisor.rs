@@ -170,6 +170,46 @@ mod tree {
     #[cfg(not(unix))]
     pub fn isolate(_cmd: &mut Command) {}
 
+    /// On Linux the node started by `keep_running` gets SIGTERM if the process that started it
+    /// dies (on Windows its Job Object does the same).
+    #[cfg(target_os = "linux")]
+    pub fn die_with_parent(cmd: &mut Command) {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: prctl is async-signal-safe and touches only the new process.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                Ok(())
+            });
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn die_with_parent(_cmd: &mut Command) {}
+
+    /// Become `exe args`. Returns only if that failed.
+    #[cfg(unix)]
+    pub fn hand_over(exe: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Error {
+        use std::os::unix::process::CommandExt;
+        Command::new(exe).args(args).exec()
+    }
+
+    /// Start `exe args` in this process's place and exit. Returns only if it did not start.
+    #[cfg(windows)]
+    pub fn hand_over(exe: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Error {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        match Command::new(exe)
+            .args(args)
+            .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+            .spawn()
+        {
+            Ok(_) => std::process::exit(0),
+            Err(e) => e,
+        }
+    }
+
     #[cfg(unix)]
     pub fn signal_group(pgid: u32, sig: libc::c_int) {
         // SAFETY: killpg only sends a signal; an already-gone group returns ESRCH.
@@ -268,6 +308,107 @@ mod tree {
             unsafe {
                 windows_sys::Win32::Foundation::CloseHandle(self.0);
             }
+        }
+    }
+}
+
+/// Keep a node running when no service starts it again (`update::has_service`): run `exe
+/// args` as a child and start it again whenever it exits, the way systemd's `Restart=always`
+/// does, until the child stops cleanly or `stop` resolves (the signal is passed on to it).
+/// - The child exits with `EXIT_RESTART` after an update or a rollback: this process hands
+///   over to the binary now at `exe` (exec on Unix; on Windows it starts it and exits, since a
+///   running binary cannot be replaced), so the next update finds the old one gone.
+/// - It crashes: it is started again after 2s, doubling to 60s while it keeps failing within
+///   a minute. A release on trial that keeps crashing is rolled back by the updater.
+pub async fn keep_running(
+    exe: &Path,
+    args: &[std::ffi::OsString],
+    stop: impl std::future::Future<Output = &'static str>,
+) -> Result<(), String> {
+    use std::time::{Duration, Instant};
+    tokio::pin!(stop);
+    println!(
+        "[supervisor] no service starts this node again when it exits, so this process does \
+         (after an update or a crash)"
+    );
+    let mut failures = 0u32;
+    loop {
+        let mut cmd = Command::new(exe);
+        cmd.args(args).env(crate::update::SUPERVISED_ENV, "1");
+        tree::die_with_parent(&mut cmd);
+        let child = match cmd.spawn() {
+            Ok(child) => child,
+            // The binary is being swapped; try again.
+            Err(e) => {
+                eprintln!("[supervisor] start {}: {e}", exe.display());
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(2)) => continue,
+                    _ = &mut stop => return Ok(()),
+                }
+            }
+        };
+        #[cfg(windows)]
+        let job = tree::Job::adopt(&child);
+        let pid = child.id();
+        let started = Instant::now();
+        let mut child = child;
+        let mut waited = tokio::task::spawn_blocking(move || child.wait());
+        let mut stopping = false;
+        let status = loop {
+            tokio::select! {
+                status = &mut waited => break status,
+                sig = &mut stop, if !stopping => {
+                    println!("[supervisor] {sig}: stopping the node");
+                    stopping = true;
+                    #[cfg(unix)]
+                    // SAFETY: kill only sends a signal to the child we started.
+                    unsafe {
+                        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                    }
+                    #[cfg(windows)]
+                    match &job {
+                        Some(job) => job.terminate(),
+                        None => {
+                            let _ = Command::new("taskkill")
+                                .args(["/F", "/PID", &pid.to_string()])
+                                .output();
+                        }
+                    }
+                }
+            }
+        };
+        if stopping {
+            return Ok(());
+        }
+        let status = status
+            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("wait for the node: {e}"))?;
+        if status.success() {
+            return Ok(());
+        }
+        if status.code() == Some(crate::update::EXIT_RESTART) {
+            println!(
+                "[supervisor] the node exited to restart; handing over to {}",
+                exe.display()
+            );
+            let err = tree::hand_over(exe, args);
+            eprintln!("[supervisor] hand over to {}: {err}", exe.display());
+            failures = 0;
+            continue;
+        }
+        failures = if started.elapsed() < Duration::from_secs(60) {
+            failures + 1
+        } else {
+            1
+        };
+        let delay = Duration::from_secs((2u64 << (failures - 1).min(5)).min(60));
+        eprintln!(
+            "[supervisor] the node stopped ({status}); starting it again in {}s",
+            delay.as_secs()
+        );
+        tokio::select! {
+            _ = tokio::time::sleep(delay) => {}
+            _ = &mut stop => return Ok(()),
         }
     }
 }

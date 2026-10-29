@@ -1208,8 +1208,8 @@ fn route_request(
             }
         }
         ("POST", "/api/restart") => {
-            // The node exits with EXIT_RESTART after answering; its service (systemd, launchd or
-            // the Windows loop) starts it again, on whatever binary is at its path now.
+            // The node exits with EXIT_RESTART after answering; its service (systemd, launchd,
+            // the Windows loop or its own restart loop) starts it again, on whatever binary is at its path now.
             drop(st);
             std::thread::spawn(|| {
                 std::thread::sleep(std::time::Duration::from_millis(500));

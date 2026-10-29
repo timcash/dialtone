@@ -2,6 +2,8 @@
 //! healthy, rolls back one that panics when it starts and one that never gets healthy, and a
 //! node that cannot reach the release server updates from a peer that runs the release.
 //!
+//! A node with no service keeps itself running through the same updates.
+//!
 //! A local HTTP server stands in for GitHub, the releases are signed with a test key, and a
 //! restart loop stands in for the service (as `start-dialtone.cmd` does). A release binary is
 //! this build with a marker appended (`update.rs` reads it in debug builds only).
@@ -150,6 +152,7 @@ impl Service {
                     .args(&args)
                     .envs(env.iter().map(|(k, v)| (k, v)))
                     .env("DIALTONE_STATE_DIR", &state)
+                    .env("DIALTONE_SUPERVISED", "1")
                     .stdin(Stdio::null())
                     .stdout(out.try_clone().unwrap())
                     .stderr(out)
@@ -474,4 +477,95 @@ fn a_node_updates_from_a_peer_that_runs_the_release() {
         "p-b did not get the binary from p-a:\n{log}"
     );
     println!("    4. A node that cannot reach the release server updated from a peer");
+}
+
+/// The node started in a directory: when dropped, every process running a binary under it is
+/// killed, since a node that keeps itself running hands over to a new process (on Windows a
+/// new PID) at each update.
+struct KillUnder(PathBuf, Child);
+
+impl Drop for KillUnder {
+    fn drop(&mut self) {
+        let dir = self.0.to_string_lossy().to_string();
+        #[cfg(unix)]
+        let _ = Command::new("pkill").args(["-9", "-f", &dir]).status();
+        #[cfg(windows)]
+        let _ = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -like '{dir}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+                ),
+            ])
+            .status();
+        let _ = self.1.wait();
+        sleep(Duration::from_millis(500));
+    }
+}
+
+/// A node started once with nothing to start it again, as `dialtone join` starts one on a host
+/// without a service manager (a container without systemd): it restarts itself into an update,
+/// and through a release that panics at start until that release is rolled back.
+#[test]
+#[cfg_attr(target_os = "macos", ignore = "test releases are unsigned copies")]
+fn a_node_without_a_service_restarts_itself() {
+    let t = TempDir::new("update-alone");
+    let releases = Releases::new(t.join("releases"));
+    let url = serve(releases.root.clone());
+    let key = releases.public_key();
+    let state = t.join("n-a");
+    let exe = install(&state);
+    let original = sha_of(&exe);
+    let log = t.join("n-a.log");
+    let out = fs::File::create(&log).unwrap();
+    let node = Command::new(&exe)
+        .args([
+            "up",
+            "--node",
+            "n-a",
+            "--listen",
+            "127.0.0.1:18934",
+            "--private-mesh",
+            "--quic-port",
+            "19534",
+            "--secret",
+            SECRET,
+        ])
+        .envs(node_env(&url, &key))
+        .env("DIALTONE_STATE_DIR", &state)
+        .env("DIALTONE_SUPERVISED", "0")
+        .stdin(Stdio::null())
+        .stdout(out.try_clone().unwrap())
+        .stderr(out)
+        .spawn()
+        .unwrap();
+    let _kill = KillUnder(state.clone(), node);
+    until_ok(60, "n-a API up", || get_json(18934, "/api/mesh").is_some());
+
+    releases.publish("94.0.0", "DIALTONE-TEST-PANIC");
+    wait(
+        300,
+        "a release that panics when it starts is rolled back",
+        &[&log],
+        || is_bad(&state, "94.0.0"),
+    );
+    wait(120, "the previous binary runs again", &[&log], || {
+        sha_of(&exe) == original && get_json(18934, "/api/mesh").is_some()
+    });
+    println!("    5. With no service, a release that panicked at start was rolled back");
+
+    releases.publish("95.0.0", "");
+    wait(240, "a healthy release is kept", &[&log], || {
+        committed(&state) == "95.0.0"
+    });
+    wait(60, "n-a reports v95.0.0", &[&log], || {
+        version_seen(18934, "n-a") == "95.0.0"
+    });
+    let text = fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        text.contains("[supervisor] the node exited to restart"),
+        "n-a did not restart itself:\n{text}"
+    );
+    println!("    6. With no service, the node restarted itself into a healthy release");
 }

@@ -50,7 +50,7 @@ s=__STATE__
 cat > "$s/service.sh" <<'SERVICE'
 s=__STATE__
 while [ ! -f "$s/stop" ]; do
-  DIALTONE_STATE_DIR="$s" "$s/bin/dialtone" up --node __NAME__ --listen 127.0.0.1:__API__ --quic-port __QUIC__ >> "$s/node.log" 2>&1 < /dev/null
+  DIALTONE_SUPERVISED=1 DIALTONE_STATE_DIR="$s" "$s/bin/dialtone" up --node __NAME__ --listen 127.0.0.1:__API__ --quic-port __QUIC__ >> "$s/node.log" 2>&1 < /dev/null
   sleep 1
 done
 SERVICE

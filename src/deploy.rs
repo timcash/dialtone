@@ -3,6 +3,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::update::{LAUNCHD_LABEL, SUPERVISED_ENV};
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonInstallReport {
     pub status: String,
@@ -14,8 +16,6 @@ pub struct DaemonInstallReport {
     pub survives_restarts: bool,
     pub instructions: String,
 }
-
-const LAUNCHD_LABEL: &str = "com.timcash.dialtone";
 
 /// A state directory other than the default one (`DIALTONE_STATE_DIR`: a second node on one
 /// machine, or a trial). Such a node is never registered to start at login.
@@ -109,7 +109,7 @@ pub fn start_service() -> Result<(), String> {
 }
 
 /// Start `bin up` in the background, detached from this terminal, logging to `log`. For nodes
-/// that are not installed at login.
+/// that are not installed at login: nothing starts them again, so they keep themselves running.
 pub fn start_detached(bin: &Path, node: &str, listen: &str, log: &Path) -> Result<u32, String> {
     let out = fs::OpenOptions::new()
         .create(true)
@@ -119,6 +119,7 @@ pub fn start_detached(bin: &Path, node: &str, listen: &str, log: &Path) -> Resul
     let err = out.try_clone().map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(bin);
     cmd.args(["up", "--node", node, "--listen", listen])
+        .env(SUPERVISED_ENV, "0")
         .stdin(std::process::Stdio::null())
         .stdout(out)
         .stderr(err);
@@ -182,7 +183,7 @@ pub fn install_persistent_os_daemon(
         let agents_dir = home.join("Library").join("LaunchAgents");
         fs::create_dir_all(&agents_dir)
             .map_err(|e| format!("create LaunchAgents dir {}: {e}", agents_dir.display()))?;
-        let plist_path = agents_dir.join("com.timcash.dialtone.plist");
+        let plist_path = agents_dir.join(format!("{LAUNCHD_LABEL}.plist"));
         let args_xml = format!(
             "    <string>{}</string>\n    <string>up</string>\n    <string>--node</string>\n    <string>{}</string>\n    <string>--listen</string>\n    <string>{}</string>",
             dest_bin.display(),
@@ -190,7 +191,7 @@ pub fn install_persistent_os_daemon(
             listen
         );
         let plist = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>com.timcash.dialtone</string>\n  <key>ProgramArguments</key>\n  <array>\n{args_xml}\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <true/>\n  <key>StandardOutPath</key>\n  <string>{}</string>\n  <key>StandardErrorPath</key>\n  <string>{}</string>\n</dict>\n</plist>\n",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>{LAUNCHD_LABEL}</string>\n  <key>EnvironmentVariables</key>\n  <dict>\n    <key>{SUPERVISED_ENV}</key>\n    <string>1</string>\n  </dict>\n  <key>ProgramArguments</key>\n  <array>\n{args_xml}\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <true/>\n  <key>StandardOutPath</key>\n  <string>{}</string>\n  <key>StandardErrorPath</key>\n  <string>{}</string>\n</dict>\n</plist>\n",
             log_path.display(),
             log_path.display()
         );
@@ -223,7 +224,7 @@ pub fn install_persistent_os_daemon(
             listen
         );
         let script = format!(
-            "@echo off\r\n:loop\r\n{cmd_line} >> \"{}\" 2>&1\r\ntimeout /t 2 /nobreak >nul\r\ngoto loop\r\n",
+            "@echo off\r\nset {SUPERVISED_ENV}=1\r\n:loop\r\n{cmd_line} >> \"{}\" 2>&1\r\ntimeout /t 2 /nobreak >nul\r\ngoto loop\r\n",
             log_path.display()
         );
         fs::write(&cmd_path, script)
@@ -282,7 +283,7 @@ pub fn install_persistent_os_daemon(
             listen
         );
         let unit = format!(
-            "[Unit]\nDescription=Dialtone Iroh Mesh Daemon ({node})\nAfter=network-online.target\n\n[Service]\nEnvironmentFile=-/etc/dialtone/daemon.env\nExecStart={exec_start}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
+            "[Unit]\nDescription=Dialtone Iroh Mesh Daemon ({node})\nAfter=network-online.target\n\n[Service]\nEnvironmentFile=-/etc/dialtone/daemon.env\nEnvironment={SUPERVISED_ENV}=1\nExecStart={exec_start}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
         );
         fs::write(&unit_path, unit)
             .map_err(|e| format!("write systemd unit {}: {e}", unit_path.display()))?;

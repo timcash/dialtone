@@ -622,35 +622,59 @@ async fn join_with_invite(opts: &CliOptions, raw: &str) -> Result<serde_json::Va
     }))
 }
 
+/// Ask the node answering on `listen` to restart, and wait until it has stopped and answers
+/// again; false if it did not come back.
+fn restart_running_node(listen: &str, token: &str) -> bool {
+    let up = || local_daemon_http_json(listen, "GET", "/api/net", None, token, 2).is_ok();
+    let within = |secs: u64, f: &dyn Fn() -> bool| {
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(secs) {
+            if f() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        false
+    };
+    local_daemon_http_json(listen, "POST", "/api/restart", None, token, 5).is_ok()
+        && within(20, &|| !up())
+        && within(30, &up)
+}
+
 /// `dialtone daemon install`, and `dialtone join <invite>` after joining: put this binary in the
 /// state directory and start the node, so it keeps running after this command and, in the
 /// default state directory, starts at login. A node already running there restarts into the
-/// new binary.
+/// new binary. Where no service can be installed (a container without systemd, say) the node
+/// keeps itself running, and restarts after updates and crashes, but does not start at boot.
 fn install_and_start(opts: &CliOptions) -> Result<(), String> {
     use dialtone::deploy::{custom_state_dir, place_binary, start_detached, start_service};
     let state = dialtone::mesh::default_state_dir();
     let log = state.join("daemon.log");
+    let token = load_or_create_api_token().unwrap_or_default();
+    let running = local_daemon_http_json(&opts.listen, "GET", "/api/net", None, &token, 2).is_ok();
+    // A running node that is not restarted would keep the store, and a second one could not
+    // start. One that does not come back (an older release with nothing to start it again) is
+    // started here.
+    let start_without_service = |bin: &std::path::Path| -> Result<String, String> {
+        if running && restart_running_node(&opts.listen, &token) {
+            return Ok("the running node restarted into it".into());
+        }
+        let pid = start_detached(bin, &opts.node, &opts.listen, &log)?;
+        Ok(format!("started it (pid {pid})"))
+    };
     let bin = if custom_state_dir() {
         let bin = place_binary(&state)?;
-        let pid = start_detached(&bin, &opts.node, &opts.listen, &log)?;
+        let how = start_without_service(&bin)?;
         println!(
-            "Started {} (pid {pid}). DIALTONE_STATE_DIR is set, so it does not start at login.",
+            "Installed {}; {how}. DIALTONE_STATE_DIR is set, so it does not start at login.",
             bin.display()
         );
         bin
     } else {
-        let token = load_or_create_api_token().unwrap_or_default();
-        let running =
-            local_daemon_http_json(&opts.listen, "GET", "/api/net", None, &token, 2).is_ok();
         let rep =
             install_persistent_os_daemon(&opts.node, &opts.listen, opts.secret_key.as_deref())?;
-        let mut cfg = load_mesh_config(&default_config_path());
-        cfg.daemon_installed = true;
-        cfg.daemon_service_path = Some(rep.service_unit_path.clone());
-        cfg.updated_at_unix = now_unix();
-        save_mesh_config(&default_config_path(), &cfg)?;
         let bin = std::path::PathBuf::from(&rep.program_path);
-        if running && cfg!(windows) {
+        let service = if running && cfg!(windows) {
             // The Windows login loop restarts the node it runs; starting the task again would
             // run a second one.
             local_daemon_http_json(&opts.listen, "POST", "/api/restart", None, &token, 5)?;
@@ -658,19 +682,28 @@ fn install_and_start(opts: &CliOptions) -> Result<(), String> {
                 "Installed {}; the running node restarts into it.",
                 bin.display()
             );
+            true
         } else if let Err(e) = start_service() {
-            let pid = start_detached(&bin, &opts.node, &opts.listen, &log)?;
+            let how = start_without_service(&bin)?;
             println!(
-                "Installed {}, but {e}: started it now (pid {pid}); it may not start at login.",
+                "Installed {}; {how}. It restarts itself after updates and crashes, but {e}, \
+                 so it does not start at boot.",
                 bin.display()
             );
+            false
         } else {
             println!(
                 "Installed {}; it runs now and starts at login ({}).",
                 bin.display(),
                 rep.service_unit_path
             );
-        }
+            true
+        };
+        let mut cfg = load_mesh_config(&default_config_path());
+        cfg.daemon_installed = service;
+        cfg.daemon_service_path = service.then(|| rep.service_unit_path.clone());
+        cfg.updated_at_unix = now_unix();
+        save_mesh_config(&default_config_path(), &cfg)?;
         bin
     };
     println!("  HUD:    http://{}", opts.listen);
@@ -683,6 +716,16 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
     // runs may share it with a running node.
     let owns_run_dir = !opts.once;
     let update_paths = dialtone::update::Paths::current().ok();
+    if let Some(p) = update_paths
+        .as_ref()
+        .filter(|p| owns_run_dir && p.managed())
+    {
+        let var = |name: &str| env::var(name).ok();
+        if !dialtone::update::has_service(&p.state_dir, std::process::id(), var) {
+            let args: Vec<std::ffi::OsString> = env::args_os().skip(1).collect();
+            return dialtone::supervisor::keep_running(&p.exe, &args, shutdown_signal()).await;
+        }
+    }
     let auto_update = owns_run_dir && update_paths.as_ref().is_some_and(dialtone::update::enabled);
     if auto_update {
         if let Some(p) = &update_paths {
