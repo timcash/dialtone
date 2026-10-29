@@ -4,7 +4,7 @@
 //! - **Detect.** Every beat carries the version its node runs. A node checks GitHub for the
 //!   latest release now and then, and as soon as a peer's beat shows a newer version.
 //! - **Trust.** CI signs `dialtone-release.json` (every binary's SHA-256, BLAKE3 hash and size)
-//!   with the release key (`cargo xtask release-manifest`); its public key is below. A binary is
+//!   with the release key (`./dialtone.sh release manifest`); its public key is below. A binary is
 //!   installed only if the manifest verifies and the binary matches it, so a binary from a peer
 //!   is as trusted as one from GitHub.
 //! - **Fetch.** From peers that run the release on the same OS and architecture (iroh-blobs, by
@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// The public key releases are signed with (`cargo xtask release-pubkey`).
+/// The public key releases are signed with (`./dialtone.sh release pubkey`).
 const RELEASE_PUBLIC_KEY: &str = "56a08fa0ae8a8a9601e2725b891af2d9dbba7598e80121b7074613b2a6c5e473";
 /// Where releases are published; `DIALTONE_RELEASE_URL` points elsewhere (a mirror, a test).
 pub const DEFAULT_RELEASES_URL: &str = "https://github.com/timcash/dialtone/releases";

@@ -627,9 +627,9 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 ---
 
-## 10. Working on dialtone: `cargo xtask` / `./dialtone.sh`
+## 10. Working on dialtone: `./dialtone.sh`
 
-Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is a one-line wrapper for `cargo xtask <task>`. Nothing else is needed on the machine (no Python, jq or curl); `test`, `dev` and `deploy` reach the test VMs with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
+Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is the one entry point (a one-line wrapper for `cargo run -p xtask`). Nothing else is needed on the machine (no Python, jq or curl); `test`, `dev` and `deploy` reach the test VMs with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
 
 `cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down, a seed that restarted) and `tests/update.rs` (self-update from a signed release: a healthy one kept, one that panics or never gets healthy rolled back, a node updated from a peer; not on macOS, where the test releases would be unsigned).
 
@@ -681,6 +681,6 @@ SSH_vm_gamma="user@203.0.113.12"
 
 To check a single running node by hand, `./dialtone mesh-test --expect-peers 3` verifies its security posture, mesh convergence and a live blob transfer.
 
-**Releasing.** Bump `version` in `Cargo.toml`, commit, and push a tag `vX.Y.Z`. The release workflow builds every binary, then `cargo xtask release-manifest` signs `dialtone-release.json` with the `DIALTONE_RELEASE_KEY` repository secret (it refuses a key whose public half is not the one in `src/update.rs`). Running nodes pick the release up within the hour, or within a beat once any peer runs it.
+**Releasing.** Bump `version` in `Cargo.toml`, commit, and push a tag `vX.Y.Z`. The release workflow builds every binary with `./dialtone.sh release build <target>` (the same command builds one here), then `./dialtone.sh release manifest` signs `dialtone-release.json` with the `DIALTONE_RELEASE_KEY` repository secret (it refuses a key whose public half is not the one in `src/update.rs`). Running nodes pick the release up within the hour, or within a beat once any peer runs it.
 
-**Build profiles.** `cargo build --release` is the everyday optimized build (no LTO, parallel and incremental codegen): `cargo xtask`, GitHub CI and fleet deploys use it, and a one-file change rebuilds in about a second. Published binaries are built with `cargo build --profile dist` (size-optimized, fat LTO), which takes about a minute and only runs when a version is tagged.
+**Build profiles.** `cargo build --release` is the everyday optimized build (no LTO, parallel and incremental codegen): `./dialtone.sh`, GitHub CI and deploys use it, and a one-file change rebuilds in about a second. Published binaries are built with `cargo build --profile dist` (size-optimized, fat LTO), which takes about a minute and only runs when a version is tagged.

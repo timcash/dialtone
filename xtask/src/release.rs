@@ -2,12 +2,111 @@
 //! signed with the release key. A node verifies a binary against it whether the binary came
 //! from GitHub or from a peer (`src/update.rs` holds the public key).
 
-use crate::util::{hex, output, say, R};
+use crate::util::{cargo, hex, output, quietly, run, say, R};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
 use std::path::Path;
+use std::process::Command;
 
 pub const MANIFEST: &str = "dialtone-release.json";
+
+/// Where `release build` stages the binaries and their `.sha256` files.
+pub const ASSETS: &str = "target/release-assets";
+
+/// `./dialtone.sh release build [TARGET] | manifest [DIR] | pubkey`.
+pub fn release(args: &[String]) -> R<()> {
+    match args.first().map(String::as_str) {
+        Some("build") => build(args.get(1).map(String::as_str)),
+        Some("manifest") => manifest(args.get(1).map(String::as_str).unwrap_or(ASSETS)),
+        Some("pubkey") => pubkey(),
+        _ => Err("usage: ./dialtone.sh release build [TARGET] | manifest [DIR] | pubkey".into()),
+    }
+}
+
+/// The published name of the binary for a target: the names nodes look for (`asset_name` in
+/// src/update.rs).
+fn asset_for(target: &str) -> Option<&'static str> {
+    let os = if target.contains("windows") {
+        "windows"
+    } else if target.contains("apple-darwin") {
+        "macos"
+    } else if target.contains("linux") {
+        "linux"
+    } else {
+        return None;
+    };
+    match (os, target.split('-').next()?) {
+        ("windows", "x86_64") => Some("dialtone-windows-x86_64.exe"),
+        ("macos", "aarch64") => Some("dialtone-macos-arm64"),
+        ("linux", "x86_64") => Some("dialtone-linux-x86_64"),
+        ("linux", "aarch64") => Some("dialtone-linux-arm64"),
+        _ => None,
+    }
+}
+
+/// This machine's target triple, from `rustc -vV`.
+fn host_target() -> R<String> {
+    output(Command::new("rustc").arg("-vV"))?
+        .lines()
+        .find_map(|l| l.strip_prefix("host: "))
+        .map(|h| h.trim().to_string())
+        .ok_or_else(|| "rustc -vV printed no host".into())
+}
+
+/// `release build [TARGET]`: the size-optimized `dist` build for TARGET (default: this machine),
+/// staged as `target/release-assets/<asset>` with its `.sha256` (`sha256sum` format).
+fn build(target: Option<&str>) -> R<()> {
+    let target = match target {
+        Some(t) => t.to_string(),
+        None => host_target()?,
+    };
+    let asset =
+        asset_for(&target).ok_or_else(|| format!("no release binary is published for {target}"))?;
+    // C code (ring, blake3) builds for musl with musl-gcc.
+    if target.ends_with("-musl") && !quietly(Command::new("musl-gcc").arg("--version")) {
+        if std::env::var_os("CI").is_none() {
+            return Err("building for musl needs musl-gcc: install musl-tools".into());
+        }
+        say("Install musl-tools");
+        run(Command::new("sudo").args(["apt-get", "update", "-qq"]))?;
+        run(Command::new("sudo").args(["apt-get", "install", "-y", "-qq", "musl-tools"]))?;
+    }
+    say(&format!("Release build for {target} (dist profile)"));
+    run(cargo().args([
+        "build",
+        "-p",
+        "dialtone",
+        "--profile",
+        "dist",
+        "--target",
+        &target,
+    ]))?;
+    let exe = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
+    let built = format!("target/{target}/dist/dialtone{exe}");
+    std::fs::create_dir_all(ASSETS).map_err(|e| format!("{ASSETS}: {e}"))?;
+    let staged = Path::new(ASSETS).join(asset);
+    std::fs::copy(&built, &staged).map_err(|e| format!("copy {built}: {e}"))?;
+    let bytes = std::fs::read(&staged).map_err(|e| e.to_string())?;
+    let sha256 = hex(&<sha2::Sha256 as sha2::Digest>::digest(&bytes));
+    std::fs::write(
+        Path::new(ASSETS).join(format!("{asset}.sha256")),
+        format!(
+            "{sha256}  {asset}
+"
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    println!(
+        "    {}  {sha256}  ({} bytes)",
+        staged.display(),
+        bytes.len()
+    );
+    Ok(())
+}
 
 /// The release key from DIALTONE_RELEASE_KEY: 32 bytes as 64 hex characters.
 fn key() -> R<SigningKey> {
@@ -28,24 +127,26 @@ fn key() -> R<SigningKey> {
     Ok(SigningKey::from_bytes(&seed))
 }
 
-/// `release-pubkey`: the public key nodes verify releases with.
-pub fn pubkey() -> R<()> {
+/// `release pubkey`: the public key nodes verify releases with.
+fn pubkey() -> R<()> {
     println!("{}", hex(key()?.verifying_key().as_bytes()));
     Ok(())
 }
 
-/// `release-manifest <version> <dir>`: write `dialtone-release.json` and its `.sig` into dir,
-/// covering every `dialtone-*` binary there.
-pub fn manifest(args: &[String]) -> R<()> {
-    let [version, dir] = args else {
-        return Err("usage: release-manifest <version> <dir with the release binaries>".into());
-    };
-    let version = version.trim_start_matches('v');
-    let cargo_version = package_version()?;
-    if version != cargo_version {
-        return Err(format!(
-            "version {version} is not the version in Cargo.toml ({cargo_version})"
-        ));
+/// `release manifest [DIR]`: write `dialtone-release.json` and its `.sig` into DIR (default
+/// target/release-assets), covering every `dialtone-*` binary there, as the version in
+/// Cargo.toml. On a tag in CI the tag must be that version.
+fn manifest(dir: &str) -> R<()> {
+    let version = package_version()?;
+    let version = version.as_str();
+    if let Ok(tag) = std::env::var("GITHUB_REF_NAME") {
+        if std::env::var("GITHUB_REF_TYPE").as_deref() == Ok("tag")
+            && tag.trim_start_matches('v') != version
+        {
+            return Err(format!(
+                "tag {tag} is not the version in Cargo.toml ({version})"
+            ));
+        }
     }
     let key = key()?;
     // Nodes verify with the public key in src/update.rs: a release signed with another key

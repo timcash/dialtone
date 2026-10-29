@@ -1,4 +1,4 @@
-//! Dev tasks for dialtone. `./dialtone.sh <task>` and `cargo xtask <task>` both run this.
+//! Dev tasks for dialtone: `./dialtone.sh <task>` runs this.
 
 mod fleet;
 mod rejoin;
@@ -10,7 +10,7 @@ mod util;
 use util::{cargo, root, run, say, R};
 
 const HELP: &str = "\
-dialtone dev tasks (./dialtone.sh <task>, or cargo xtask <task>)
+dialtone dev tasks: ./dialtone.sh <task>
 
   test [opts]            every test, from one command. With no options, end to end on the VMs:
                          lint here; the build VM runs the whole cargo test suite and the release
@@ -39,9 +39,12 @@ dialtone dev tasks (./dialtone.sh <task>, or cargo xtask <task>)
                          runs no tests (`test` deploys the build it tested)
                            --release      every VM downloads the latest GitHub release (SHA-256 checked)
                            --tag vX.Y.Z   ... or this release
-  release-manifest V DIR sign DIR's dialtone-* binaries as release V (DIALTONE_RELEASE_KEY):
-                         dialtone-release.json and .sig, which nodes verify updates with
-  release-pubkey         the public key of DIALTONE_RELEASE_KEY
+  release build [TARGET] the size-optimized release binary for TARGET (default: this machine),
+                         staged in target/release-assets with its .sha256 (what GitHub CI publishes)
+  release manifest [DIR] sign every dialtone-* binary in DIR (default target/release-assets) as the
+                         Cargo.toml version with DIALTONE_RELEASE_KEY: dialtone-release.json and
+                         .sig, which nodes verify updates with
+  release pubkey         the public key of DIALTONE_RELEASE_KEY
 
 `test` (without --here), `dev` and `deploy` read the VMs from fleet.local.env (never committed).";
 
@@ -53,8 +56,7 @@ fn main() {
         Some("test") => test::test(rest),
         Some("dev") => fleet::dev(rest),
         Some("deploy") => fleet::deploy(rest),
-        Some("release-manifest") => release::manifest(rest),
-        Some("release-pubkey") => release::pubkey(),
+        Some("release") => release::release(rest),
         Some("help" | "-h" | "--help") | None => {
             println!("{HELP}");
             Ok(())
