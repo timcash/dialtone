@@ -54,12 +54,51 @@ const LATEST_TAG: &str = "latest";
 const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How often unreferenced data (untagged partial downloads) is removed.
 const GC_INTERVAL: Duration = Duration::from_secs(600);
+/// How long a starting node waits for the store's lock: a node restarted right after SIGTERM
+/// waits for the old one to finish shutting down, and a process another thread is spawning
+/// can hold a copy of the lock for a moment until it execs.
+const LOCK_WAIT: Duration = Duration::from_secs(10);
 
 fn sha256_tag(digest: &str) -> String {
     format!(
         "{SHA256_TAG_PREFIX}{}",
         digest.strip_prefix("sha256:").unwrap_or(digest)
     )
+}
+
+/// Take the exclusive lock on `<dir>/store.lock`, retrying for up to `wait` while another
+/// process holds it. Runs once, before the store opens, so it sleeps on the calling thread.
+fn lock_store(dir: &Path, wait: Duration) -> Result<fs::File, String> {
+    let file = fs::File::create(dir.join("store.lock"))
+        .map_err(|e| format!("open store lock in {}: {e}", dir.display()))?;
+    let start = std::time::Instant::now();
+    let deadline = start + wait;
+    let mut told = false;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(fs::TryLockError::Error(e)) => {
+                return Err(format!("lock store {}: {e}", dir.display()))
+            }
+            Err(fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                if !told && start.elapsed() >= Duration::from_secs(1) {
+                    eprintln!(
+                        "[store] {} is in use; waiting up to {}s for it to be released",
+                        dir.display(),
+                        wait.as_secs()
+                    );
+                    told = true;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(fs::TryLockError::WouldBlock) => {
+                return Err(format!(
+                    "store {} is in use by another process",
+                    dir.display()
+                ))
+            }
+        }
+    }
 }
 
 /// Blob count, total bytes and the newest digest; kept current on every add.
@@ -81,7 +120,7 @@ pub struct Blobs {
     /// A throwaway store (see [`Blobs::open_or_private`]), deleted on close.
     private: bool,
     /// Exclusive OS lock on `<dir>/store.lock`, held until `close`. The database itself
-    /// waits forever for another process's lock; this one fails at once instead.
+    /// waits forever for another process's lock; this one gives up after [`LOCK_WAIT`].
     lock: Arc<Mutex<Option<fs::File>>>,
 }
 
@@ -93,17 +132,14 @@ impl std::fmt::Debug for Blobs {
 
 impl Blobs {
     /// Open (or create) the store in `dir`, importing any blobs left in the old
-    /// one-file-per-SHA-256 layout.
+    /// one-file-per-SHA-256 layout. Waits up to [`LOCK_WAIT`] for another process to let go.
     pub async fn open(dir: &Path) -> Result<Self, String> {
+        Self::open_within(dir, LOCK_WAIT).await
+    }
+
+    async fn open_within(dir: &Path, wait: Duration) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|e| format!("create store {}: {e}", dir.display()))?;
-        let lock_file = fs::File::create(dir.join("store.lock"))
-            .map_err(|e| format!("open store lock in {}: {e}", dir.display()))?;
-        lock_file.try_lock().map_err(|e| match e {
-            fs::TryLockError::WouldBlock => {
-                format!("store {} is in use by another process", dir.display())
-            }
-            fs::TryLockError::Error(e) => format!("lock store {}: {e}", dir.display()),
-        })?;
+        let lock_file = lock_store(dir, wait)?;
         let mut options = FsOptions::new(dir);
         options.gc = Some(GcConfig {
             interval: GC_INTERVAL,
@@ -133,7 +169,7 @@ impl Blobs {
     /// Open `dir`, or a private store under the temp dir when another process (the daemon)
     /// already owns it. Used by `index` and one-shot runs that share the daemon's state dir.
     pub async fn open_or_private(dir: &Path) -> Result<Self, String> {
-        match Self::open(dir).await {
+        match Self::open_within(dir, Duration::ZERO).await {
             Ok(blobs) => Ok(blobs),
             Err(err) => {
                 let private =
@@ -681,27 +717,26 @@ mod tests {
     }
 
     #[test]
-    fn a_store_in_use_is_refused_at_once_instead_of_waiting() {
+    fn a_store_in_use_is_waited_for_briefly_never_forever() {
         let (dir, blobs) = temp_store("blob-locked");
         let start = std::time::Instant::now();
-        let err = Blobs::open_blocking(&dir).expect_err("second open must fail");
+        let err = block_on(Blobs::open_within(&dir, Duration::ZERO))
+            .expect_err("a second open with no wait must fail");
         assert!(err.contains("in use by another process"), "{err}");
         assert!(start.elapsed() < Duration::from_secs(2));
-        blobs.close_blocking();
-        // Closing releases the lock. Other tests spawn processes in parallel, and a child can
-        // hold a copy of the lock file's handle for a moment before it execs, so allow a
-        // short wait here; the refusal above must still be immediate.
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        let reopened = loop {
-            match Blobs::open_blocking(&dir) {
-                Ok(b) => break b,
-                Err(e) if std::time::Instant::now() < deadline => {
-                    assert!(e.contains("in use"), "{e}");
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => panic!("store still locked 3s after close: {e}"),
-            }
-        };
+        let err = block_on(Blobs::open_within(&dir, Duration::from_millis(300)))
+            .expect_err("a second open must give up once the wait is over");
+        assert!(err.contains("in use by another process"), "{err}");
+
+        // A node restarted right after SIGTERM waits for the old one to close the store.
+        let start = std::time::Instant::now();
+        let closer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            blobs.close_blocking();
+        });
+        let reopened = Blobs::open_blocking(&dir).expect("the store is free once closed");
+        assert!(start.elapsed() >= Duration::from_millis(300));
+        closer.join().unwrap();
         reopened.close_blocking();
         let _ = fs::remove_dir_all(&dir);
     }
