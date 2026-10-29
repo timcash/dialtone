@@ -37,6 +37,13 @@ strip = "symbols"
 opt-level = 3
 [profile.dev.package.blake2]
 opt-level = 3
+# ... and so is hashing a binary as large as a debug build (the self-update tests).
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+[profile.dev.package.bao-tree]
+opt-level = 3
 
 # Published binaries (release.yml): smallest size, built only when a version is tagged.
 [profile.dist]

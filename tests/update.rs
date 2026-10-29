@@ -253,13 +253,49 @@ fn version_seen(port: u16, name: &str) -> String {
         .unwrap_or_default()
 }
 
+/// `until_ok`, but on timeout the panic shows the end of each node's log.
+fn wait(secs: u64, what: &str, logs: &[&Path], mut f: impl FnMut() -> bool) {
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(secs) {
+        if f() {
+            return;
+        }
+        sleep(Duration::from_millis(500));
+    }
+    let tails: Vec<String> = logs
+        .iter()
+        .map(|l| {
+            let text = fs::read_to_string(l).unwrap_or_default();
+            let lines: Vec<&str> = text.lines().filter(|l| !l.starts_with("[probe]")).collect();
+            format!(
+                "--- {}
+{}",
+                l.display(),
+                lines[lines.len().saturating_sub(40)..].join(
+                    "
+"
+                )
+            )
+        })
+        .collect();
+    panic!(
+        "{what} (gave up after {secs}s)
+{}",
+        tails.join(
+            "
+"
+        )
+    );
+}
+
 fn node_env<'a>(url: &'a str, key: &'a str) -> Vec<(&'a str, &'a str)> {
     vec![
         ("DIALTONE_RELEASE_URL", url),
         ("DIALTONE_RELEASE_PUBKEY", key),
         ("DIALTONE_UPDATE_CHECK_SECS", "3"),
         ("DIALTONE_TRIAL_MIN_SECS", "3"),
-        ("DIALTONE_TRIAL_DEADLINE_SECS", "20"),
+        // Debug builds start slowly on a busy CI runner.
+        ("DIALTONE_TRIAL_DEADLINE_SECS", "45"),
     ]
 }
 
@@ -275,10 +311,11 @@ fn update_keeps_a_healthy_release_and_rolls_back_bad_ones() {
     let state = t.join("u-a");
     let exe = install(&state);
     let original = sha_of(&exe);
+    let log = t.join("u-a.log");
     let _a = Service::start(
         &exe,
         &state,
-        &t.join("u-a.log"),
+        &log,
         18931,
         &[
             "up",
@@ -298,25 +335,37 @@ fn update_keeps_a_healthy_release_and_rolls_back_bad_ones() {
     let back_on_original = || sha_of(&exe) == original && get_json(18931, "/api/mesh").is_some();
 
     releases.publish("90.0.0", "DIALTONE-TEST-HANG");
-    until_ok(
-        120,
+    wait(
+        240,
         "a release that never gets healthy is rolled back",
+        &[&log],
         || is_bad(&state, "90.0.0"),
     );
-    until_ok(60, "the previous binary runs again", back_on_original);
+    wait(
+        120,
+        "the previous binary runs again",
+        &[&log],
+        back_on_original,
+    );
     println!("    1. A release that never got healthy was rolled back at its deadline");
 
     releases.publish("91.0.0", "DIALTONE-TEST-PANIC");
-    until_ok(
-        120,
+    wait(
+        240,
         "a release that panics when it starts is rolled back",
+        &[&log],
         || is_bad(&state, "91.0.0"),
     );
-    until_ok(60, "the previous binary runs again", back_on_original);
+    wait(
+        120,
+        "the previous binary runs again",
+        &[&log],
+        back_on_original,
+    );
     println!("    2. A release that panicked at start was rolled back after 3 starts");
 
     let good = releases.publish("92.0.0", "");
-    until_ok(120, "a healthy release is kept", || {
+    wait(240, "a healthy release is kept", &[&log], || {
         committed(&state) == "92.0.0"
     });
     assert_eq!(
@@ -330,7 +379,7 @@ fn update_keeps_a_healthy_release_and_rolls_back_bad_ones() {
         original,
         "the previous binary is not kept as dialtone.prev"
     );
-    until_ok(30, "u-a reports v92.0.0", || {
+    wait(60, "u-a reports v92.0.0", &[&log], || {
         version_seen(18931, "u-a") == "92.0.0"
     });
     assert!(is_bad(&state, "90.0.0") && is_bad(&state, "91.0.0"));
@@ -346,10 +395,11 @@ fn a_node_updates_from_a_peer_that_runs_the_release() {
     let key = releases.public_key();
     let (sa, sb) = (t.join("p-a"), t.join("p-b"));
     let (exe_a, exe_b) = (install(&sa), install(&sb));
+    let (la, lb) = (t.join("p-a.log"), t.join("p-b.log"));
     let _a = Service::start(
         &exe_a,
         &sa,
-        &t.join("p-a.log"),
+        &la,
         18932,
         &[
             "up",
@@ -389,7 +439,7 @@ fn a_node_updates_from_a_peer_that_runs_the_release() {
     let _b = Service::start(
         &exe_b,
         &sb,
-        &t.join("p-b.log"),
+        &lb,
         18933,
         &[
             "up",
@@ -403,19 +453,22 @@ fn a_node_updates_from_a_peer_that_runs_the_release() {
         ],
         &node_env("http://127.0.0.1:9", &key),
     );
-    until_ok(90, "p-a and p-b see each other", || {
+    wait(120, "p-a and p-b see each other", &[&la, &lb], || {
         !version_seen(18932, "p-b").is_empty() && !version_seen(18933, "p-a").is_empty()
     });
 
     let good = releases.publish("93.0.0", "");
-    until_ok(120, "p-a keeps the release from the server", || {
-        committed(&sa) == "93.0.0"
-    });
-    until_ok(180, "p-b keeps the release from p-a", || {
+    wait(
+        300,
+        "p-a keeps the release from the server",
+        &[&la, &lb],
+        || committed(&sa) == "93.0.0",
+    );
+    wait(300, "p-b keeps the release from p-a", &[&la, &lb], || {
         committed(&sb) == "93.0.0"
     });
     assert_eq!(sha_of(&exe_b), good);
-    let log = fs::read_to_string(t.join("p-b.log")).unwrap_or_default();
+    let log = fs::read_to_string(&lb).unwrap_or_default();
     assert!(
         log.contains("from peers"),
         "p-b did not get the binary from p-a:\n{log}"

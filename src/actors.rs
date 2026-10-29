@@ -1100,6 +1100,7 @@ impl Mesh {
                     let interval = beat_interval_for(nodes);
                     if interval != self.beat_interval_secs {
                         self.beat_interval_secs = interval;
+                        update::BEAT_INTERVAL_SECS.store(interval, std::sync::atomic::Ordering::Relaxed);
                         beat_tick = tokio::time::interval_at(
                             tokio::time::Instant::now() + Duration::from_secs(interval),
                             Duration::from_secs(interval),

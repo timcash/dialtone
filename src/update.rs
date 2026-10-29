@@ -41,13 +41,15 @@ pub const EXIT_RESTART: i32 = 75;
 pub const MAX_TRIAL_STARTS: u32 = 3;
 /// A trial binary must have run this long, healthy, to be kept.
 const TRIAL_MIN_UP: Duration = Duration::from_secs(60);
-/// ... and must get there within this long of starting.
+/// ... and must get there within this long of starting (or four beat intervals, if longer).
 const TRIAL_DEADLINE: Duration = Duration::from_secs(180);
 
 /// Gossip is joined (set by the Mesh actor).
 pub static READY: AtomicBool = AtomicBool::new(false);
 /// Current gossip neighbors (set by the Mesh actor).
 pub static NEIGHBORS: AtomicU64 = AtomicU64::new(0);
+/// The beat interval in seconds (set by the Mesh actor).
+pub static BEAT_INTERVAL_SECS: AtomicU64 = AtomicU64::new(5);
 static RUNNING_VERSION: OnceLock<String> = OnceLock::new();
 static RESTART: OnceLock<tokio_util::sync::CancellationToken> = OnceLock::new();
 static RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -188,6 +190,10 @@ pub struct Trial {
     pub starts: u32,
     /// Whether the old binary had gossip neighbors (the new one must get one).
     pub had_neighbors: bool,
+    /// The beat interval then: peers notice a node that restarted after three of them, so the
+    /// deadline is at least four.
+    #[serde(default)]
+    pub beat_interval_secs: u64,
     pub installed_unix: u64,
 }
 
@@ -378,7 +384,8 @@ pub fn on_start(paths: &Paths) {
 fn watch_trial(paths: &Paths, trial: &Trial) {
     let started = Instant::now();
     let min_up = env_secs("DIALTONE_TRIAL_MIN_SECS", TRIAL_MIN_UP);
-    let deadline = env_secs("DIALTONE_TRIAL_DEADLINE_SECS", TRIAL_DEADLINE);
+    let deadline = env_secs("DIALTONE_TRIAL_DEADLINE_SECS", TRIAL_DEADLINE)
+        .max(Duration::from_secs(4 * trial.beat_interval_secs));
     let hangs = test_marker(&paths.exe) == Some(TestMarker::Hang);
     loop {
         std::thread::sleep(Duration::from_millis(500));
@@ -502,6 +509,7 @@ pub fn install(
         sha256: sha,
         starts: 0,
         had_neighbors: NEIGHBORS.load(Ordering::Relaxed) > 0,
+        beat_interval_secs: BEAT_INTERVAL_SECS.load(Ordering::Relaxed),
         installed_unix: crate::now_unix(),
     });
     paths.save(&state)
