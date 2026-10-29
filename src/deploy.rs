@@ -3,21 +3,6 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-pub fn render_os_service_unit(os_kind: &str, program_path: &Path, node: &str) -> String {
-    let bin = program_path.display();
-    if os_kind == "macos" {
-        format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>com.timcash.dialtone</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>{bin}</string>\n    <string>up</string>\n    <string>--node</string>\n    <string>{node}</string>\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <true/>\n</dict>\n</plist>\n"
-        )
-    } else if os_kind == "windows" {
-        format!("@echo off\r\n\"{bin}\" up --node {node}\r\n")
-    } else {
-        format!(
-            "[Unit]\nDescription=Dialtone Iroh Mesh Daemon ({node})\nAfter=network-online.target\n\n[Service]\nEnvironmentFile=-/etc/dialtone/daemon.env\nExecStart={bin} up --node {node}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
-        )
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonInstallReport {
     pub status: String,

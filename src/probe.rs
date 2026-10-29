@@ -13,7 +13,9 @@
 //! - `STO`  a fresh blob is written to the store and read back intact;
 //! - `PUL`  up to `PULL_SAMPLE` peers each write a fresh blob on request (`fetch.rs`), and
 //!   it is pulled over QUIC and its SHA-256 verified;
-//! - `PRC`  the probe program, staged from the store, is running under the supervisor.
+//! - `PRC`  the probe program, staged from the store, is running under the supervisor;
+//! - `SEC`  config.json holds no plaintext secret, only keys derived with argon2id-v2, and
+//!   the node publishes itself to no public directory (Pkarr DNS, Mainline DHT).
 //!
 //! A compact report travels in the node's beats, so every HUD shows every node's results.
 //! Probe blobs are forgotten once verified (pulled) or a few runs old (own), so the store
@@ -24,7 +26,10 @@ use std::time::{Duration, Instant};
 
 use crate::api::NodeState;
 use crate::blob::{Blobs, Store};
-use crate::mesh::{now_unix, ProbeBeat, ProbeCheck, ProbePull, ProbeReport, DEFAULT_PEER_TTL_SECS};
+use crate::mesh::{
+    now_unix, MeshConfig, ProbeBeat, ProbeCheck, ProbePull, ProbeReport, DEFAULT_PEER_TTL_SECS,
+    KDF_VERSION_V2,
+};
 use crate::service::ProcessSpec;
 
 /// How often a running node probes the gossip mesh.
@@ -69,6 +74,10 @@ pub struct ProbeInputs {
     pub probe_program: Option<ProcessSpec>,
     /// Own probe blobs too old to keep.
     pub expired_blobs: Vec<String>,
+    /// How the endpoint looks up and publishes addresses (`IrohTransportDiagnostics`).
+    pub lookup_modes: Vec<String>,
+    /// The node's config.json, which `SEC` reads.
+    pub config_path: std::path::PathBuf,
 }
 
 /// A request to the Probe actor, answered on `reply`.
@@ -230,7 +239,8 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
     report
 }
 
-/// STO, PUL and PRC: the store, pulls from sampled peers and the probe program.
+/// STO, PUL, PRC and SEC: the store, pulls from sampled peers, the probe program and the
+/// node's secrets and privacy.
 fn full_checks(inputs: &ProbeInputs, checks: &mut Vec<ProbeCheck>, report: &mut ProbeReport) {
     // STO: write a blob nobody has seen before and read it back.
     let payload = format!(
@@ -342,6 +352,39 @@ fn full_checks(inputs: &ProbeInputs, checks: &mut Vec<ProbeCheck>, report: &mut 
         report.pid = p.pid;
         report.staged_path = p.path.clone();
     }
+
+    // SEC: read from disk, where a leaked secret would be.
+    let cfg = crate::mesh::load_mesh_config(&inputs.config_path);
+    let issues = security_issues(&cfg, &inputs.lookup_modes);
+    checks.push(ProbeCheck {
+        code: "SEC".to_string(),
+        ok: issues.is_empty(),
+        detail: if issues.is_empty() {
+            "no plaintext secret, argon2id-v2 keys, no public directory".to_string()
+        } else {
+            issues.join("; ")
+        },
+        ms: None,
+    });
+}
+
+/// What is wrong with a node's secrets and privacy, if anything.
+fn security_issues(cfg: &MeshConfig, lookup_modes: &[String]) -> Vec<String> {
+    let mut issues = Vec::new();
+    if cfg.secret_key.is_some() {
+        issues.push("plaintext secret in config.json".to_string());
+    }
+    if let Some(keys) = &cfg.derived_keys {
+        if keys.kdf_version != KDF_VERSION_V2 {
+            issues.push(format!("keys derived with {:?}", keys.kdf_version));
+        }
+    }
+    for mode in lookup_modes {
+        if mode == "dns-pkarr" || mode == "mainline-dht" {
+            issues.push(format!("publishes to {mode}"));
+        }
+    }
+    issues
 }
 
 /// The first few names, then how many more.
@@ -443,6 +486,8 @@ mod tests {
             peers,
             probe_program: Some(running_probe_program()),
             expired_blobs: Vec::new(),
+            lookup_modes: Vec::new(),
+            config_path: std::env::temp_dir().join("dialtone-probe-test-no-config.json"),
         }
     }
 
@@ -504,8 +549,8 @@ mod tests {
         let mut full = inputs(&blobs_a, Some(store_a.clone()), vec![b.clone()]);
         full.all = true;
         let report = run(full);
-        assert_eq!(report.passed_count, 6, "{:#?}", report.checks);
-        assert_eq!(report.total_count, 6);
+        assert_eq!(report.passed_count, 7, "{:#?}", report.checks);
+        assert_eq!(report.total_count, 7);
         assert!(report.pulls[0].ok && report.pulls[0].bytes > 0);
         // The pulled blob was verified, then forgotten: probes do not fill the store.
         assert!(!blobs_a.has_blocking(&offered.digest));
@@ -535,6 +580,21 @@ mod tests {
         blobs_b.close_blocking();
         let _ = std::fs::remove_dir_all(&dir_a);
         let _ = std::fs::remove_dir_all(&dir_b);
+    }
+
+    #[test]
+    fn security_flags_plaintext_secrets_old_keys_and_public_directories() {
+        let mut cfg = MeshConfig::default();
+        assert!(security_issues(&cfg, &["relay".to_string()]).is_empty());
+        cfg.secret_key = Some("dt-leaked".to_string());
+        cfg.derived_keys = Some(crate::mesh::ChannelKeysHex {
+            kdf_version: "argon2id-v1".to_string(),
+            topic_id_hex: String::new(),
+            auth_key_hex: String::new(),
+            enc_key_hex: String::new(),
+        });
+        let modes = ["dns-pkarr".to_string(), "mainline-dht".to_string()];
+        assert_eq!(security_issues(&cfg, &modes).len(), 4);
     }
 
     #[test]

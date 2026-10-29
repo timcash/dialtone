@@ -12,15 +12,15 @@ use dialtone::api::{
 };
 use dialtone::blob::{Blobs, Store};
 use dialtone::collect_node_diagnostics;
-use dialtone::deploy::{install_persistent_os_daemon, render_os_service_unit};
+use dialtone::deploy::install_persistent_os_daemon;
 use dialtone::mesh::{
     allow_peer_in_config_with_addrs, cached_local_public_ip_geo, default_arch, default_config_path,
     default_os, default_seeds, default_store_dir, derive_standby_topic_id,
-    detect_default_node_name, is_allowed_peer_in_list, load_mesh_config, new_secret,
-    node_capabilities_for, node_role_for, normalize_channel_name, now_unix, parse_duration_secs,
-    redeem_invite, revoke_peer_in_config, save_mesh_config, spawn_background_public_ip_geo_probe,
-    validate_secret, Beat, ChannelKeys, LiveAllowlist, MeshControlCommand, SeedList, StoreStats,
-    BEAT_INTERVAL_SECS, BEAT_SCHEMA, DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_INTERVAL_SECS,
+    detect_default_node_name, load_mesh_config, new_secret, node_capabilities_for, node_role_for,
+    normalize_channel_name, now_unix, parse_duration_secs, redeem_invite, revoke_peer_in_config,
+    save_mesh_config, spawn_background_public_ip_geo_probe, validate_secret, Beat, ChannelKeys,
+    LiveAllowlist, MeshControlCommand, SeedList, StoreStats, BEAT_INTERVAL_SECS, BEAT_SCHEMA,
+    DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
@@ -55,13 +55,10 @@ fn print_usage() {
          \x20 daemon [install|status]  install: put this binary in ~/.dialtone/bin, register the login\n\
          \x20                          service and start the node (a running one restarts into it)\n\
          \x20 probe [--all]            Run one probe now: the gossip checks (MSH, NBR, BEAT; nodes run them\n\
-         \x20                          every 30s), and with --all the store, pulls and programs (STO, PUL, PRC)\n\
+         \x20                          every 30s), and with --all the store, pulls, programs and security\n\
+         \x20                          (STO, PUL, PRC, SEC)\n\
          \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
-         \x20 mesh-test                Check the running node's security, mesh convergence and blob transfer\n\
-         \x20 hud                      Serve the HUD and API only (no mesh)\n\
-         \x20 node                     Run the node without the HUD or API\n\
          \x20 status                   Print this node's NodeId and transport report\n\
-         \x20 service                  Render OS login service unit (macos | linux | windows)\n\
          \x20 help                     Show this help\n\n\
          flags:\n\
          \x20 --node <name>            Node name (default: saved config or hostname)\n\
@@ -69,30 +66,21 @@ fn print_usage() {
          \x20 --api-token <token>      Explicit API bearer token for POST routes (default: ~/.dialtone/api-token)\n\
          \x20 --channel <name>         Channel name (default: dialtone)\n\
          \x20 --secret <secret>        Channel secret (or set DIALTONE_SECRET)\n\
-         \x20 --invite <invite>        Invite to redeem when joining (repeatable)\n\
          \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 7d; default: 24h)\n\
-         \x20 --peer <node_id>         Target NodeId for 'dialtone invite' or 'dialtone allowlist'\n\
          \x20 --addr <ip:port>         Direct address for 'dialtone allowlist add' (repeatable)\n\
-         \x20 --expect-peers <count>   Expected peer count for 'dialtone mesh-test'\n\
-         \x20 --timeout <duration>     Timeout for 'dialtone mesh-test' (default: 15s)\n\
          \x20 --force                  Pull over QUIC even if the blob is already in the store\n\
          \x20 --udp <ip:port>          'dialtone link': where the source sends (export) or packets go (import)\n\
          \x20 --tcp <ip:port>          'dialtone link': the service to connect to (export) or listen on (import)\n\
-         \x20 --install-daemon        Install the daemon so the node starts at login\n\
-         \x20 --no-tailnet             Exclude Tailscale (100.64.0.0/10 & fd7a:115c:a1e0::/48) and bind physical IPv4\n\
-         \x20 --allow-tailnet          Allow Tailscale interface addresses\n\
-         \x20 --private-mesh           Disable relays, Pkarr DNS, and Mainline DHT (direct static peer QUIC only)\n\
-         \x20 --quic-port <port>       Explicit UDP port to bind for the Iroh QUIC endpoint\n\
-         \x20 --lan                    Enable mDNS local discovery (lan_only profile)\n\
-         \x20 --dns                    Enable public Pkarr DNS lookup/publish (disabled by default)\n\
-         \x20 --dht                    Enable Mainline DHT address lookup (disabled by default)\n\
-         \x20 --no-dns                 Disable DNS/Pkarr lookup\n\
-         \x20 --no-relay               Disable Iroh relay servers\n\
-         \x20 --relay-only             Advertise relay-only gossip tickets\n\
-         \x20 --relay-url <url>        Custom Iroh relay URL (repeatable)\n\
-         \x20 --os <macos|linux|windows> Target OS for service unit generation\n\
-         \x20 --once                   Run one cycle and exit\n\
-         \x20 --all                    'dialtone probe': also test the store, pulls and programs"
+         \x20 --json                   Print JSON ('devices', 'invite', 'link list')\n\
+         \x20 --once                   'up': boot, beat once and exit; 'join': only join, start nothing\n\
+         \x20 --all                    'dialtone probe': also test the store, pulls, programs and security\n\n\
+         transport (the default: relays on, no public DNS or DHT, Tailscale addresses left out):\n\
+         \x20 --private-mesh           No relays: dial peers only at their direct addresses\n\
+         \x20 --relay-only             Advertise only the relay, no direct addresses\n\
+         \x20 --relay-url <url>        Use this Iroh relay instead of the public ones (repeatable)\n\
+         \x20 --quic-port <port>       Bind the QUIC endpoint to this UDP port\n\
+         \x20 --lan                    Also find peers on the local network (mDNS)\n\
+         \x20 --allow-tailnet          Also use Tailscale addresses"
     );
 }
 
@@ -105,7 +93,6 @@ struct CliOptions {
     api_token: Option<String>,
     channel: String,
     secret_key: Option<String>,
-    install_daemon: bool,
     daemon_subcmd: String,
     allowlist_subcmd: String,
     peer_target: Option<String>,
@@ -118,12 +105,9 @@ struct CliOptions {
     link_tcp: Option<String>,
     force: bool,
     json: bool,
-    expect_peers: Option<usize>,
-    timeout_secs: u64,
     invite_ttl_secs: u64,
     once: bool,
     all: bool,
-    os_kind: String,
     invites: Vec<String>,
     transport: IrohTransportConfig,
 }
@@ -160,7 +144,6 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             .filter(|s| !s.trim().is_empty()),
         channel: default_channel,
         secret_key: env_secret.or(saved.secret_key),
-        install_daemon: false,
         daemon_subcmd: "install".to_string(),
         allowlist_subcmd: "list".to_string(),
         peer_target: None,
@@ -173,18 +156,9 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         link_tcp: None,
         force: false,
         json: false,
-        expect_peers: None,
-        timeout_secs: 15,
         invite_ttl_secs: 86_400,
         once: false,
         all: false,
-        os_kind: if cfg!(target_os = "macos") {
-            "macos".to_string()
-        } else if cfg!(target_os = "windows") {
-            "windows".to_string()
-        } else {
-            "linux".to_string()
-        },
         invites: saved.invites,
         transport: IrohTransportConfig::default(),
     };
@@ -196,10 +170,6 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "help" | "-h" | "--help" => {
                 opts.action = "help".to_string();
                 return Ok(opts);
-            }
-            "mesh-test" if !action_set => {
-                opts.action = "mesh-test".to_string();
-                action_set = true;
             }
             "secret" if !action_set => {
                 opts.action = "secret".to_string();
@@ -263,7 +233,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.action = "invite".to_string();
                 action_set = true;
             }
-            "devices" | "device" if !action_set => {
+            "devices" if !action_set => {
                 opts.action = "devices".to_string();
                 action_set = true;
             }
@@ -307,7 +277,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     }
                 }
             }
-            cmd @ ("status" | "node" | "hud" | "probe" | "service") if !action_set => {
+            cmd @ ("status" | "probe") if !action_set => {
                 opts.action = cmd.to_string();
                 action_set = true;
             }
@@ -339,47 +309,16 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 let raw_ttl = args.get(idx).ok_or("missing --ttl value")?;
                 opts.invite_ttl_secs = parse_duration_secs(raw_ttl)?;
             }
-            "--timeout" => {
-                idx += 1;
-                let raw_to = args.get(idx).ok_or("missing --timeout value")?;
-                opts.timeout_secs = parse_duration_secs(raw_to)?;
-            }
-            "--expect-peers" => {
-                idx += 1;
-                let raw_ep = args.get(idx).ok_or("missing --expect-peers value")?;
-                opts.expect_peers = Some(
-                    raw_ep
-                        .parse::<usize>()
-                        .map_err(|e| format!("invalid --expect-peers value: {e}"))?,
-                );
-            }
             "--force" => {
                 opts.force = true;
             }
             "--json" => {
                 opts.json = true;
             }
-            "--peer" | "--endpoint-id" => {
-                idx += 1;
-                opts.peer_target = Some(args.get(idx).ok_or("missing --peer value")?.clone());
-            }
-            "--addr" | "--peer-addr" => {
+            "--addr" => {
                 idx += 1;
                 let addr = args.get(idx).ok_or("missing --addr value")?.clone();
                 opts.peer_addrs.push(addr);
-            }
-            "--install-daemon" | "--daemon" => {
-                opts.install_daemon = true;
-            }
-            "--invite" => {
-                idx += 1;
-                let t = args.get(idx).ok_or("missing --invite value")?.clone();
-                if !opts.invites.contains(&t) {
-                    opts.invites.push(t);
-                }
-            }
-            "--no-tailnet" => {
-                opts.transport.exclude_tailnet = true;
             }
             "--allow-tailnet" => {
                 opts.transport.exclude_tailnet = false;
@@ -395,31 +334,15 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     .map_err(|e| format!("invalid --quic-port value: {e}"))?;
                 opts.transport.quic_port = Some(port);
             }
-            "--os" => {
-                idx += 1;
-                opts.os_kind = args.get(idx).ok_or("missing --os value")?.clone();
-            }
             "--once" => {
                 opts.once = true;
             }
             "--all" => {
                 opts.all = true;
             }
-            "--lan" | "--local-discovery" => {
+            "--lan" => {
                 opts.transport.local_discovery = true;
                 opts.transport.profile = "lan_only".to_string();
-            }
-            "--dns" => {
-                opts.transport.dns_lookup = true;
-            }
-            "--dht" => {
-                opts.transport.dht_lookup = true;
-            }
-            "--no-dns" => {
-                opts.transport.dns_lookup = false;
-            }
-            "--no-relay" => {
-                opts.transport.relay_mode = IrohRelayPolicy::Disabled;
             }
             "--relay-only" => {
                 opts.transport.relay_mode = IrohRelayPolicy::RelayOnly;
@@ -755,10 +678,10 @@ fn install_and_start(opts: &CliOptions) -> Result<(), String> {
     Ok(())
 }
 
-async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> {
-    // Only the node that owns the state dir cleans its run dir and updates itself: `hud` and
-    // one-shot runs may share it with a running node.
-    let owns_run_dir = serve_http && opts.action != "hud" && !opts.once;
+async fn run_node(mut opts: CliOptions) -> Result<(), String> {
+    // Only the node that owns the state dir cleans its run dir and updates itself: one-shot
+    // runs may share it with a running node.
+    let owns_run_dir = !opts.once;
     let update_paths = dialtone::update::Paths::current().ok();
     let auto_update = owns_run_dir && update_paths.as_ref().is_some_and(dialtone::update::enabled);
     if auto_update {
@@ -766,12 +689,11 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             dialtone::update::on_start(p);
         }
     }
-    let verbose_boot = serve_http || !opts.once;
     let config_path = default_config_path();
     let blob_dir = default_store_dir();
-    // `index` previews and one-shot runs may share the state dir with a running daemon,
-    // which owns the store; they get a private one instead.
-    let blobs = if opts.action == "hud" || opts.once {
+    // One-shot runs may share the state dir with a running node, which owns the store; they
+    // get a private one instead.
+    let blobs = if opts.once {
         Blobs::open_or_private(&blob_dir).await?
     } else {
         Blobs::open(&blob_dir).await?
@@ -788,9 +710,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         spawn_background_public_ip_geo_probe();
     }
 
-    if serve_http {
-        validate_listen_addr_security(&opts.listen, opts.api_token.is_some())?;
-    }
+    validate_listen_addr_security(&opts.listen, opts.api_token.is_some())?;
 
     // =========================================================================
     // [BOOT 1/5] Local Runtime, Config & Stdout Logger
@@ -836,29 +756,12 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     };
     let has_mesh_credentials = active_keys.is_some();
 
-    if opts.install_daemon {
-        if let Ok(rep) =
-            install_persistent_os_daemon(&opts.node, &opts.listen, validated_secret.as_deref())
-        {
-            saved_cfg.daemon_installed = true;
-            saved_cfg.daemon_service_path = Some(rep.service_unit_path.clone());
-            if verbose_boot {
-                println!(
-                    "[DAEMON] Persistent OS service installed: {}",
-                    rep.instructions
-                );
-            }
-        }
-    }
-
-    if verbose_boot {
-        println!(
-            "[BOOT 1/5] Local Runtime & Stdout Logger ................. [READY] (node={}, os={}/{})",
-            opts.node,
-            default_os(),
-            default_arch()
-        );
-    }
+    println!(
+        "[BOOT 1/5] Local Runtime & Stdout Logger ................. [READY] (node={}, os={}/{})",
+        opts.node,
+        default_os(),
+        default_arch()
+    );
 
     // =========================================================================
     // [BOOT 2/5] Local Web HUD & Configuration Console (starts FIRST!)
@@ -887,7 +790,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         advertised_ip_addrs: Vec::new(),
     };
 
-    let shared_state: Option<Arc<Mutex<NodeState>>> = if serve_http {
+    let shared_state: Option<Arc<Mutex<NodeState>>> = {
         // Persist the requested address, not an auto-fallback port that was only free this boot.
         let requested_listen = opts.listen.clone();
         let listener = bind_local_web_listener(&opts.listen, opts.listen_explicit)?;
@@ -927,8 +830,8 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         saved_cfg.channel_fingerprint = fp;
         saved_cfg.invites = opts.invites.clone();
         saved_cfg.updated_at_unix = now_unix();
-        // `index` is a read-only hud preview: never overwrite the daemon's saved config.
-        if opts.action != "hud" {
+        // A one-shot run may share the state dir with a running node: it leaves the config alone.
+        if !opts.once {
             let _ = save_mesh_config(&config_path, &saved_cfg);
         }
         runtime_state.mesh_config = saved_cfg.clone();
@@ -973,11 +876,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
         }
 
         let state = Arc::new(Mutex::new(runtime_state));
-        let max_reqs = if opts.once { Some(1) } else { None };
-        if opts.action == "hud" {
-            println!("index listening {local_web_url}");
-            return serve_http_blocking(listener, state, max_reqs);
-        }
         let state_for_http = Arc::clone(&state);
         std::thread::spawn(move || {
             let _ = serve_http_blocking(listener, state_for_http, None);
@@ -997,8 +895,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             "================================================================================"
         );
         Some(state)
-    } else {
-        None
     };
 
     // =========================================================================
@@ -1016,12 +912,10 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             &probe_sha[..18]
         ),
     );
-    if verbose_boot {
-        println!(
-            "[BOOT 3/5] Content-Addressed Blob Store (iroh-blobs) ..... [READY] {} (stage blobs via Web UI or POST /api/blob)",
-            blobs.dir().display()
-        );
-    }
+    println!(
+        "[BOOT 3/5] Content-Addressed Blob Store (iroh-blobs) ..... [READY] {} (stage blobs via Web UI or POST /api/blob)",
+        blobs.dir().display()
+    );
 
     // =========================================================================
     // [BOOT 4/5] Iroh 1.3 QUIC Endpoint & Non-Tailnet Physical NIC
@@ -1135,16 +1029,14 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                 .unwrap_or("LAN/WAN")
         ),
     );
-    if verbose_boot {
-        println!(
-            "[BOOT 4/5] Iroh 1.3 QUIC Endpoint (No-Tailnet NIC) ....... [READY] id={}.. ip={}",
-            &node_id[..16],
-            diagnostics
-                .bound_non_tailnet_ipv4
-                .as_deref()
-                .unwrap_or("LAN/WAN")
-        );
-    }
+    println!(
+        "[BOOT 4/5] Iroh 1.3 QUIC Endpoint (No-Tailnet NIC) ....... [READY] id={}.. ip={}",
+        &node_id[..16],
+        diagnostics
+            .bound_non_tailnet_ipv4
+            .as_deref()
+            .unwrap_or("LAN/WAN")
+    );
 
     // =========================================================================
     // [BOOT 5/5] Gossip Mesh & Channel Secret (iroh-gossip)
@@ -1307,14 +1199,12 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                 seed_ids.len()
             ),
         );
-        if verbose_boot {
-            println!(
-                "[BOOT 5/5] Gossip Mesh & Channel Secret ................ [READY] channel={} fp={} peers={}",
-                active_channel,
-                channel_fp,
-                seed_ids.len()
-            );
-        }
+        println!(
+            "[BOOT 5/5] Gossip Mesh & Channel Secret ................ [READY] channel={} fp={} peers={}",
+            active_channel,
+            channel_fp,
+            seed_ids.len()
+        );
     } else {
         update_boot_stage(
             &shared_state,
@@ -1325,14 +1215,12 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
                 active_channel, local_web_url
             ),
         );
-        if verbose_boot {
-            println!("[BOOT 5/5] Gossip Mesh & Channel Secret ................ [SECRET REQUIRED]");
-            println!(
-                "           -> Enter the '{}' channel secret in the Web UI at {}",
-                active_channel, local_web_url
-            );
-            println!("           -> Or run in terminal: dialtone join <SECRET>");
-        }
+        println!("[BOOT 5/5] Gossip Mesh & Channel Secret ................ [SECRET REQUIRED]");
+        println!(
+            "           -> Enter the '{}' channel secret in the Web UI at {}",
+            active_channel, local_web_url
+        );
+        println!("           -> Or run in terminal: dialtone join <SECRET>");
     }
 
     if opts.once {
@@ -1386,7 +1274,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             topic_id,
             seed_ids,
             known_peer_addrs,
-            print_first_beat: !serve_http,
             update: update_paths.clone().filter(|_| auto_update),
             control_rx,
         },
@@ -1677,238 +1564,6 @@ async fn main() {
             println!("{}", serde_json::to_string_pretty(&resp).unwrap());
             Ok(())
         })(),
-        "mesh-test" => (|| -> Result<(), String> {
-            let api_token = opts
-                .api_token
-                .clone()
-                .or_else(|| load_or_create_api_token().ok())
-                .unwrap_or_default();
-            let cfg_disk = load_mesh_config(&default_config_path());
-            let boot_deadline =
-                std::time::Instant::now() + Duration::from_secs(opts.timeout_secs.max(1));
-            let config_resp = loop {
-                let resp = local_daemon_http_json(
-                    &opts.listen,
-                    "GET",
-                    "/api/config",
-                    None,
-                    &api_token,
-                    5,
-                )?;
-                let stages = resp
-                    .get("boot_stages")
-                    .and_then(|v| v.as_array())
-                    .ok_or("missing boot_stages in /api/config")?;
-                if stages.len() >= 5
-                    && stages
-                        .iter()
-                        .all(|s| s.get("status").and_then(|v| v.as_str()) == Some("ready"))
-                {
-                    break resp;
-                }
-                if std::time::Instant::now() >= boot_deadline {
-                    return Err(format!("not all 5 boot stages are ready: {stages:?}"));
-                }
-                std::thread::sleep(Duration::from_millis(400));
-            };
-
-            if cfg_disk.secret_key.is_some() {
-                return Err(
-                    "security check failed: plaintext secret_key present in config.json"
-                        .to_string(),
-                );
-            }
-            let kdf_ver = cfg_disk
-                .derived_keys
-                .as_ref()
-                .map(|k| k.kdf_version.as_str())
-                .unwrap_or("");
-            if kdf_ver != "argon2id-v2" {
-                return Err(format!(
-                    "security check failed: expected derived_keys.kdf_version == 'argon2id-v2', got {kdf_ver:?}"
-                ));
-            }
-
-            let lookup_modes: Vec<String> = config_resp
-                .get("iroh_runtime")
-                .and_then(|r| r.get("address_lookup_modes"))
-                .and_then(|m| m.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let public_directory_exposed = lookup_modes
-                .iter()
-                .any(|m| m == "dns-pkarr" || m == "mainline-dht");
-            if public_directory_exposed {
-                return Err(format!(
-                    "privacy check failed: public directory lookup/publishing active ({lookup_modes:?})"
-                ));
-            }
-
-            let own_ep_id = config_resp
-                .get("iroh_runtime")
-                .and_then(|r| r.get("node_id"))
-                .and_then(|v| v.as_str());
-            let expected_peers = opts
-                .expect_peers
-                .unwrap_or_else(|| cfg_disk.allowlist.len().max(1));
-            let deadline =
-                std::time::Instant::now() + Duration::from_secs(opts.timeout_secs.max(1));
-            let (converged_nodes, mesh_rtt_ms) = loop {
-                let state_resp =
-                    local_daemon_http_json(&opts.listen, "GET", "/api/state", None, &api_token, 5)?;
-                let nodes = state_resp
-                    .get("nodes")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let rtt_matrix = state_resp
-                    .get("mesh_rtt_ms")
-                    .and_then(|v| v.as_object())
-                    .cloned()
-                    .unwrap_or_default();
-                let mut valid_peers = Vec::new();
-                let mut all_stats_real = true;
-                for n in &nodes {
-                    let ep_id = n.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
-                    let tailnet_used = n
-                        .get("tailnet_used")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    // Peers only reach node state after their beat's signature verified.
-                    if is_allowed_peer_in_list(&cfg_disk.allowlist, ep_id, own_ep_id)
-                        && (!opts.transport.exclude_tailnet || !tailnet_used)
-                    {
-                        let hr = n.get("stats").cloned().unwrap_or(json!({}));
-                        let disk_used = hr
-                            .get("disk_used_bytes")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let disk_total = hr
-                            .get("disk_total_bytes")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let mem_total = hr
-                            .get("mem_total_bytes")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let is_fake_disk = disk_used == 120 * 1024 * 1024 * 1024
-                            && disk_total == 512 * 1024 * 1024 * 1024;
-                        if disk_total == 0 || mem_total == 0 || is_fake_disk {
-                            all_stats_real = false;
-                        }
-                        if n.get("summary_stats").is_none()
-                            || n.get("summary_stats").map(|v| v.is_null()).unwrap_or(true)
-                        {
-                            all_stats_real = false;
-                        }
-                        valid_peers.push(json!({
-                            "node": n.get("node"),
-                            "os": n.get("os"),
-                            "arch": n.get("arch"),
-                            "node_id": ep_id,
-                            "counter": n.get("counter"),
-                            "kind": n.get("kind"),
-                            "beat_interval_secs": n.get("beat_interval_secs"),
-                            "summary_interval_secs": n.get("summary_interval_secs"),
-                            "updated_at_unix": n.get("updated_at_unix"),
-                            "observed_remote_addrs": n.get("observed_remote_addrs"),
-                            "tailnet_used": tailnet_used,
-                            "peer_rtt_ms": n.get("peer_rtt_ms"),
-                            "geo_location": n.get("geo_location"),
-                            "processes": n.get("processes"),
-                            "probe": n.get("probe"),
-                            "stats": {
-                                "cpu_cores": hr.get("cpu_cores"),
-                                "cpu_percent": hr.get("cpu_percent"),
-                                "mem_percent": hr.get("mem_percent"),
-                                "mem_used_bytes": hr.get("mem_used_bytes"),
-                                "mem_total_bytes": hr.get("mem_total_bytes"),
-                                "disk_percent": hr.get("disk_percent"),
-                                "disk_used_bytes": hr.get("disk_used_bytes"),
-                                "disk_total_bytes": hr.get("disk_total_bytes")
-                            },
-                            "summary_stats": n.get("summary_stats")
-                        }));
-                    }
-                }
-                let rtt_ready =
-                    expected_peers <= 1 || rtt_matrix.len() >= expected_peers.saturating_sub(1);
-                if valid_peers.len() >= expected_peers && all_stats_real && rtt_ready {
-                    break (valid_peers, serde_json::Value::Object(rtt_matrix));
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Err(format!(
-                        "mesh convergence timed out after {}s: expected {} allowlisted peers with real stats & RTT, observed {} peers (all_stats_real={}, rtt_pairs={})",
-                        opts.timeout_secs,
-                        expected_peers,
-                        valid_peers.len(),
-                        all_stats_real,
-                        rtt_matrix.len()
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(500));
-            };
-
-            let probe_payload = format!("dialtone-mesh-test-probe-{}-{}", opts.node, now_unix());
-            let share_resp = local_daemon_http_json(
-                &opts.listen,
-                "POST",
-                "/api/blob/share",
-                Some(&json!({
-                    "bytes_base64": dialtone::base64_encode(probe_payload.as_bytes())
-                })),
-                &api_token,
-                10,
-            )?;
-            let ticket_uri = share_resp
-                .get("ticket_uri")
-                .and_then(|v| v.as_str())
-                .ok_or("missing ticket_uri from POST /api/blob/share")?;
-            let pull_resp = local_daemon_http_json(
-                &opts.listen,
-                "POST",
-                "/api/blob/pull",
-                Some(&json!({
-                    "ticket_uri": ticket_uri,
-                    "force": true
-                })),
-                &api_token,
-                15,
-            )?;
-
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&json!({
-                    "schema": "dialtone.mesh_test.v1",
-                    "status": "ok",
-                    "node": config_resp.get("node"),
-                    "channel_fingerprint": cfg_disk.channel_fingerprint,
-                    "kdf_version": kdf_ver,
-                    "beat_interval_secs": BEAT_INTERVAL_SECS,
-                    "summary_interval_secs": SUMMARY_INTERVAL_SECS,
-                    "real_stats_verified": true,
-                    "summary_stats_verified": true,
-                    "public_directory_publishing": false,
-                    "address_lookup_modes": lookup_modes,
-                    "expected_peers": expected_peers,
-                    "converged_peers": converged_nodes.len(),
-                    "mesh_rtt_ms": mesh_rtt_ms,
-                    "nodes": converged_nodes,
-                    "blob_round_trip": {
-                        "digest": pull_resp.get("digest"),
-                        "method": pull_resp.get("method"),
-                        "transferred_bytes": pull_resp.get("transferred_bytes"),
-                        "ticket_uri": ticket_uri
-                    }
-                }))
-                .unwrap()
-            );
-            Ok(())
-        })(),
         "invite" => (|| -> Result<(), String> {
             // The running node makes the invite: it is the member a new node presents it to.
             let cfg = load_mesh_config(&default_config_path());
@@ -1997,7 +1652,7 @@ async fn main() {
                 .or_else(|| opts.invites.first().cloned())
             else {
                 eprintln!(
-                    "dialtone: usage: dialtone join <SECRET> [--channel dialtone] [--invite <INVITE>] [--listen 127.0.0.1:8788]"
+                    "dialtone: usage: dialtone join <SECRET> [--channel dialtone] [--listen 127.0.0.1:8788]"
                 );
                 std::process::exit(2);
             };
@@ -2093,7 +1748,7 @@ async fn main() {
                     "[JOIN] Derived & saved v2 channel subkeys for '{}' channel ({}) — booting dialtone daemon & local Web HUD...",
                     channel, fp
                 );
-                run_node(opts, true).await
+                run_node(opts).await
             }
         }
         "daemon" => {
@@ -2131,15 +1786,7 @@ async fn main() {
                 .unwrap()
             );
         }),
-        "service" => {
-            let exe =
-                env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/dialtone"));
-            let unit = render_os_service_unit(&opts.os_kind, &exe, &opts.node);
-            println!("{unit}");
-            Ok(())
-        }
-        "node" => run_node(opts, false).await,
-        "up" | "hud" => run_node(opts, true).await,
+        "up" => run_node(opts).await,
         other => Err(format!("unsupported action {other:?}")),
     };
 

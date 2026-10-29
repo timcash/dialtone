@@ -13,20 +13,23 @@ Running `dialtone` with no arguments boots in dependency order and prints the lo
 
 actions:
   up                       Start the node: HUD -> store -> Iroh QUIC -> mesh
-  join <secret>            Unlock and join a channel with its secret
+  join <invite>            Join a channel with an invite from any member (dialtone-invite-v2:...),
+                           install this binary and start the node at login (--once: only join)
+  join <secret>            Unlock (or start) a channel with its secret
   secret                   Generate a new channel secret (dt-...)
   allowlist [list|add|remove] [<node_id>] Manage the allowlist in ~/.dialtone/config.json
   blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket
-  invite [--ttl 15m]       Mint a signed, expiring, single-use invite
-  daemon [install|status]  Install or inspect the daemon that starts the node at login
+  link export <name> --udp|--tcp <ip:port>    Offer a local source to peers over a direct link
+  link import <node>/<name> --udp|--tcp <ip:port>  Open a peer's source and deliver it here
+  link [list|close <id>]   Show links (path direct or relay, Rtt, packets), or close one
+  invite [--ttl 24h]       Make an invite any node can join with until it expires (max 30d)
+  daemon [install|status]  install: put this binary in ~/.dialtone/bin, register the login
+                           service and start the node (a running one restarts into it)
   probe [--all]            Run one probe now: the gossip checks (MSH, NBR, BEAT; nodes run them
-                           every 30s), and with --all the store, pulls and programs (STO, PUL, PRC)
+                           every 30s), and with --all the store, pulls, programs and security
+                           (STO, PUL, PRC, SEC)
   devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)
-  mesh-test                Check the running node's security, mesh convergence and blob transfer
-  hud                      Serve the HUD and API only (no mesh)
-  node                     Run the node without the HUD or API
   status                   Print this node's NodeId and transport report
-  service                  Render OS login service unit (macos | linux | windows)
   help                     Show this help
 
 flags:
@@ -35,28 +38,22 @@ flags:
   --api-token <token>      Explicit API bearer token for POST routes (default: ~/.dialtone/api-token)
   --channel <name>         Channel name (default: dialtone)
   --secret <secret>        Channel secret (or set DIALTONE_SECRET)
-  --invite <invite>        Invite to redeem when joining (repeatable)
-  --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 300s; default: 15m)
-  --peer <node_id>         Target NodeId for 'dialtone invite' or 'dialtone allowlist'
+  --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 7d; default: 24h)
   --addr <ip:port>         Direct address for 'dialtone allowlist add' (repeatable)
-  --expect-peers <count>   Expected peer count for 'dialtone mesh-test'
-  --timeout <duration>     Timeout for 'dialtone mesh-test' (default: 15s)
   --force                  Pull over QUIC even if the blob is already in the store
-  --install-daemon         Install the daemon so the node starts at login
-  --no-tailnet             Exclude Tailscale (100.64.0.0/10 & fd7a:115c:a1e0::/48) and bind physical IPv4
-  --allow-tailnet          Allow Tailscale interface addresses
-  --private-mesh           Disable relays, Pkarr DNS, and Mainline DHT (direct static peer QUIC only)
-  --quic-port <port>       Explicit UDP port to bind for the Iroh QUIC endpoint
-  --lan                    Enable mDNS local discovery (lan_only profile)
-  --dns                    Enable public Pkarr DNS lookup/publish (disabled by default)
-  --dht                    Enable Mainline DHT address lookup (disabled by default)
-  --no-dns                 Disable DNS/Pkarr lookup
-  --no-relay               Disable Iroh relay servers
-  --relay-only             Advertise relay-only gossip tickets
-  --relay-url <url>        Custom Iroh relay URL (repeatable)
-  --os <macos|linux|windows> Target OS for service unit generation
-  --once                   Run one cycle and exit
-  --all                    'dialtone probe': also test the store, pulls and programs
+  --udp <ip:port>          'dialtone link': where the source sends (export) or packets go (import)
+  --tcp <ip:port>          'dialtone link': the service to connect to (export) or listen on (import)
+  --json                   Print JSON ('devices', 'invite', 'link list')
+  --once                   'up': boot, beat once and exit; 'join': only join, start nothing
+  --all                    'dialtone probe': also test the store, pulls, programs and security
+
+transport (the default: relays on, no public DNS or DHT, Tailscale addresses left out):
+  --private-mesh           No relays: dial peers only at their direct addresses
+  --relay-only             Advertise only the relay, no direct addresses
+  --relay-url <url>        Use this Iroh relay instead of the public ones (repeatable)
+  --quic-port <port>       Bind the QUIC endpoint to this UDP port
+  --lan                    Also find peers on the local network (mDNS)
+  --allow-tailnet          Also use Tailscale addresses
 ```
 
 HUD keys (at http://127.0.0.1:8788):
@@ -130,8 +127,8 @@ curl.exe -fsSLo dialtone.exe https://github.com/timcash/dialtone/releases/latest
 # Install this binary as a user-level OS service (launchd / systemd --user / Windows logon task) and start it
 ./dialtone daemon install
 
-# Check the running node: security, mesh convergence and a live blob transfer
-./dialtone mesh-test --expect-peers 1
+# Check the running node: mesh, beats, store, pulls from peers, programs and security
+./dialtone probe --all
 ```
 
 ---
@@ -162,7 +159,7 @@ Running `./dialtone` (with no arguments, or `./dialtone up`) boots 5 subsystems 
 ```
 
 - **Port Auto-Fallback**: Defaults to `127.0.0.1:8788` (override with `--listen <ip:port>`). If `8788` is in use and `--listen` was not explicitly forced, `dialtone` automatically scans `127.0.0.1:8788..=8799` (falling back to an OS-assigned port).
-- **HUD-only mode**: Run `./dialtone hud --listen 127.0.0.1:8788` to run only the HTTP HUD and state API server without spawning the live gossip loop.
+- **One-shot run**: `./dialtone up --once` boots, prints one beat and exits. Next to a running node it uses a private store and leaves the config alone.
 
 ---
 
@@ -206,7 +203,7 @@ A channel whose nodes have an **empty allowlist** is open: any node holding the 
    ./dialtone join "dialtone-invite-v2:..." --node node-beta
    ```
 
-**How an invite works.** `dialtone invite` asks the running node for one (`POST /api/invites`). It names the channel, an expiry and that node (its NodeId, home relay and direct addresses), under a MAC with the channel's `auth_key`; it carries **no keys**. `dialtone join <invite>` opens one QUIC stream to that node (ALPN `dialtone/join/1`) and presents it; the node checks the MAC and the expiry and answers with the channel keys and itself as a seed. The QUIC handshake proves the answer comes from the NodeId the invite names. The joining node saves the keys (`config.json`, `0600`), clears any allowlist and starts.
+**How an invite works.** `dialtone invite` asks the running node for one (`POST /api/invites`). It names the channel, an expiry and up to four members to present it to (that node, then its seeds; each with its NodeId, home relay and direct addresses), under a MAC with the channel's `auth_key`; it carries **no keys**. `dialtone join <invite>` opens one QUIC stream to the first named member that answers (ALPN `dialtone/join/1`) and presents it; the member checks the MAC and the expiry and answers with the channel keys and the same list of seeds. So an invite works while any one of its members is up. The QUIC handshake proves the answer comes from the NodeId the invite names. The joining node saves the keys (`config.json`, `0600`), clears any allowlist and starts.
 
 - An invite works for any number of nodes until it expires, then for none. Make a new one with `dialtone invite`.
 - The node that made the invite must be online when someone joins with it.
@@ -291,11 +288,10 @@ The `"dialtone"` channel (and any custom `--channel <name>`) is **secret-protect
     ./dialtone allowlist add <node_id> --addr 192.168.1.50:19440
     ./dialtone allowlist remove <node_id>
     ```
-- **Expiring, Single-Use invites (`invite`)**:
-  - Mint a signed, time-limited, single-use invite (`dialtone-invite-v1:...`) that automatically authorizes the peer upon redemption:
+- **Expiring invites (`invite`)**:
+  - The running node makes an invite (`dialtone-invite-v2:...`) that any node can join with until it expires:
     ```bash
     ./dialtone invite --ttl 15m
-    ./dialtone invite --ttl 15m --peer <target_node_id>
     ```
 
 ```bash
@@ -327,38 +323,25 @@ curl -X POST http://127.0.0.1:8788/api/mesh/join \
   -d '{"channel":"dialtone","secret":"dt-...","node":"node-alpha"}'
 ```
 
-### Headless Peer Mode (`node`) & Transport Inspection (`status`)
+### Transport Inspection (`status`)
 
 ```bash
-# Run a headless Iroh 1.3 gossip + blob peer (no HTTP server)
-./dialtone node --node node-alpha --channel dialtone --secret <secret>
-
-# Emit one beat JSON payload and exit
-./dialtone node --node node-alpha --no-dns --no-relay --once
-
 # Bind persistent Ed25519 identity (~/.dialtone/iroh-secret-key) and print transport diagnostics
 ./dialtone status --node node-alpha
 ```
 
 ### Transport & Discovery Flags
 
-By default, `dialtone` uses **zero public directory publishing** (`dns-pkarr` and `mainline-dht` are disabled unless `--dns` or `--dht` is explicitly passed), so node `NodeId`s and IP addresses are never published to public DNS or DHT directories.
+A node never publishes itself to a public directory (Pkarr DNS or Mainline DHT), so its `NodeId` and IP addresses never appear there; the full probe's `SEC` check fails if it ever does. By default it uses the public Iroh relays and leaves Tailscale addresses (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) out of what it advertises, binding QUIC to the primary physical IPv4 interface.
 
 | Flag | Behavior |
 | :--- | :--- |
-| `--no-tailnet` | **(Default)** Strips Tailscale IPv4 (`100.64.0.0/10`) and IPv6 (`fd7a:115c:a1e0::/48`) addresses from advertised tickets and binds the QUIC socket to the primary physical non-Tailnet IPv4 interface. |
-| `--allow-tailnet` | Permits Tailscale interface addresses in advertised endpoints. |
-| `--private-mesh` | Zero-internet private mesh: disables public relays, DNS/Pkarr and Mainline DHT; peers are dialed at the direct `ip:port` addresses from `allowlist add --addr` or invites. |
+| `--private-mesh` | No relays: peers are dialed only at the direct `ip:port` addresses from `allowlist add --addr` or invites. |
+| `--relay-only` | Strips direct IP addresses from tickets so traffic goes only through the relay (`relay_only` profile). |
+| `--relay-url <url>` | Uses this Iroh relay instead of the public ones (repeatable). |
 | `--quic-port <port>` | Binds the Iroh QUIC UDP socket to a fixed port (e.g. `19440`) so peers can dial it directly. |
-| `--lan` / `--local-discovery` | Enables zero-conf mDNS local network discovery (`lan_only` profile). |
-| `--dns` | Explicitly enables public Pkarr DNS address lookup/publishing (`dns.iroh.link`). |
-| `--dht` | Explicitly enables Mainline BitTorrent DHT address publication and lookup. |
-| `--no-dns` | Keeps DNS/Pkarr address lookup disabled (default). |
-| `--no-relay` | Disables Iroh relay servers (direct UDP/QUIC only). |
-| `--relay-only` | Strips direct IP addresses from tickets so traffic routes strictly via relay (`relay_only` profile). |
-| `--relay-url <url>` | Adds a custom Iroh relay server URL (repeatable). |
-| `--invite <t>` | Redeems a `dialtone-invite-v1:` invite or adds a seed list when joining (repeatable). |
-| `--api-token <token>` | Sets an explicit bearer token for `POST` routes on the HTTP control API. |
+| `--lan` | Also finds peers on the local network with mDNS (`lan_only` profile). |
+| `--allow-tailnet` | Also advertises Tailscale interface addresses. |
 
 ---
 
@@ -369,9 +352,6 @@ By default, `dialtone` uses **zero public directory publishing** (`dns-pkarr` an
 ```bash
 # Copy binary to ~/.dialtone/bin/ and register OS login service
 ./dialtone daemon install
-
-# Or install inline while booting
-./dialtone up --secret "<CHANNEL_PW>" --install-daemon
 
 # Check installation status and saved configuration
 ./dialtone daemon status
@@ -395,21 +375,11 @@ A node that runs from `~/.dialtone/bin` (every service install does) updates its
 
 `DIALTONE_AUTO_UPDATE=0` turns it off. A binary run from anywhere else (a development build) never replaces itself. `./dialtone.sh test --only probes` shows the version every test VM runs. `./dialtone.sh test --only rejoin` checks the whole path on the live channel: a node on the previous signed release joins by invite, goes away and rejoins, hears of the newest release in a peer's beat, installs it, restarts and keeps it (about two minutes on the test VMs).
 
-### Render Service Unit Templates (`service`)
-
-To preview or pipe service definitions for system-wide deployment:
-
-```bash
-./dialtone service --os macos --node node-alpha
-./dialtone service --os linux --node node-alpha
-./dialtone service --os windows --node node-beta
-```
-
 ---
 
 ## 6. Blob Store
 
-The store is an iroh-blobs `FsStore` in `~/.dialtone/blobs/` (`blobs.db`, `data/`). Every blob is named by its digest through the tag `sha256/<hex>`, which points at its BLAKE3 hash; tagged blobs are kept and garbage collection removes anything untagged (such as an interrupted download). Uploads are checked against their SHA-256 before they are added, and a pulled blob is checked against the ticket's digest before it is tagged. Blobs left in the old one-file-per-digest layout are imported the first time the node starts. A store belongs to one process: `dialtone hud` and one-shot runs next to a running node use a private temporary store.
+The store is an iroh-blobs `FsStore` in `~/.dialtone/blobs/` (`blobs.db`, `data/`). Every blob is named by its digest through the tag `sha256/<hex>`, which points at its BLAKE3 hash; tagged blobs are kept and garbage collection removes anything untagged (such as an interrupted download). Uploads are checked against their SHA-256 before they are added, and a pulled blob is checked against the ticket's digest before it is tagged. Blobs left in the old one-file-per-digest layout are imported the first time the node starts. A store belongs to one process: one-shot runs (`--once`) next to a running node use a private temporary store.
 
 ### Store, Fetch & Verify Blobs via HTTP
 
@@ -477,6 +447,7 @@ Gossip is routed the way [libp2p GossipSub](https://docs.libp2p.io/concepts/pubs
 - **Peer scores.** As in GossipSub, each node scores its peers: credit for messages a neighbor delivered, a squared penalty for invalid frames it delivered. Below −20 a peer is graylisted: what it delivers is dropped, it is not joined, and the node joins other peers when it has fewer than two good neighbors. Failed fetches are counted apart: three recent ones make the node fetch from other peers for a while, never graylist (a restarting peer fails fetches without misbehaving). Every counter decays each beat. `GET /api/net` lists the scores.
 - **Details on focus.** What beats leave out (devices, the full probe report, processes with their status, services, the rolling summary, store, full stats and transport) is fetched for the node a HUD focuses (`GET /api/details?node_id=…`, which asks that node over `dialtone/fetch/1` and keeps the answer for 10s).
 - **Peers that go silent are forgotten.** A peer pruned from the mesh is no longer a join candidate (seeds stay), so a node short of neighbors does not keep dialing dead peers.
+- **Seeds follow the mesh.** About once a minute (every 12 beats) a node saves the peers it hears as its seeds in `config.json`: seeds it still hears stay first, other live peers fill up to 8, silent ones are dropped (a node that hears nobody keeps what it had). A node that restarts after the member it joined through has left still reaches the mesh.
 
 `./dialtone.sh test --here --only scale --scale N [--secs S]` starts N nodes on this machine, each given 3 random seeds, and reports how long until every node sees all N and the traffic per node (`GET /api/net`: socket bytes from iroh's counters, gossip messages, neighbors, and iroh-gossip's own counts of data frames, duplicates included, and control messages). Measured on one laptop:
 
@@ -631,7 +602,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is the one entry point (a one-line wrapper for `cargo run -p xtask`). Nothing else is needed on the machine (no Python, jq or curl); `test`, `dev` and `deploy` reach the test VMs with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
 
-`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down, a seed that restarted) and `tests/update.rs` (self-update from a signed release: a healthy one kept, one that panics or never gets healthy rolled back, a node updated from a peer; not on macOS, where the test releases would be unsigned).
+`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, one-shot runs) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down, a seed that restarted) and `tests/update.rs` (self-update from a signed release: a healthy one kept, one that panics or never gets healthy rolled back, a node updated from a peer; not on macOS, where the test releases would be unsigned).
 
 **All testing goes through one command, `./dialtone.sh test`.** With no options it runs every test end to end on Linux VMs, never on the machine you type on: that machine only lints, packs the sources and drives the VMs over SSH. Options pick one part, or run on this machine instead (GitHub CI runs `test --here`).
 
@@ -679,7 +650,7 @@ SSH_vm_beta="user@203.0.113.11|-J vm-alpha user@10.0.0.2"   # alternatives; the 
 SSH_vm_gamma="user@203.0.113.12"
 ```
 
-To check a single running node by hand, `./dialtone mesh-test --expect-peers 3` verifies its security posture, mesh convergence and a live blob transfer.
+To check a single running node by hand, `./dialtone probe --all` runs every probe check on it: mesh, neighbors, beats, store, pulls from peers, programs and security.
 
 **Releasing.** Bump `version` in `Cargo.toml`, commit, and push a tag `vX.Y.Z`. The release workflow builds every binary with `./dialtone.sh release build <target>` (the same command builds one here), then `./dialtone.sh release manifest` signs `dialtone-release.json` with the `DIALTONE_RELEASE_KEY` repository secret (it refuses a key whose public half is not the one in `src/update.rs`). Running nodes pick the release up within the hour, or within a beat once any peer runs it.
 

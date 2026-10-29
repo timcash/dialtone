@@ -32,10 +32,10 @@ use dialtone::mesh::{
     beat_fresh_secs, beat_interval_for, build_mesh_rtt_matrix, cached_local_public_ip_geo,
     default_seeds, events_topic_id, is_valid_node_name, merge_beat, merge_inventory, mesh_offer,
     monotonic_now_ms, node_capabilities_for, node_role_for, normalize_channel_name, now_unix,
-    observe_peer_remote_addrs, open_message, prune_stale_peers, seal_message, try_load_mesh_config,
-    Beat, ChannelKeys, Deploy, Inventory, LiveAllowlist, MeshControlCommand, Message, NeighborLink,
-    NodeDetails, PeerScores, ReplayGuard, SeedList, BEAT_INTERVAL_SECS, DEFAULT_PEER_TTL_SECS,
-    SUMMARY_INTERVAL_SECS,
+    observe_peer_remote_addrs, open_message, prune_stale_peers, refresh_seeds, save_mesh_config,
+    seal_message, try_load_mesh_config, Beat, ChannelKeys, Deploy, Inventory, LiveAllowlist,
+    MeshControlCommand, Message, NeighborLink, NodeDetails, PeerScores, ReplayGuard, Seed,
+    SeedList, BEAT_INTERVAL_SECS, DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, GossipConnections, IrohTransportConfig,
@@ -108,7 +108,6 @@ pub(crate) struct MeshStart {
     pub topic_id: TopicId,
     pub seed_ids: Vec<EndpointId>,
     pub known_peer_addrs: HashMap<EndpointId, EndpointAddr>,
-    pub print_first_beat: bool,
     pub control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
     /// Where this node updates itself, when it does (`dialtone::update`).
     pub update: Option<update::Paths>,
@@ -939,6 +938,8 @@ const ONE_SIDED_BEATS: u32 = 2;
 /// Every this many beats, Mesh rebuilds its inventory to catch details that drift slowly
 /// (the public-IP lookup, addresses); it is broadcast only when it changed.
 const INVENTORY_REFRESH_EVERY: u64 = 6;
+/// Every this many beats, Mesh saves the peers it hears as its seeds (`refresh_seeds`).
+const SEED_REFRESH_EVERY: u64 = 12;
 /// When new nodes join, an origin re-announces its deploys at most this often.
 const NEW_NODE_ANNOUNCE_GAP: Duration = Duration::from_secs(60);
 /// How long an origin keeps announcing a program it removed (for nodes that missed it).
@@ -973,7 +974,6 @@ struct Mesh {
     known_peer_addrs: HashMap<EndpointId, EndpointAddr>,
     counter: u64,
     beat_interval_secs: u64,
-    print_first_beat: bool,
     replay_guard: ReplayGuard,
     /// Latest inventory per peer NodeId, applied again when its entry is first created.
     inventories: HashMap<String, Inventory>,
@@ -1052,7 +1052,6 @@ impl Mesh {
             known_peer_addrs: start.known_peer_addrs,
             counter: 1,
             beat_interval_secs: BEAT_INTERVAL_SECS,
-            print_first_beat: start.print_first_beat,
             replay_guard: ReplayGuard::default(),
             inventories: HashMap::new(),
             own_inventory_version: 0,
@@ -1340,6 +1339,50 @@ impl Mesh {
             .neighbors
             .store(neighbors.len() as u64, std::sync::atomic::Ordering::Relaxed);
         self.ctx.with_state(|st| st.gossip_neighbors = neighbors);
+    }
+
+    /// Keep the saved seeds to peers this node hears, so after a restart it still reaches the
+    /// mesh when the member it joined through is gone.
+    fn refresh_saved_seeds(&mut self) {
+        let now = now_unix();
+        let own = self.ctx.endpoint.id().to_string();
+        let live: Vec<Seed> = self
+            .ctx
+            .with_state(|st| {
+                st.nodes
+                    .iter()
+                    .filter(|n| {
+                        n.node_id != own
+                            && now.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n)
+                    })
+                    .filter_map(|n| n.node_id.parse::<EndpointId>().ok())
+                    .filter_map(|id| self.known_peer_addrs.get(&id).map(Seed::from_addr))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Change only the seeds on disk: the CLI may have just edited the rest of the config.
+        let config_path = self.ctx.config_path.clone();
+        let saved = self
+            .ctx
+            .with_state(|st| {
+                let mut disk = try_load_mesh_config(&config_path).ok()?;
+                let next = refresh_seeds(&disk.seeds, &live)?;
+                disk.seeds = next.clone();
+                save_mesh_config(&config_path, &disk).ok()?;
+                st.mesh_config.seeds = next.clone();
+                Some(next)
+            })
+            .flatten();
+        if let Some(seeds) = saved {
+            self.seed_ids = seeds
+                .iter()
+                .filter_map(|s| s.node_id.parse().ok())
+                .collect();
+            println!(
+                "[mesh] saved {} seed(s): the peers this node hears",
+                seeds.len()
+            );
+        }
     }
 
     /// Remember a peer's address for fetches and joins.
@@ -1638,6 +1681,9 @@ impl Mesh {
         self.rejoin_silent_neighbors().await;
 
         let counter = self.counter;
+        if counter.is_multiple_of(SEED_REFRESH_EVERY) {
+            self.refresh_saved_seeds();
+        }
         if counter <= 2 || counter.is_multiple_of(INVENTORY_REFRESH_EVERY) {
             self.refresh_own_inventory(true).await;
         }
@@ -1667,12 +1713,6 @@ impl Mesh {
             st.stats = beat.stats.clone();
             merge_beat(&mut st.nodes, beat.clone());
         });
-        if counter == 1 && self.print_first_beat {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&beat).unwrap_or_default()
-            );
-        }
         self.broadcast(&Message::Beat(beat)).await;
         self.counter += 1;
         self.announce_deploys().await;

@@ -115,18 +115,18 @@ fn three_nodes() {
     for i in 0..3 {
         until_ok(
             60,
-            &format!("{} full probe 6/6 with 2 pulls", NAMES[i]),
+            &format!("{} full probe 7/7 with 2 pulls", NAMES[i]),
             || {
                 post(i, "/api/probe", r#"{"all":true}"#).is_some_and(|r| {
                     let pulls = r["probe"]["pulls"]
                         .as_array()
                         .map_or(0, |p| p.iter().filter(|x| x["ok"] == true).count());
-                    passes(&r["probe"], 6) && pulls == 2
+                    passes(&r["probe"], 7) && pulls == 2
                 })
             },
         );
     }
-    println!("    2. Probe: gossip checks 3/3 on every node; full probe 6/6, each pulled a fresh blob from both peers");
+    println!("    2. Probe: gossip checks 3/3 on every node; full probe 7/7, each pulled a fresh blob from both peers");
     let d = get(0, &format!("/api/details?node_id={}", ids[1])).expect("details of b");
     assert!(
         d["node_id"] == ids[1].as_str()

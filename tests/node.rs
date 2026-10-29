@@ -1,10 +1,7 @@
-//! One node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud, routes.
+//! One node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, one-shot runs, routes.
 mod common;
 
 use std::fs;
-use std::process::{Command, Stdio};
-use std::thread::sleep;
-use std::time::{Duration, Instant};
 
 use base64::Engine;
 use common::*;
@@ -21,37 +18,14 @@ fn one_node() {
     run_ok(d, &["devices", "--json"]);
     assert!(run_ok(d, &["status", "--node", "node-alpha"])
         .contains(r#""steady_state_data_plane": "iroh-quic""#));
-    assert!(
-        run_ok(d, &["service", "--os", "macos", "--node", "node-alpha"])
-            .contains("com.timcash.dialtone")
-    );
-    assert!(
-        run_ok(d, &["service", "--os", "linux", "--node", "node-alpha"])
-            .contains("EnvironmentFile=-/etc/dialtone/daemon.env")
-    );
-    assert!(
-        run_ok(d, &["service", "--os", "windows", "--node", "node-beta"])
-            .contains("up --node node-beta")
-    );
-    assert!(run_ok(
-        d,
-        &[
-            "node",
-            "--node",
-            "node-alpha",
-            "--no-dns",
-            "--no-relay",
-            "--once"
-        ]
-    )
-    .contains(r#""schema": "dialtone.iroh.beat.v1""#));
     let boot = run_ok(
         d,
         &[
+            "--node",
+            "node-alpha",
             "--listen",
             "127.0.0.1:0",
-            "--no-dns",
-            "--no-relay",
+            "--private-mesh",
             "--once",
         ],
     );
@@ -61,7 +35,8 @@ fn one_node() {
             "boot stage {stage} missing"
         );
     }
-    println!("    CLI: devices, status, service units, beat, five boot stages");
+    assert!(boot.contains(r#""schema": "dialtone.iroh.beat.v1""#));
+    println!("    CLI: devices, status, five boot stages and a beat");
 
     let join = |secret: &str| {
         run(
@@ -213,19 +188,6 @@ fn one_node() {
         run_ok(d, &["blob", "pull", ticket, "--force", "--listen", LISTEN])
             .contains(r#""method": "local-self""#)
     );
-    assert!(run_ok(
-        d,
-        &[
-            "mesh-test",
-            "--expect-peers",
-            "1",
-            "--timeout",
-            "5s",
-            "--listen",
-            LISTEN
-        ]
-    )
-    .contains(r#""status": "ok""#));
     let gossip = post("/api/probe", "{}");
     assert_eq!(
         check_codes(&gossip["probe"]),
@@ -236,7 +198,7 @@ fn one_node() {
     let p = &full["probe"];
     assert_eq!(
         check_codes(p),
-        ["BEAT", "MSH", "NBR", "PRC", "PUL", "STO"],
+        ["BEAT", "MSH", "NBR", "PRC", "PUL", "SEC", "STO"],
         "{full}"
     );
     let ok = |code: &str| {
@@ -246,41 +208,25 @@ fn one_node() {
             .iter()
             .any(|c| c["code"] == code && c["ok"] == true)
     };
-    assert!(ok("STO") && ok("PRC"), "{full}");
-    println!("    Blobs share / pull, mesh-test, probe (gossip only, then full)");
+    assert!(ok("STO") && ok("PRC") && ok("SEC"), "{full}");
+    println!("    Blobs share / pull, probe (gossip only, then full)");
 
     let before = fs::read(dir.join("config.json")).unwrap();
-    let mut hud = Command::new(BIN)
-        .args([
-            "hud",
+    run_ok(
+        d,
+        &[
             "--node",
-            "check-hud",
+            "check-once",
             "--listen",
-            "127.0.0.1:18795",
+            "127.0.0.1:0",
+            "--private-mesh",
             "--once",
-        ])
-        .env("DIALTONE_STATE_DIR", dir.path())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    for _ in 0..50 {
-        if matches!(http(18795, "GET", "/", None, None), Ok((200..=299, _))) {
-            break;
-        }
-        sleep(Duration::from_millis(100));
-    }
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while hud.try_wait().unwrap().is_none() && Instant::now() < deadline {
-        sleep(Duration::from_millis(100));
-    }
-    let _ = hud.kill();
-    let _ = hud.wait();
+        ],
+    );
     assert_eq!(
         before,
         fs::read(dir.join("config.json")).unwrap(),
-        "dialtone hud rewrote the running node's config"
+        "a one-shot run rewrote the running node's config"
     );
     for route in [
         "/api/deploy-plan",
@@ -292,6 +238,6 @@ fn one_node() {
         let (code, _) = http(API, "GET", route, None, None).unwrap();
         assert_eq!(code, 404, "removed route {route} answered");
     }
-    println!("    hud leaves the node's config alone; removed routes return 404");
+    println!("    A one-shot run leaves the node's config alone; removed routes return 404");
     node.stop();
 }

@@ -21,8 +21,9 @@ use crate::node::{advertised_endpoint_addr, IrohTransportConfig};
 pub const ALPN: &[u8] = b"dialtone/join/1";
 const MAX_REQUEST_BYTES: usize = 16 << 10;
 const MAX_ANSWER_BYTES: usize = 64 << 10;
-/// Direct addresses put in an invite, besides the relay.
-const MAX_INVITE_IPS: usize = 3;
+/// Members an invite and a join answer name: this node, then its seeds (the peers it hears),
+/// so a new node gets in, and back in after a restart, while any one of them is up.
+const MAX_INVITE_SEEDS: usize = 4;
 
 /// What a member answers a valid invite with.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -52,19 +53,24 @@ impl Joins {
 
     /// This node as a seed: its NodeId, home relay and a few direct addresses.
     pub fn self_seed(&self) -> Seed {
-        let addr = advertised_endpoint_addr(&self.endpoint.addr(), &self.transport);
-        let relay_url = addr.relay_urls().next().map(|u| u.to_string());
-        let ip_addrs = addr
-            .ip_addrs()
-            .filter(|a| a.is_ipv4())
-            .take(MAX_INVITE_IPS)
-            .map(|a| a.to_string())
-            .collect();
-        Seed {
-            node_id: self.endpoint.id().to_string(),
-            relay_url,
-            ip_addrs,
-        }
+        Seed::from_addr(&advertised_endpoint_addr(
+            &self.endpoint.addr(),
+            &self.transport,
+        ))
+    }
+
+    /// The members to name in an invite or a join answer: this node, then its seeds.
+    fn seeds(&self) -> Vec<Seed> {
+        let me = self.self_seed();
+        let mut seeds = vec![me.clone()];
+        seeds.extend(
+            load_mesh_config(&self.config_path)
+                .seeds
+                .into_iter()
+                .filter(|s| s.node_id != me.node_id),
+        );
+        seeds.truncate(MAX_INVITE_SEEDS);
+        seeds
     }
 
     fn open_channel_keys(&self) -> Result<ChannelKeys, String> {
@@ -82,7 +88,7 @@ impl Joins {
     /// A new open invite to this node's channel, valid for `ttl_secs`.
     pub fn mint(&self, ttl_secs: u64) -> Result<OpenInvite, String> {
         let keys = self.open_channel_keys()?;
-        OpenInvite::new(&keys, vec![self.self_seed()], crate::now_unix(), ttl_secs)
+        OpenInvite::new(&keys, self.seeds(), crate::now_unix(), ttl_secs)
     }
 
     fn answer(&self, request: &[u8]) -> Result<JoinAnswer, String> {
@@ -93,7 +99,7 @@ impl Joins {
         Ok(JoinAnswer {
             channel: keys.channel.clone(),
             derived_keys: keys.to_hex_bundle(),
-            seeds: vec![self.self_seed()],
+            seeds: self.seeds(),
         })
     }
 }

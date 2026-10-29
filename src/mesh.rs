@@ -723,7 +723,51 @@ impl FromStr for OpenInvite {
     }
 }
 
+/// How many seeds a node keeps: enough that it still reaches the mesh when it restarts after
+/// some of them are gone.
+pub const MAX_SEEDS: usize = 8;
+/// Direct addresses kept per seed, besides the relay.
+const MAX_SEED_IPS: usize = 3;
+
+/// The seed list after hearing the `live` peers: seeds still heard stay first (with their
+/// latest addresses), other live peers fill up to `MAX_SEEDS`, and silent seeds are dropped.
+/// `None` when nothing changes, or when no peer is heard at all, so a node cut off for a
+/// while keeps the seeds it had.
+pub fn refresh_seeds(current: &[Seed], live: &[Seed]) -> Option<Vec<Seed>> {
+    if live.is_empty() {
+        return None;
+    }
+    let mut next: Vec<Seed> = current
+        .iter()
+        .filter_map(|s| live.iter().find(|l| l.node_id == s.node_id).cloned())
+        .collect();
+    for l in live {
+        if next.len() >= MAX_SEEDS {
+            break;
+        }
+        if !next.iter().any(|s| s.node_id == l.node_id) {
+            next.push(l.clone());
+        }
+    }
+    next.truncate(MAX_SEEDS);
+    (next != current).then_some(next)
+}
+
 impl Seed {
+    /// A peer as a seed: its NodeId, home relay and a few direct IPv4 addresses.
+    pub fn from_addr(addr: &EndpointAddr) -> Seed {
+        Seed {
+            node_id: addr.id.to_string(),
+            relay_url: addr.relay_urls().next().map(|u| u.to_string()),
+            ip_addrs: addr
+                .ip_addrs()
+                .filter(|a| a.is_ipv4())
+                .take(MAX_SEED_IPS)
+                .map(|a| a.to_string())
+                .collect(),
+        }
+    }
+
     /// The address to dial: the relay (n0's default when none is named) and direct addresses.
     pub fn to_addr(&self) -> Option<EndpointAddr> {
         let id = self.node_id.trim().parse::<iroh::EndpointId>().ok()?;
@@ -3034,6 +3078,29 @@ mod tests {
         assert!(is_valid_node_name("edge-1.lab_2"));
         assert!(!is_valid_node_name("<img src=x onerror=alert(1)>"));
         assert!(!is_valid_node_name(""));
+    }
+
+    #[test]
+    fn seeds_follow_the_peers_a_node_hears() {
+        let seed = |id: &str, ip: &str| Seed {
+            node_id: id.to_string(),
+            relay_url: None,
+            ip_addrs: vec![ip.to_string()],
+        };
+        let current = vec![seed("gone", "10.0.0.1:1"), seed("b", "10.0.0.2:1")];
+        // Hearing nobody keeps the seeds a node has.
+        assert_eq!(refresh_seeds(&current, &[]), None);
+        // A seed still heard stays first, with its new address; a silent one is dropped.
+        let live = vec![seed("c", "10.0.0.3:1"), seed("b", "10.0.0.9:1")];
+        assert_eq!(
+            refresh_seeds(&current, &live),
+            Some(vec![seed("b", "10.0.0.9:1"), seed("c", "10.0.0.3:1")])
+        );
+        assert_eq!(refresh_seeds(&live[1..], &live[1..]), None);
+        let many: Vec<Seed> = (0..20)
+            .map(|i| seed(&i.to_string(), "10.0.0.4:1"))
+            .collect();
+        assert_eq!(refresh_seeds(&[], &many).unwrap().len(), MAX_SEEDS);
     }
 
     #[test]

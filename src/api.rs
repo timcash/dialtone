@@ -523,6 +523,8 @@ impl NodeState {
                 .find(|p| p.name == PROBE_PROGRAM_NAME)
                 .cloned(),
             expired_blobs: expired,
+            lookup_modes: self.iroh_runtime.address_lookup_modes.clone(),
+            config_path: crate::mesh::default_config_path(),
         }
     }
 
