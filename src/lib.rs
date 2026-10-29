@@ -14,6 +14,7 @@ pub mod record;
 pub mod service;
 pub mod stats;
 pub mod supervisor;
+pub mod update;
 pub mod wire;
 
 use std::process::Command;

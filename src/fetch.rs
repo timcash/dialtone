@@ -6,6 +6,8 @@
 //! - `details`    what beats leave out, for the HUD's focused node: its devices, full probe,
 //!   processes with their status, services, rolling summary, store, stats and transport;
 //! - `probe_blob` a fresh probe blob's ticket, for a full probe to pull (`probe.rs`).
+//! - `release`    the signed manifest of the release the node runs, for a node that sees a
+//!   newer version in its beats (`update.rs`).
 //!
 //! One request per stream. The allowlist hook admits the connection and the QUIC handshake
 //! proves which node answers.
@@ -29,6 +31,7 @@ const MAX_ANSWER_BYTES: usize = 16 << 20;
 pub enum Request {
     Details,
     ProbeBlob,
+    Release,
 }
 
 impl Request {
@@ -36,6 +39,7 @@ impl Request {
         match self {
             Request::Details => "details",
             Request::ProbeBlob => "probe_blob",
+            Request::Release => "release",
         }
     }
 }
@@ -60,6 +64,12 @@ impl FetchHandler {
             .ok_or("this node has no state to share")?;
         let json = match request {
             Request::Details => lock(&state)?.details_json(),
+            Request::Release => {
+                let signed = crate::update::Paths::current()?
+                    .running_manifest()
+                    .ok_or("this node runs no signed release")?;
+                serde_json::to_value(signed).map_err(|e| e.to_string())?
+            }
             Request::ProbeBlob => {
                 // Writing to the store blocks; keep it off the async runtime.
                 let ticket = tokio::task::spawn_blocking(move || share_probe_blob(&state))
@@ -196,4 +206,14 @@ pub async fn probe_blob(
         .and_then(|t| t.as_str())
         .map(str::to_string)
         .ok_or_else(|| "answer has no ticket".to_string())
+}
+
+/// Ask `peer` for the signed manifest of the release it runs (verify it before use).
+pub async fn release(
+    endpoint: &Endpoint,
+    peer: EndpointId,
+    timeout: Duration,
+) -> Result<crate::update::SignedManifest, String> {
+    let value = fetch_once(endpoint, peer, Request::Release, timeout).await?;
+    serde_json::from_value(value).map_err(|e| format!("bad release answer: {e}"))
 }

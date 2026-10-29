@@ -1313,6 +1313,10 @@ pub struct NeighborLink {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Beat {
     pub schema: String,
+    /// The dialtone release the node runs (`update::running_version`); empty from a node
+    /// that predates it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub version: String,
     pub node: String,
     pub node_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -2209,6 +2213,7 @@ mod tests {
             .map_err(|e| format!("join_peers B->A: {e}"))?;
 
         let beat_a = Beat {
+            version: String::new(),
             schema: BEAT_SCHEMA.to_string(),
             node: node_a.to_string(),
             node_id: id_a.to_string(),
@@ -2276,6 +2281,7 @@ mod tests {
         .map_err(|_| "timed out waiting for encrypted iroh-gossip beat".to_string())??;
 
         let beat_b = Beat {
+            version: String::new(),
             schema: BEAT_SCHEMA.to_string(),
             node: node_b.to_string(),
             node_id: id_b.to_string(),
@@ -2439,6 +2445,7 @@ mod tests {
         let node_id = node_key.public().to_string();
         let diag = build_diagnostics(&cfg, &addr, None, &node_id);
         let beat = Beat {
+            version: String::new(),
             schema: BEAT_SCHEMA.to_string(),
             node: "node-alpha".to_string(),
             node_id: node_id.clone(),
@@ -2495,6 +2502,7 @@ mod tests {
         let addr = EndpointAddr::new(node_key.public());
         let node_id = node_key.public().to_string();
         Beat {
+            version: String::new(),
             schema: BEAT_SCHEMA.to_string(),
             node: "node-alpha".to_string(),
             node_id: node_id.clone(),
@@ -2621,7 +2629,8 @@ mod tests {
         }
         let typical = seal(&healthy);
         println!("sealed beat {typical} bytes, at most {largest}");
-        assert!(typical <= 256, "a healthy beat is {typical} bytes");
+        // 256 bytes, and the 4 a beat has carried since its version and architecture (`wire.rs`).
+        assert!(typical <= 260, "a healthy beat is {typical} bytes");
         assert!(largest <= 320, "the largest beat is {largest} bytes");
 
         // What a peer sees: the load, place, addresses, neighbors and probe, nothing else.
@@ -3172,6 +3181,7 @@ mod tests {
         let diag = build_diagnostics(&cfg, &addr, None, "ep-1");
 
         let mut beat_a = Beat {
+            version: String::new(),
             schema: BEAT_SCHEMA.to_string(),
             node: "node-alpha".to_string(),
             node_id: "ep-1".to_string(),

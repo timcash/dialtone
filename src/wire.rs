@@ -54,6 +54,18 @@ struct WireBeat {
     probe: Option<WireProbe>,
 }
 
+/// What later builds send after `WireBeat`. postcard ignores bytes after a value, so a node
+/// that predates these fields reads the beat without them, and a beat from such a node has none.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+struct WireBeatExt {
+    /// The dialtone release the node runs (major, minor, patch; all 0 when unknown).
+    version: (u16, u16, u16),
+    /// An index into `ARCH_NAMES`: with `os`, which release binary the node runs.
+    arch: u8,
+}
+
+const ARCH_NAMES: [&str; 3] = ["", "x86_64", "aarch64"];
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct WireNeighbor {
     id: [u8; NEIGHBOR_PREFIX_BYTES],
@@ -190,12 +202,21 @@ pub fn encode_beat(beat: &Beat) -> Result<Vec<u8>, String> {
         neighbors,
         probe,
     };
-    postcard::to_allocvec(&wire).map_err(|e| e.to_string())
+    let mut out = postcard::to_allocvec(&wire).map_err(|e| e.to_string())?;
+    let (major, minor, patch) = crate::update::parse_version(&beat.version).unwrap_or_default();
+    let ext = WireBeatExt {
+        version: (major as u16, minor as u16, patch as u16),
+        arch: ARCH_NAMES.iter().position(|a| *a == beat.arch).unwrap_or(0) as u8,
+    };
+    out.extend(postcard::to_allocvec(&ext).map_err(|e| e.to_string())?);
+    Ok(out)
 }
 
 /// Decode a beat from the wire.
 pub fn decode_beat(bytes: &[u8]) -> Result<Beat, String> {
-    let w: WireBeat = postcard::from_bytes(bytes).map_err(|e| format!("invalid beat: {e}"))?;
+    let (w, rest): (WireBeat, &[u8]) =
+        postcard::take_from_bytes(bytes).map_err(|e| format!("invalid beat: {e}"))?;
+    let ext: WireBeatExt = postcard::from_bytes(rest).unwrap_or_default();
     let stats = Stats {
         cpu_percent: unpct(w.load[0]),
         mem_percent: unpct(w.load[1]),
@@ -271,7 +292,11 @@ pub fn decode_beat(bytes: &[u8]) -> Result<Beat, String> {
             .copied()
             .unwrap_or_default()
             .to_string(),
-        arch: String::new(),
+        arch: ARCH_NAMES
+            .get(ext.arch as usize)
+            .copied()
+            .unwrap_or_default()
+            .to_string(),
         role: String::new(),
         capabilities: Vec::new(),
         stats,
@@ -281,6 +306,10 @@ pub fn decode_beat(bytes: &[u8]) -> Result<Beat, String> {
         observed_remote_addrs: Vec::new(),
         tailnet_used: false,
         devices: Vec::new(),
+        version: match ext.version {
+            (0, 0, 0) => String::new(),
+            (a, b, c) => format!("{a}.{b}.{c}"),
+        },
     };
     beat.iroh_transport.advertised_relay_urls = w.relay.iter().map(|r| expand_relay(r)).collect();
     beat.iroh_transport.advertised_ip_addrs = w.ips.iter().map(|a| a.to_string()).collect();
@@ -298,6 +327,48 @@ mod tests {
         assert_eq!(expand_relay(&compact_relay(n0)), n0);
         let own = "https://relay.example.com./";
         assert_eq!(expand_relay(&compact_relay(own)), own);
+    }
+
+    /// Beats with and without the extension decode on both sides: an old node reads a new
+    /// beat (it stops after `WireBeat`), and a new node reads an old one (no version).
+    #[test]
+    fn the_beat_extension_works_with_older_nodes_both_ways() {
+        let wire = WireBeat {
+            node_id: [1; 32],
+            node: "n".into(),
+            counter: 1,
+            sent_unix_ms: 2,
+            interval_secs: 5,
+            heard: 0,
+            inventory_version: [0; 4],
+            os: 2,
+            load: [UNKNOWN_PCT; 3],
+            net: None,
+            geo: None,
+            relay: None,
+            ips: Vec::new(),
+            neighbors: Vec::new(),
+            probe: None,
+        };
+        let old = postcard::to_allocvec(&wire).unwrap();
+        let beat = decode_beat(&old).unwrap();
+        assert_eq!((beat.version.as_str(), beat.arch.as_str()), ("", ""));
+        let mut new = old.clone();
+        let ext = WireBeatExt {
+            version: (0, 5, 0),
+            arch: 1,
+        };
+        new.extend(postcard::to_allocvec(&ext).unwrap());
+        assert_eq!(postcard::from_bytes::<WireBeat>(&new).unwrap(), wire);
+        let beat = decode_beat(&new).unwrap();
+        assert_eq!(
+            (beat.version.as_str(), beat.arch.as_str()),
+            ("0.5.0", "x86_64")
+        );
+        assert_eq!(
+            decode_beat(&encode_beat(&beat).unwrap()).unwrap().version,
+            "0.5.0"
+        );
     }
 
     #[test]

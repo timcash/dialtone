@@ -381,6 +381,18 @@ By default, `dialtone` uses **zero public directory publishing** (`dns-pkarr` an
 | **Linux** | `~/.config/systemd/user/dialtone.service` (`systemctl --user enable --now dialtone.service`) |
 | **Windows** | `~/.dialtone/start-dialtone.cmd` registered in `HKCU\...\Run\DialtoneDaemon` + Scheduled Task `DialtoneDaemon` |
 
+### Self-update: a new release reaches every node on its own
+
+A node that runs from `~/.dialtone/bin` (every service install does) updates itself whenever a new release is tagged, and rolls back a release that does not start healthy:
+
+- **Detect.** Every beat carries the version its node runs. A node asks GitHub for the latest release about once an hour, and as soon as a peer's beat shows a newer one.
+- **Trust.** The release workflow signs `dialtone-release.json` (each binary's SHA-256, BLAKE3 hash and size) with the release key, and every binary holds the public key. A binary is installed only if the manifest verifies and the binary matches it, so a binary from a peer is as trusted as one from GitHub.
+- **Fetch.** From peers that already run the release on the same OS and architecture (iroh-blobs), else from GitHub. A node that cannot reach GitHub still updates from its peers.
+- **A/B install.** The running binary moves aside as `dialtone.prev`, the new one takes its path, and the node exits (code 75) so its service starts the new one.
+- **Trial and rollback.** The new binary is kept once it has run for a minute with gossip joined and, if the old one had neighbors, at least one neighbor. If it is not healthy within 3 minutes, or it fails to start 3 times, `dialtone.prev` takes the path back, the version is marked bad in `~/.dialtone/update.json` (never tried again), and the old binary runs.
+
+`DIALTONE_AUTO_UPDATE=0` turns it off. A binary run from anywhere else (a development build) never replaces itself. `./dialtone.sh fleet` shows the version every node runs.
+
 ### Render Service Unit Templates (`service`)
 
 To preview or pipe service definitions for system-wide deployment:
@@ -606,6 +618,11 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | `~/.dialtone/api-token` | — | Auto-generated 256-bit local HTTP control API bearer token (`0600`) |
 | `~/.dialtone/blobs/` | — | Blob store (iroh-blobs `FsStore`; blobs named by `sha256/<hex>` tags) |
 | `~/.dialtone/run/` | — | Staged `0755` executables spawned by the blob process supervisor |
+| `DIALTONE_AUTO_UPDATE` | *(on)* | `0` stops a node updating itself to new releases |
+| `DIALTONE_RELEASE_URL` | GitHub releases | Where a node looks for releases (a mirror); they must still be signed with the release key |
+| `DIALTONE_UPDATE_CHECK_SECS` | `3600` | How often a node asks for the latest release |
+| `~/.dialtone/update.json` | — | Self-update state: the release on trial, the one kept, versions rolled back |
+| `~/.dialtone/bin/dialtone.prev` | — | The binary that ran before the last update (what a rollback restores) |
 
 ---
 
@@ -613,7 +630,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is a one-line wrapper for `cargo xtask <task>`. Nothing else is needed on the machine (no Python, jq or curl); `deploy` and `scale-fleet` reach other machines with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
 
-`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down, a seed that restarted).
+`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down, a seed that restarted) and `tests/update.rs` (self-update from a signed release: a healthy one kept, one that panics or never gets healthy rolled back, a node updated from a peer; not on macOS, where the test releases would be unsigned).
 
 ```bash
 ./dialtone.sh check     # lint, fmt, cargo test (one-node and three-node tests included), release build
@@ -642,5 +659,7 @@ SSH_node_delta="user@node-delta"
 ```
 
 To check a single running node by hand, `./dialtone mesh-test --expect-peers 3` verifies its security posture, mesh convergence and a live blob transfer.
+
+**Releasing.** Bump `version` in `Cargo.toml`, commit, and push a tag `vX.Y.Z`. The release workflow builds every binary, then `cargo xtask release-manifest` signs `dialtone-release.json` with the `DIALTONE_RELEASE_KEY` repository secret (it refuses a key whose public half is not the one in `src/update.rs`). Running nodes pick the release up within the hour, or within a beat once any peer runs it.
 
 **Build profiles.** `cargo build --release` is the everyday optimized build (no LTO, parallel and incremental codegen): `cargo xtask`, GitHub CI and fleet deploys use it, and a one-file change rebuilds in about a second. Published binaries are built with `cargo build --profile dist` (size-optimized, fat LTO), which takes about a minute and only runs when a version is tagged.

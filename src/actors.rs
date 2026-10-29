@@ -43,6 +43,7 @@ use dialtone::node::{
 use dialtone::probe::{ProbeRequest, PULL_SAMPLE};
 use dialtone::service::ProcessSpec;
 use dialtone::stats::{sample_stats, StatsSummary, StatsWindow};
+use dialtone::update;
 use dialtone::wire::{neighbor_prefix, MAX_NEIGHBORS};
 use futures_lite::StreamExt;
 use iroh::address_lookup::memory::MemoryLookup;
@@ -109,10 +110,14 @@ pub(crate) struct MeshStart {
     pub known_peer_addrs: HashMap<EndpointId, EndpointAddr>,
     pub print_first_beat: bool,
     pub control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
+    /// Where this node updates itself, when it does (`dialtone::update`).
+    pub update: Option<update::Paths>,
 }
 
 /// Start every actor. The returned handles finish after `ctx.cancel` is cancelled.
-pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
+pub(crate) fn spawn_all(ctx: Ctx, mut start: MeshStart) -> Vec<JoinHandle<()>> {
+    let (update_tx, update_rx) = mpsc::unbounded_channel();
+    let update_paths = start.update.take();
     let (rtt_tx, rtt_rx) = watch::channel(BTreeMap::new());
     let (summary_tx, summary_rx) = watch::channel(None);
     let (inventory_tx, inventory_rx) = mpsc::unbounded_channel();
@@ -129,8 +134,9 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
         summary_rx,
         inventory_rx,
         deploy_tx,
+        update_tx,
     );
-    vec![
+    let mut actors = vec![
         tokio::spawn(mesh.run()),
         tokio::spawn(stats_actor(ctx.clone(), rtt_rx, summary_tx)),
         tokio::spawn(supervisor_actor(ctx.clone(), inventory_tx.clone())),
@@ -138,8 +144,12 @@ pub(crate) fn spawn_all(ctx: Ctx, start: MeshStart) -> Vec<JoinHandle<()>> {
         tokio::spawn(paths_actor(ctx.clone(), rtt_tx)),
         tokio::spawn(allowlist_actor(ctx.clone())),
         tokio::spawn(probe_actor(ctx.clone(), probe_rx)),
-        tokio::spawn(deploy_actor(ctx, deploy_rx)),
-    ]
+        tokio::spawn(deploy_actor(ctx.clone(), deploy_rx)),
+    ];
+    if let Some(paths) = update_paths {
+        actors.push(tokio::spawn(update_actor(ctx, paths, update_rx)));
+    }
+    actors
 }
 
 fn every(period: Duration) -> tokio::time::Interval {
@@ -692,6 +702,229 @@ fn random_below(max: u64) -> u64 {
 }
 
 // ---------------------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------------------
+
+/// A peer whose beat shows a newer release than this node runs.
+pub(crate) struct UpdateHint {
+    node_id: String,
+    version: String,
+}
+
+/// How often a node asks GitHub for the latest release (`DIALTONE_UPDATE_CHECK_SECS`).
+const UPDATE_CHECK_EVERY: Duration = Duration::from_secs(3600);
+/// The first check comes this long after start (or sooner when checks are more frequent).
+const UPDATE_FIRST_CHECK: Duration = Duration::from_secs(60);
+/// A peer's beats showing a newer release are followed at most this often (a peer serves its
+/// release only once it has kept it, which takes a minute after it restarts into it).
+const UPDATE_HINT_GAP: Duration = Duration::from_secs(15);
+/// How often the actor looks whether a release it just kept is in the store for peers yet.
+const UPDATE_SHARE_EVERY: Duration = Duration::from_secs(10);
+/// How long fetching the release binary from peers may take.
+const UPDATE_PEER_FETCH: Duration = Duration::from_secs(600);
+
+/// Self-update (`dialtone::update`): asks GitHub for the latest release now and then, and
+/// follows peers whose beats show a newer one; installs it A/B and restarts into it.
+async fn update_actor(
+    ctx: Ctx,
+    paths: update::Paths,
+    mut hints: mpsc::UnboundedReceiver<UpdateHint>,
+) {
+    let client = match update::http_client() {
+        Ok(c) => Some(c),
+        Err(e) => {
+            eprintln!("[update] {e}; this node updates from peers only");
+            None
+        }
+    };
+    let mut share_tick = every(UPDATE_SHARE_EVERY);
+    let every = std::env::var("DIALTONE_UPDATE_CHECK_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(UPDATE_CHECK_EVERY);
+    // Spread out, so a mesh that restarted together does not ask at once.
+    let spread = |d: Duration| {
+        let ms = d.as_millis() as u64;
+        Duration::from_millis(ms * 4 / 5 + random_below(ms * 2 / 5))
+    };
+    let mut next_check = tokio::time::Instant::now() + spread(every.min(UPDATE_FIRST_CHECK));
+    let mut last_hint: Option<tokio::time::Instant> = None;
+    loop {
+        let (signed, from) = tokio::select! {
+            _ = ctx.cancel.cancelled() => return,
+            _ = share_tick.tick() => {
+                share_own_binary(&ctx, &paths).await;
+                continue;
+            }
+            _ = tokio::time::sleep_until(next_check) => {
+                next_check = tokio::time::Instant::now() + spread(every);
+                let Some(client) = &client else { continue };
+                if paths.load().trial.is_some() {
+                    continue;
+                }
+                match update::latest_manifest(client).await {
+                    Ok(signed) => (signed, "GitHub".to_string()),
+                    Err(e) => {
+                        eprintln!("[update] release check: {e}");
+                        continue;
+                    }
+                }
+            }
+            Some(hint) = hints.recv() => {
+                if last_hint.is_some_and(|t| t.elapsed() < UPDATE_HINT_GAP)
+                    || paths.load().trial.is_some()
+                {
+                    continue;
+                }
+                last_hint = Some(tokio::time::Instant::now());
+                let Ok(peer) = hint.node_id.parse::<EndpointId>() else { continue };
+                match fetch::release(&ctx.endpoint, peer, Duration::from_secs(10)).await {
+                    Ok(signed) => (signed, format!("peer {}", peer.fmt_short())),
+                    Err(e) => {
+                        eprintln!("[update] {} runs v{}, but its release: {e}", peer.fmt_short(), hint.version);
+                        continue;
+                    }
+                }
+            }
+        };
+        if let Err(e) = consider_release(&ctx, &paths, client.as_ref(), &signed, &from).await {
+            eprintln!("[update] {e}");
+        }
+    }
+}
+
+/// Install `signed`'s release if it is newer than this node runs and was never rolled back
+/// here, then restart into it.
+async fn consider_release(
+    ctx: &Ctx,
+    paths: &update::Paths,
+    client: Option<&reqwest::Client>,
+    signed: &update::SignedManifest,
+    from: &str,
+) -> Result<(), String> {
+    let manifest = signed
+        .verify()
+        .map_err(|e| format!("release from {from}: {e}"))?;
+    let running = update::running_version();
+    if !update::newer(&manifest.version, running) || paths.load().bad.contains(&manifest.version) {
+        return Ok(());
+    }
+    let name = update::own_asset().ok_or("no release binary for this OS and architecture")?;
+    let asset = manifest
+        .asset(name)
+        .ok_or_else(|| format!("v{} has no {name}", manifest.version))?
+        .clone();
+    println!(
+        "[update] v{} is out (this node runs v{running}, heard from {from}); fetching {name}",
+        manifest.version
+    );
+    // Peers that run it on this OS and architecture hold the binary in their stores.
+    let own = ctx.node_id.clone();
+    let providers: Vec<EndpointId> = ctx
+        .with_state(|st| {
+            st.nodes
+                .iter()
+                .filter(|n| {
+                    n.node_id != own
+                        && n.version == manifest.version
+                        && n.os == std::env::consts::OS
+                        && n.arch == std::env::consts::ARCH
+                })
+                .filter_map(|n| n.node_id.parse().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let bytes = match binary_from_peers(ctx, &asset, providers).await {
+        Ok(bytes) => {
+            println!("[update] got {name} from peers");
+            bytes
+        }
+        Err(peer_err) => match client {
+            Some(client) => update::download_asset(client, &manifest, &asset).await?,
+            None => return Err(format!("{name} from peers: {peer_err}")),
+        },
+    };
+    update::install(paths, signed, &manifest, &asset, &bytes)?;
+    println!(
+        "[update] installed v{} (v{running} kept as {}); restarting into it",
+        manifest.version,
+        paths.prev().display()
+    );
+    update::request_restart();
+    Ok(())
+}
+
+/// The release binary from peers' stores, by its BLAKE3 hash, checked against its SHA-256.
+async fn binary_from_peers(
+    ctx: &Ctx,
+    asset: &update::Asset,
+    providers: Vec<EndpointId>,
+) -> Result<Vec<u8>, String> {
+    if providers.is_empty() {
+        return Err("no peer runs it on this OS and architecture".into());
+    }
+    let hash: iroh_blobs::Hash = asset
+        .blake3
+        .parse()
+        .map_err(|e| format!("bad BLAKE3 hash in the manifest: {e}"))?;
+    let store = ctx
+        .with_state(|st| st.store.clone())
+        .flatten()
+        .ok_or("no store")?;
+    tokio::time::timeout(
+        UPDATE_PEER_FETCH,
+        store.downloader.download(hash, providers),
+    )
+    .await
+    .map_err(|_| "timed out".to_string())?
+    .map_err(|e| e.to_string())?;
+    store
+        .blobs
+        .adopt(hash, &format!("sha256:{}", asset.sha256))
+        .await
+}
+
+/// Keep the release binary this node runs in its store, so peers on the same OS and
+/// architecture can update from it; the one it ran before is let go.
+/// Does nothing once it is there.
+async fn share_own_binary(ctx: &Ctx, paths: &update::Paths) {
+    let Some(signed) = paths.running_manifest() else {
+        return;
+    };
+    let Some(asset) = signed
+        .verify()
+        .ok()
+        .and_then(|m| update::own_asset().and_then(|n| m.asset(n).cloned()))
+    else {
+        return;
+    };
+    let digest = format!("sha256:{}", asset.sha256);
+    let mut state = paths.load();
+    if state.shared.as_deref() == Some(digest.as_str()) {
+        return;
+    }
+    let exe = paths.exe.clone();
+    let Ok(Ok(bytes)) = tokio::task::spawn_blocking(move || std::fs::read(exe)).await else {
+        return;
+    };
+    if update::sha256_hex(&bytes) != asset.sha256 {
+        return;
+    }
+    if let Err(e) = ctx.blobs.put(&bytes, Some(&digest)).await {
+        eprintln!("[update] could not share this binary with peers: {e}");
+        return;
+    }
+    if let Some(old) = state.shared.replace(digest.clone()) {
+        if old != digest {
+            let _ = ctx.blobs.forget(&old).await;
+        }
+    }
+    let _ = paths.save(&state);
+    println!("[update] this node now serves its release binary to peers");
+}
+
+// ---------------------------------------------------------------------------------------
 // Mesh
 // ---------------------------------------------------------------------------------------
 
@@ -766,6 +999,8 @@ struct Mesh {
     summary_rx: watch::Receiver<Option<StatsSummary>>,
     inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
     deploy_tx: mpsc::UnboundedSender<Deploy>,
+    /// Peers whose beats show a newer release than this node runs (`update_actor`).
+    update_tx: mpsc::UnboundedSender<UpdateHint>,
 }
 
 /// The next event on a topic, or never when not subscribed.
@@ -797,6 +1032,7 @@ impl Mesh {
         summary_rx: watch::Receiver<Option<StatsSummary>>,
         inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
         deploy_tx: mpsc::UnboundedSender<Deploy>,
+        update_tx: mpsc::UnboundedSender<UpdateHint>,
     ) -> Self {
         Mesh {
             ctx,
@@ -832,11 +1068,13 @@ impl Mesh {
             summary_rx,
             inventory_rx,
             deploy_tx,
+            update_tx,
         }
     }
 
     async fn run(mut self) {
         self.subscribe_events().await;
+        update::READY.store(true, std::sync::atomic::Ordering::Relaxed);
         self.refresh_own_inventory(false).await;
         let mut beat_tick = every(Duration::from_secs(self.beat_interval_secs));
         // When the gossip subscription ends, stop polling it and re-subscribe with backoff.
@@ -1095,6 +1333,7 @@ impl Mesh {
     /// Publish the beats topic's neighbors for the probe, the Paths actor and `/api/net`.
     fn neighbors_changed(&mut self) {
         let neighbors: Vec<String> = self.receiver.neighbors().map(|id| id.to_string()).collect();
+        update::NEIGHBORS.store(neighbors.len() as u64, std::sync::atomic::Ordering::Relaxed);
         self.ctx
             .net
             .neighbors
@@ -1549,6 +1788,12 @@ impl Mesh {
 
     async fn on_beat(&mut self, mut beat: Beat) {
         self.learn_addresses(&beat);
+        if update::newer(&beat.version, update::running_version()) {
+            let _ = self.update_tx.send(UpdateHint {
+                node_id: beat.node_id.clone(),
+                version: beat.version.clone(),
+            });
+        }
         self.rejoin_if_one_sided(&beat).await;
         // Stamp with our clock once admitted, so clock skew between hosts cannot cause
         // early TTL pruning.

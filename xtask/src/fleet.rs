@@ -655,8 +655,12 @@ fn report(names: &[String], builds: &HashMap<String, String>) -> (bool, String) 
             ""
         };
         text.push_str(&format!(
-            "    {:<8} build {:<12} probe #{:<4} {}/{}  {}{}{}\n",
+            "    {:<12} {:<8} build {:<12} probe #{:<4} {}/{}  {}{}{}\n",
             name,
+            node.and_then(|n| n["version"].as_str())
+                .filter(|v| !v.is_empty())
+                .map(|v| format!("v{v}"))
+                .unwrap_or_else(|| "v?".into()),
             if build.is_empty() {
                 "?"
             } else {

@@ -77,6 +77,11 @@ and config field names) were accepted for a while after the rename and were remo
    longer `message_id_retention` removed the extra messages; cut the remaining duplicate gossip frames (IDONTWANT as
    in GossipSub v1.2); start Windows scale nodes without WMI; the API reading `watch` snapshots instead of locking
    node state.
+2. **Done — 2026-10-28: Self-update.** Beats carry the version a node runs; a node checks GitHub hourly and
+   follows peers whose beats show a newer release, verifies the CI-signed `dialtone-release.json` (release key in
+   `src/update.rs`), fetches the binary from same-platform peers (iroh-blobs) or GitHub, installs it A/B
+   (`dialtone.prev`) and restarts through its service; a trial binary that is not healthy in 3 minutes or fails to
+   start 3 times is rolled back and marked bad. `tests/update.rs`.
 2. **Done — 2026-10-27: Direct links for video (phase 3).** `dialtone link export <name> --udp|--tcp <addr>` and
    `dialtone link import <node>/<name> --udp|--tcp <addr>` carry a local source to one peer over a direct QUIC
    connection (`dialtone/link/1`): UDP as QUIC datagrams (split and rejoined when too large; late packets dropped,

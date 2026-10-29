@@ -475,6 +475,7 @@ fn self_beat(
         observed_remote_addrs: vec!["local:self".to_string()],
         tailnet_used: false,
         devices: Vec::new(),
+        version: dialtone::update::running_version().to_string(),
         geo_location: cached_local_public_ip_geo(),
         probe: None,
         store: Some(StoreStats {
@@ -697,6 +698,16 @@ async fn join_with_invite(opts: &CliOptions, raw: &str) -> Result<serde_json::Va
 }
 
 async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> {
+    // Only the node that owns the state dir cleans its run dir and updates itself: `hud` and
+    // one-shot runs may share it with a running node.
+    let owns_run_dir = serve_http && opts.action != "hud" && !opts.once;
+    let update_paths = dialtone::update::Paths::current().ok();
+    let auto_update = owns_run_dir && update_paths.as_ref().is_some_and(dialtone::update::enabled);
+    if auto_update {
+        if let Some(p) = &update_paths {
+            dialtone::update::on_start(p);
+        }
+    }
     let verbose_boot = serve_http || !opts.once;
     let config_path = default_config_path();
     let blob_dir = default_store_dir();
@@ -707,9 +718,6 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
     } else {
         Blobs::open(&blob_dir).await?
     };
-    // Only the node that owns the state dir cleans its run dir: `hud` and one-shot runs may
-    // share it with a running node whose processes and programs must not be touched.
-    let owns_run_dir = serve_http && opts.action != "hud" && !opts.once;
     let run_dir = blob_dir.parent().unwrap_or(&blob_dir).join("run");
     if owns_run_dir {
         let reaped = dialtone::supervisor::reap_stale_processes(&run_dir);
@@ -1321,6 +1329,7 @@ async fn run_node(mut opts: CliOptions, serve_http: bool) -> Result<(), String> 
             seed_ids,
             known_peer_addrs,
             print_first_beat: !serve_http,
+            update: update_paths.clone().filter(|_| auto_update),
             control_rx,
         },
     );
@@ -1366,12 +1375,15 @@ async fn shutdown_signal() -> &'static str {
             _ = tokio::signal::ctrl_c() => "SIGINT",
             _ = recv_or_pending(&mut term) => "SIGTERM",
             _ = recv_or_pending(&mut hup) => "SIGHUP",
+            _ = dialtone::update::restart_token().cancelled() => "update",
         }
     }
     #[cfg(not(unix))]
     {
-        let _ = tokio::signal::ctrl_c().await;
-        "ctrl-c"
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => "ctrl-c",
+            _ = dialtone::update::restart_token().cancelled() => "update",
+        }
     }
 }
 
@@ -2084,5 +2096,9 @@ async fn main() {
     if let Err(err) = result {
         eprintln!("dialtone: {err}");
         std::process::exit(1);
+    }
+    if dialtone::update::restart_requested() {
+        println!("[update] exiting so the service starts the new binary");
+        std::process::exit(dialtone::update::EXIT_RESTART);
     }
 }

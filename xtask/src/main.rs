@@ -1,6 +1,7 @@
 //! Dev tasks for dialtone. `./dialtone.sh <task>` and `cargo xtask <task>` both run this.
 
 mod fleet;
+mod release;
 mod scale;
 mod util;
 
@@ -21,6 +22,9 @@ dialtone dev tasks (./dialtone.sh <task>, or cargo xtask <task>)
                            --release      every node downloads the latest GitHub release (SHA-256 checked)
                            --tag vX.Y.Z   ... or this release
   fleet                  probe results of every node in the live mesh
+  release-manifest V DIR sign DIR's dialtone-* binaries as release V (DIALTONE_RELEASE_KEY):
+                         dialtone-release.json and .sig, which nodes verify updates with
+  release-pubkey         the public key of DIALTONE_RELEASE_KEY
 
 `deploy`, `fleet` and `scale-fleet` read this fleet's hosts from fleet.local.env (never committed).";
 
@@ -35,6 +39,8 @@ fn main() {
         Some("scale-fleet") => scale::fleet(rest),
         Some("deploy") => fleet::deploy(rest),
         Some("fleet") => fleet::report_live(),
+        Some("release-manifest") => release::manifest(rest),
+        Some("release-pubkey") => release::pubkey(),
         Some("help" | "-h" | "--help") | None => {
             println!("{HELP}");
             Ok(())

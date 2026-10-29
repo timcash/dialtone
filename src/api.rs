@@ -598,6 +598,7 @@ impl NodeState {
             observed_remote_addrs: Vec::new(),
             tailnet_used: false,
             devices: Vec::new(),
+            version: crate::update::running_version().to_string(),
             geo_location: cached_local_public_ip_geo(),
             probe: None,
             store: None,

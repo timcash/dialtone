@@ -9,3 +9,5 @@ description = "Dev tasks for dialtone: lint, check, deploy, fleet, scale (`cargo
 base64 = { version = "0.22.1", default-features = false, features = ["std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 sha2 = { version = "0.11", default-features = false }
+blake3 = { version = "1.8", default-features = false, features = ["std"] }
+ed25519-dalek = { version = "3.0.0", default-features = false }
