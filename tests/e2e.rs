@@ -495,3 +495,84 @@ fn seed_back() {
     until_ok(60, "s-b joins s-a once it is back", || sees_two(18917));
     println!("    6. A node that started while its seed was down joined it once the seed was back");
 }
+
+/// A seed that restarts is joined again within seconds, even by nodes that stay each
+/// other's neighbors meanwhile (they have neighbors enough, so only the seed's stale
+/// beats bring them back to it; it knows no peers of its own).
+#[test]
+fn seed_restart() {
+    let s = TempDir::new("seedrestart");
+    const API_R: [u16; 4] = [18918, 18919, 18920, 18921];
+    const QUIC_R: [&str; 4] = ["19518", "19519", "19520", "19521"];
+    let names = ["r-a", "r-b", "r-c", "r-d"];
+    let dirs: Vec<_> = names.iter().map(|n| s.join(n)).collect();
+    for d in &dirs {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let listen = |k: usize| format!("127.0.0.1:{}", API_R[k]);
+    let la = listen(0);
+    let a_args = [
+        "up",
+        "--node",
+        names[0],
+        "--listen",
+        &la,
+        "--private-mesh",
+        "--quic-port",
+        QUIC_R[0],
+        "--secret",
+        "dt-E2E_Seed_Restart_Secret_2026!",
+    ];
+    let mut sa = Node::start(&dirs[0], &s.join("r-a.log"), API_R[0], &a_args);
+    until_ok(30, "r-a API up", || {
+        get_json(API_R[0], "/api/mesh").is_some()
+    });
+    let invite = run_ok(Some(&dirs[0]), &["invite", "--listen", &la, "--ttl", "10m"])
+        .trim()
+        .to_string();
+    let mut others = Vec::new();
+    for k in 1..4 {
+        let l = listen(k);
+        run_ok(
+            Some(&dirs[k]),
+            &[
+                "join",
+                &invite,
+                "--node",
+                names[k],
+                "--listen",
+                &l,
+                "--private-mesh",
+                "--once",
+            ],
+        );
+        others.push(Node::start(
+            &dirs[k],
+            &s.join(&format!("{}.log", names[k])),
+            API_R[k],
+            &[
+                "up",
+                "--node",
+                names[k],
+                "--listen",
+                &l,
+                "--private-mesh",
+                "--quic-port",
+                QUIC_R[k],
+            ],
+        ));
+    }
+    let sees_four = |port: u16| {
+        get_json(port, "/api/mesh").is_some_and(|m| m["nodes"].as_array().map(Vec::len) == Some(4))
+    };
+    until_ok(90, "r-a sees all four", || sees_four(API_R[0]));
+    sa.stop();
+    let _sa = Node::start(&dirs[0], &s.join("r-a2.log"), API_R[0], &a_args);
+    // Before the fix this took until the old r-a was pruned (5 minutes).
+    until_ok(60, "the restarted seed is joined again", || {
+        sees_four(API_R[0])
+    });
+    println!(
+        "    7. A seed that restarted was joined again by nodes that kept their own neighbors"
+    );
+}

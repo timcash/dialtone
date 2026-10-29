@@ -1058,17 +1058,25 @@ impl Mesh {
         dialed
     }
 
-    /// Join the seeds this node has heard no beat from. A group of nodes that are each
+    /// Join the seeds this node has heard no fresh beat from. A group of nodes that are each
     /// other's neighbors but split from the rest (they all started while the seed was down)
-    /// has neighbors enough, so `keep_neighbors` would never bring it back.
+    /// has neighbors enough, so `keep_neighbors` would never bring it back. A seed that
+    /// restarted counts once its beats go stale, not only once it is pruned (minutes later).
     async fn join_unheard_seeds(&mut self) {
         if !self.subscribed || self.keys.is_none() {
             return;
         }
         let own = self.ctx.endpoint.id();
+        let now = now_unix();
         let heard: HashSet<String> = self
             .ctx
-            .with_state(|st| st.nodes.iter().map(|n| n.node_id.clone()).collect())
+            .with_state(|st| {
+                st.nodes
+                    .iter()
+                    .filter(|n| now.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n))
+                    .map(|n| n.node_id.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         let unheard: Vec<EndpointId> = self
             .seed_ids

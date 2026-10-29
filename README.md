@@ -613,7 +613,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is a one-line wrapper for `cargo xtask <task>`. Nothing else is needed on the machine (no Python, jq or curl); `deploy` and `scale-fleet` reach other machines with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
 
-`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down).
+`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down, a seed that restarted).
 
 ```bash
 ./dialtone.sh check     # lint, fmt, cargo test (one-node and three-node tests included), release build
