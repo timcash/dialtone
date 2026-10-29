@@ -391,7 +391,7 @@ A node that runs from `~/.dialtone/bin` (every service install does) updates its
 - **A/B install.** The running binary moves aside as `dialtone.prev`, the new one takes its path, and the node exits (code 75) so its service starts the new one.
 - **Trial and rollback.** The new binary is kept once it has run for a minute with gossip joined and, if the old one had neighbors, at least one neighbor. If it is not healthy within 3 minutes, or it fails to start 3 times, `dialtone.prev` takes the path back, the version is marked bad in `~/.dialtone/update.json` (never tried again), and the old binary runs.
 
-`DIALTONE_AUTO_UPDATE=0` turns it off. A binary run from anywhere else (a development build) never replaces itself. `./dialtone.sh fleet` shows the version every node runs.
+`DIALTONE_AUTO_UPDATE=0` turns it off. A binary run from anywhere else (a development build) never replaces itself. `./dialtone.sh test --only probes` shows the version every test VM runs.
 
 ### Render Service Unit Templates (`service`)
 
@@ -451,7 +451,7 @@ Every running node checks the gossip mesh every 30 seconds. These checks read wh
 | `NBR` | The node has at least two gossip neighbors (one in a two-node mesh) |
 | `BEAT` | Every peer's beats are fresh (within three of its beat intervals) and every peer hears as many nodes as this one |
 
-A full probe also tests the node's other capabilities, which move data, so it runs only when asked (`dialtone probe --all`, or `POST /api/probe` with `{"all": true}`; `deploy` runs one on this machine):
+A full probe also tests the node's other capabilities, which move data, so it runs only when asked (`dialtone probe --all`, or `POST /api/probe` with `{"all": true}`; `./dialtone.sh test` and `deploy` run one on every test VM):
 
 | Check | What it proves |
 | :--- | :--- |
@@ -476,20 +476,18 @@ Gossip is routed the way [libp2p GossipSub](https://docs.libp2p.io/concepts/pubs
 - **Details on focus.** What beats leave out (devices, the full probe report, processes with their status, services, the rolling summary, store, full stats and transport) is fetched for the node a HUD focuses (`GET /api/details?node_id=…`, which asks that node over `dialtone/fetch/1` and keeps the answer for 10s).
 - **Peers that go silent are forgotten.** A peer pruned from the mesh is no longer a join candidate (seeds stay), so a node short of neighbors does not keep dialing dead peers.
 
-`./dialtone.sh scale N [secs]` starts N nodes on this machine, each given 3 random seeds, and reports how long until every node sees all N and the traffic per node (`GET /api/net`: socket bytes from iroh's counters, gossip messages, neighbors, and iroh-gossip's own counts of data frames, duplicates included, and control messages). Measured on one Mac:
+`./dialtone.sh test --here --only scale --scale N [--secs S]` starts N nodes on this machine, each given 3 random seeds, and reports how long until every node sees all N and the traffic per node (`GET /api/net`: socket bytes from iroh's counters, gossip messages, neighbors, and iroh-gossip's own counts of data frames, duplicates included, and control messages). Measured on one laptop:
 
 | Nodes | Before | After |
 | ---: | :--- | :--- |
 | 10 | converged in 4s; 56 Mbit/s in and out per node, 2001 connections opened | converged in 7s; 60 kbit/s per node, 4.6 neighbors |
 | 30 | never converged (180s) | converged in 8s; 120 kbit/s per node |
 | 50 | — | converged in 19s; 200 kbit/s per node |
-| 100 | — | converged in 48s on one overloaded Mac |
+| 100 | — | converged in 48s on one overloaded laptop |
 
-With gossip only and compact beats (envelope v6), 50 nodes on the same Mac converge in 12s at 42.5 kbit/s in per node (14 kbit/s of it gossip payload, 1.33 data frames per message delivered). On the live three-node fleet a node takes in 0.76 kbit/s of gossip payload; the rest of its roughly 11 kbit/s is iroh's own upkeep of relay and paths.
+With gossip only and compact beats (envelope v6), 50 nodes on the same laptop converge in 12s at 42.5 kbit/s in per node (14 kbit/s of it gossip payload, 1.33 data frames per message delivered). On the live mesh a node takes in 0.76 kbit/s of gossip payload; the rest of its roughly 11 kbit/s is iroh's own upkeep of relay and paths.
 
-`./dialtone.sh scale-fleet N [secs]` does the same across machines: N throwaway nodes on every machine in `fleet.local.env`, one mesh, seeds anywhere in the fleet, links direct or through the relay. It waits 60s after convergence, then reports traffic per machine, and stops every scale node afterwards (the nodes' own daemons are left alone). With the three-machine fleet, 20 nodes on each (60 in all) converge in 30 to 50s. Runs then settle in one of two states: most at about 420 kbit/s in per node, of which 133 kbit/s is beats (10 messages a second, about 2.1 data frames per message delivered); some at about 850 kbit/s, with 15 messages a second delivered and 2.8 frames each. The extra messages are not yet explained; old beats arriving up to 100s late (seen in node logs as replay rejects) suggest messages coming round again after iroh-gossip forgets their ids. Changing Plumtree's graft timeout made no difference.
-
-On Windows the test starts its nodes through WMI. Microsoft Defender's behaviour monitoring once flagged `dialtone.exe` on a fleet machine during such a run (`Trojan:Win32/Bearfoos.A!ml`, a machine-learning detection) and quarantined it, which stopped that machine's node; check Defender before running it on a machine you depend on.
+`./dialtone.sh test --only scale --scale N [--secs S]` does the same across the test VMs: N throwaway nodes on every VM in `fleet.local.env` (each runs the VM's installed binary), one mesh, seeds on any VM, links direct or through the relay. It waits 60s after convergence (`SCALE_WARMUP`), then reports traffic per VM, and stops every scale node afterwards (the VMs' own nodes are left alone); `./dialtone.sh test` ends with it, 10 nodes per VM. On the three VMs (US, Europe, Asia), 10 nodes on each (30 in all) converge in 17s and run at about 61 kbit/s in and out per node, of which 12.5 kbit/s is gossip payload (6 messages a second, 2.14 data frames per message delivered, 4.2 neighbors, none graylisted). Before the fleet moved to VMs, 20 nodes on each of three machines (60 in all) converged in 30 to 50s and settled in one of two states: most at about 420 kbit/s in per node, of which 133 kbit/s is beats (10 messages a second, about 2.1 data frames per message delivered); some at about 850 kbit/s, with 15 messages a second delivered and 2.8 frames each. The extra messages are not yet explained; old beats arriving up to 100s late (seen in node logs as replay rejects) suggest messages coming round again after iroh-gossip forgets their ids. Changing Plumtree's graft timeout made no difference.
 
 ### Direct links (video)
 
@@ -628,34 +626,50 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 ## 10. Working on dialtone: `cargo xtask` / `./dialtone.sh`
 
-Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is a one-line wrapper for `cargo xtask <task>`. Nothing else is needed on the machine (no Python, jq or curl); `deploy` and `scale-fleet` reach other machines with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
+Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is a one-line wrapper for `cargo xtask <task>`. Nothing else is needed on the machine (no Python, jq or curl); `test`, `dev` and `deploy` reach the test VMs with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
 
 `cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down, a seed that restarted) and `tests/update.rs` (self-update from a signed release: a healthy one kept, one that panics or never gets healthy rolled back, a node updated from a peer; not on macOS, where the test releases would be unsigned).
 
+**All testing goes through one command, `./dialtone.sh test`.** With no options it runs every test end to end on Linux VMs, never on the machine you type on: that machine only lints, packs the sources and drives the VMs over SSH. Options pick one part, or run on this machine instead (GitHub CI runs `test --here`).
+
 ```bash
-./dialtone.sh check     # lint, fmt, cargo test (one-node and three-node tests included), release build
-./dialtone.sh lint      # leak gate (no host names / NodeIds in git) and domain language
-cargo test --test e2e   # just the three-node test (about a minute)
-./dialtone.sh scale 30  # 30 nodes on this machine: convergence time and traffic per node
-./dialtone.sh scale-fleet 20   # 20 nodes on every fleet machine as one mesh: traffic per machine
-./dialtone.sh deploy    # check, build, install on every node, wait until every node's probe
-                        # passes on the exact binary just installed, then a full probe here
-./dialtone.sh deploy --skip-check   # ... without running check first
-./dialtone.sh fleet     # each node's latest probe in the live mesh
+./dialtone.sh test                  # everything: lint here; on the build VM the whole cargo test
+                                    # suite and the release build; every VM installs that build and
+                                    # must pass its gossip probe on exactly that binary, then a full
+                                    # probe; then 10 scale nodes per VM as one mesh
+./dialtone.sh test --scale 20       # ... with 20 scale nodes per VM (--scale 0 skips them)
+./dialtone.sh test --only lint      # leak gate (no host names / NodeIds in git), domain language,
+                                    # fmt and clippy
+./dialtone.sh test --only suite     # just cargo test, on the build VM
+./dialtone.sh test --only suite -- --test e2e   # just the three-node tests (anything after -- goes
+                                                # to cargo test)
+./dialtone.sh test --only scale --scale 20 --secs 60   # just the scale test on the VMs' installed
+                                    # build: convergence time and traffic per node per VM
+./dialtone.sh test --only probes    # every VM's latest probe in the live mesh; fails unless all pass
+./dialtone.sh test --here           # on this machine instead: lint, cargo test, release build
+./dialtone.sh test --here --only scale --scale 30   # 30 nodes on this machine; fails above
+                                    # SCALE_BUDGET_KBPS kbit/s in or out per node when set
 ```
 
-`deploy` and `fleet` read your fleet's hosts from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine. Any machine with a node can drive a deploy: macOS (its node runs under launchd) or Windows. The local build goes to every node of the same OS; the first node of the other OS builds the binary for its OS from the sources (so it needs cargo).
+Two more tasks look after the VMs; neither tests anything:
 
 ```bash
-FLEET_NODES="node-alpha node-beta node-gamma node-delta"   # every node; deploy waits for all of their probes
-LOCAL_NODE="node-alpha"                          # this machine (macOS or Windows)
-LOCAL_LAUNCHD="com.timcash.dialtone"             # macOS only
-WINDOWS_NODES="node-beta node-gamma"             # other Windows nodes, over SSH
-MAC_NODES="node-delta"                           # other macOS nodes, over SSH
-LAUNCHD_node_delta="com.timcash.dialtone"        # its launchd label (this is the default)
-SSH_node_beta="node-beta|-J node-gamma user@10.0.0.2"   # SSH alternatives; first that answers wins
-SSH_node_gamma="node-gamma"
-SSH_node_delta="user@node-delta"
+./dialtone.sh dev       # set up every VM for development: C toolchain, pkg-config, git, curl (apt)
+                        # and Rust (rustup) with rustfmt and clippy; skips what is already there
+./dialtone.sh dev user@10.0.0.9     # ... or any machine you can SSH to
+./dialtone.sh deploy    # build on the build VM and install on every VM, waiting for every probe
+                        # (`test` already deploys the build it tested)
+./dialtone.sh deploy --tag v0.5.1   # every VM downloads that release instead (SHA-256 checked)
+```
+
+The VMs come from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine. Each VM runs a node as the systemd user service `dialtone` (`dialtone daemon install`); the build VM keeps its cargo target directory between runs, so only what changed is rebuilt, and every other VM gets the build VM's binary (so all VMs share its OS and architecture).
+
+```bash
+FLEET_NODES="vm-alpha vm-beta vm-gamma"          # every VM; deploy waits for all of their probes
+BUILD_NODE="vm-alpha"                            # builds and runs the test suite (default: the first)
+SSH_vm_alpha="-i $HOME/.ssh/id_vm user@203.0.113.10"   # SSH options and destination
+SSH_vm_beta="user@203.0.113.11|-J vm-alpha user@10.0.0.2"   # alternatives; the first that answers wins
+SSH_vm_gamma="user@203.0.113.12"
 ```
 
 To check a single running node by hand, `./dialtone mesh-test --expect-peers 3` verifies its security posture, mesh convergence and a live blob transfer.

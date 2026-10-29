@@ -19,7 +19,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Run Dialtone CI/CD & Zero-Leak Gate
-        run: ./dialtone.sh check
+        run: ./dialtone.sh test --here
 
   build-and-release:
     needs: verify

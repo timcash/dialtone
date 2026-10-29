@@ -1,7 +1,7 @@
 //! Small helpers shared by the tasks: running commands, the node's HTTP API, hashing.
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
@@ -77,11 +77,6 @@ fn show(cmd: &Command) -> String {
         s.push_str(&a.to_string_lossy());
     }
     s
-}
-
-pub fn sha256_file(path: &Path) -> R<String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    Ok(hex(&Sha256::digest(&bytes)))
 }
 
 pub fn hex(bytes: &[u8]) -> String {

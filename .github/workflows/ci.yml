@@ -14,10 +14,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Lint with Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Run Dialtone CI/CD Suite
-        run: ./dialtone.sh check
+      - name: Every test on this runner (lint, fmt, clippy, cargo test, release build)
+        run: ./dialtone.sh test --here
 
   cross-platform-matrix:
     needs: test-and-verify
@@ -30,5 +28,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Unit tests, one-node and three-node tests
-        run: cargo test --workspace
+      - name: The test suite (unit, one node, three nodes, self-update)
+        shell: bash
+        run: ./dialtone.sh test --here --only suite

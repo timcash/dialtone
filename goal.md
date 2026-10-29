@@ -3,7 +3,7 @@
 ## Domain Language
 
 Every concept has **one word**. Code, CLI, API, HUD, docs and commit messages use that word and nothing else.
-`./dialtone.sh lint` (part of `check`) fails if a banned synonym appears in `src/` (lines that must keep an old name for wire / CLI
+`./dialtone.sh test --only lint` (part of every `test`) fails if a banned synonym appears in `src/` (lines that must keep an old name for wire / CLI
 compatibility, or that name an Iroh library type, carry a `// compat` marker).
 
 | Word | Means | Code form | Never say |
@@ -73,10 +73,18 @@ and config field names) were accepted for a while after the rename and were remo
 
 ## Current Work
 
-1. **Next — candidates:** rerun `scale-fleet` to see whether the
+1. **Next — candidates:** rerun the scale test (`test --only scale`) to see whether the
    longer `message_id_retention` removed the extra messages; cut the remaining duplicate gossip frames (IDONTWANT as
-   in GossipSub v1.2); start Windows scale nodes without WMI; the API reading `watch` snapshots instead of locking
+   in GossipSub v1.2); the API reading `watch` snapshots instead of locking
    node state.
+2. **Done — 2026-10-29: Every test on the VMs.** `./dialtone.sh test` runs every node and test end to end on
+   the three Linux test VMs (only the lint checks run on the machine that drives it): the build VM runs the whole
+   `cargo test` suite and the release build, every VM installs that build and passes its probes (gossip probe on
+   the exact binary, then a full probe), then scale nodes on every VM as one mesh. All testing goes through that one
+   command: `--here` runs on one machine (GitHub CI), `--only lint|suite|scale|probes` picks a part, `--scale`,
+   `--secs` and `-- ARGS` tune it; the old `check`, `lint`, `scale`, `scale-fleet` and `fleet` tasks are gone and
+   `deploy` no longer tests. `./dialtone.sh dev` sets any node up for development (C toolchain, pkg-config, git,
+   curl, Rust with rustfmt and clippy). The desktop machines left the test fleet.
 2. **Done — 2026-10-28: Self-update.** Beats carry the version a node runs; a node checks GitHub hourly and
    follows peers whose beats show a newer release, verifies the CI-signed `dialtone-release.json` (release key in
    `src/update.rs`), fetches the binary from same-platform peers (iroh-blobs) or GitHub, installs it A/B
@@ -87,9 +95,9 @@ and config field names) were accepted for a while after the rename and were remo
    connection (`dialtone/link/1`): UDP as QUIC datagrams (split and rejoined when too large; late packets dropped,
    never queued), TCP as one stream per connection. `GET /api/links`, `dialtone link list` and the HUD show each
    link's path (DIRECT, or RELAY when hole punching fails) and QUIC's Rtt. Checked by e2e (UDP with a split packet,
-   TCP) on macOS and Windows. Live, between two Windows fleet machines on a direct path: a 720p30 H.264 stream
+   TCP) on macOS and Windows. Live, between two machines on a direct path: a 720p30 H.264 stream
    at 4 Mbit/s crossed with every one of 11,539 packets delivered and none dropped, while 64-byte probes echoed
-   through the same link took 13 ms p50 / 29 ms p99 round trip. Capturing the Cam Link 4K with ffmpeg on the sending
+   through the same link took 13 ms p50 / 29 ms p99 round trip. Capturing a USB camera with ffmpeg on the sending
    machine ran at only 0.17x real time (5 fps): the capture and scaling, not the link, limit live camera video there.
 3. **Done — 2026-10-27: Deploys announced over gossip (phase 2).** A signed `Deploy` message on the events topic
    (program advert, blob ticket, target NodeIds) replaced inventory-driven auto-deploy. Only targeted nodes pull,
@@ -104,19 +112,18 @@ and config field names) were accepted for a while after the rename and were remo
    links are repaired from the neighbor lists in beats. The beat interval comes from a 4 KB/s budget
    (`clamp(nodes × 500 B / 4 KB/s, 5, 120)` s), iroh-gossip remembers message ids for 6 minutes, and silent peers
    stop being join candidates. What beats leave out is fetched for the HUD's focused node (`/api/details`).
-   50 nodes on one Mac: converged in 12s at 42.5 kbit/s per node (was 19s at 200); the live fleet takes in
+   50 nodes on one laptop: converged in 12s at 42.5 kbit/s per node (was 19s at 200); the live fleet takes in
    0.76 kbit/s of gossip payload per node and opens no connection in steady state.
 5. **Done — 2026-10-25: Scaling phase B.** Peer scores after GossipSub (delivered, invalid; failed fetches only
    steer fetches elsewhere — counting them toward the graylist cut a node off from the live mesh during a rolling
    deploy, caught by the deploy gate). Scuttlebutt-style catch-up from one neighbor on joining and every 12 beats,
    with frames still signed by their authors; inventory fetches return the signed frame too. Devices and full
    probe reports are fetched for the HUD's focused node (`GET /api/details`) instead of gossiped.
-   `./dialtone.sh scale-fleet N` runs N nodes on every fleet machine as one mesh: 60 nodes on three machines
+   `./dialtone.sh scale-fleet N` runs N nodes on every fleet machine as one mesh: 60 nodes on three machines (before the move to VMs)
    converge in 30 to 50s and mostly run at about 420 kbit/s per node; some runs settle at about 850 kbit/s with
    50% more messages delivered (open; suspected: old beats coming round after iroh-gossip forgets their ids). A longer Plumtree graft timeout looked like
    a fix after one run each and made no difference over two more. `GET /api/net` adds iroh-gossip's data /
-   control frame counts and each peer's last fetch error. Defender flagged a Windows node's binary during a fleet
-   run (`Bearfoos.A!ml`, behaviour-based; the test starts nodes through WMI) and quarantined it.
+   control frame counts and each peer's last fetch error.
 6. **Done — 2026-10-25: Gossip that scales (Phase A, after libp2p GossipSub).** Each node keeps 2 to 5 neighbors
    and joins three random known peers only when it has fewer than two, instead of joining every known peer every
    beat. Beats are a fixed ~1.2 KB (binary envelope v5, no seed lists, no per-peer probe results, no details); they
@@ -179,7 +186,7 @@ and config field names) were accepted for a while after the rename and were remo
 | F7 | **Node runtime & API** | 5-stage boot, six actors with one shutdown token, shared node state, `httparse` API on `127.0.0.1:8788`, bearer-token POST auth, Host / Origin checks, live channel join | `main.rs` (`run_node`), `actors.rs`, `api.rs` |
 | F8 | **HUD** | Three.js + H3 globe (vendored, compiled into the binary), `top`-style overlay, focused node's device list, 5-step tour with captions (mesh, blobs and pulls, process, beats, devices), blob / process FX | `hud.rs`, `hud/`, `h3_land.rs` |
 | F12 | **Devices** | Per-OS listing of connected cameras, microphones, speakers, keyboards, pointers, displays, printers, storage, Bluetooth devices; gossiped in the Inventory | `devices.rs`, Devices actor |
-| F9 | **Verification** | `mesh-test`, `probe`, unit + live iroh tests, `cargo xtask check` (zero-leak gate, domain-language gate, fmt, tests incl. one-node and three-node tests), GitHub CI matrix | `lib.rs`, `tests/`, `xtask/`, `.github/workflows/` |
+| F9 | **Verification** | `mesh-test`, `probe`, unit + live iroh tests, `./dialtone.sh test` (zero-leak gate, domain-language gate, fmt, clippy, the cargo test suite, probes and a scale test on the VMs; `--here` on one machine), GitHub CI matrix | `lib.rs`, `tests/`, `xtask/`, `.github/workflows/` |
 | F10 | **Services & records** | Service refs, Services, key leases, policies, Event / Alert / Log / Kv records with cursor pagination, proof validation | `service.rs`, `record.rs` |
 | F11 | **CLI & fixtures** | Argument parsing, `help`, and the `*-fixture` preview commands | `main.rs` |
 
@@ -292,7 +299,7 @@ When a repository is public, any hardcoded operational defaults become public in
 - **No Hardcoded Seed Keys in Source**: `default_seeds()` returns an empty list by default unless populated from the host's local `~/.dialtone/config.json` (`seeds`).
 - **Hardened `.gitignore`**: Explicitly ignore all local state, config, and secret patterns:
   - `/target`, `/bin`, `.dialtone/`, `.dialtone2/`, `*config.json`, `*mesh*.json`, `*.key`, `*.pem`, `*.secret`, `.env`, `.env.*`.
-- **Automated Leak Gate in `cargo xtask lint`**: it scans all git-tracked files and fails the build if any forbidden machine name or real `NodeId` appears anywhere in the repository.
+- **Automated Leak Gate in `./dialtone.sh test --only lint`**: it scans all git-tracked files and fails the build if any forbidden machine name or real `NodeId` appears anywhere in the repository.
 
 ### Pillar B — Out-of-Band Host Provisioning over SSH / Tailnet (`~/.dialtone/config.json`)
 - **Host-Local State Directory**: All runtime identity and mesh membership config is stored in `~/.dialtone/` (`C:\Users\<user>\.dialtone\` on Windows), never inside any git checkout directory.

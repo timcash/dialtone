@@ -3,6 +3,7 @@
 mod fleet;
 mod release;
 mod scale;
+mod test;
 mod util;
 
 use util::{cargo, root, run, say, R};
@@ -10,35 +11,43 @@ use util::{cargo, root, run, say, R};
 const HELP: &str = "\
 dialtone dev tasks (./dialtone.sh <task>, or cargo xtask <task>)
 
-  check                  lint, fmt, tests (one node and three nodes included), release build
-  lint                   leak gate (no host names / NodeIds in git) and domain language
-  scale [N] [secs]       N nodes on this machine (default 20): gossip convergence and bytes per
-                         node over secs (default 30); fails above SCALE_BUDGET_KBPS (kbit/s in
-                         or out per node) when set
-  scale-fleet [N] [secs] N nodes on every fleet machine (default 10), one mesh across them:
-                         convergence and bytes per node per machine
-  deploy [opts]          build, install on every node, wait for every probe to pass
-                           --skip-check   do not run `check` first
-                           --release      every node downloads the latest GitHub release (SHA-256 checked)
+  test [opts]            every test, from one command. With no options, end to end on the VMs:
+                         lint here; the build VM runs the whole cargo test suite and the release
+                         build; every VM installs that build and must pass its gossip probe on it,
+                         then a full probe; then scale nodes on every VM as one mesh
+                           --here         run on this machine instead: lint, cargo test, release
+                                          build (what GitHub CI runs)
+                           --only lint    just the leak gate, domain language, fmt and clippy
+                           --only suite   just cargo test (on the build VM, or --here)
+                           --only scale   just the scale test: convergence and traffic per node (on
+                                          the VMs' installed build, or --here with this machine's
+                                          release build, failing above SCALE_BUDGET_KBPS kbit/s)
+                           --only probes  every VM's latest probe in the live mesh
+                           --scale N      scale nodes per VM (default 10; 0 skips) or --here
+                                          (default 20 with --only scale; none otherwise)
+                           --secs S       how long the scale test measures traffic (default 30)
+                           -- ARGS        passed to cargo test, e.g. -- --test e2e
+  dev [node ...]         set up nodes for development (C toolchain, pkg-config, git, curl, Rust
+                         with rustfmt and clippy): every VM, or the ones named (a VM's name or any
+                         SSH destination)
+  deploy [opts]          build on the build VM, install on every VM, wait for every probe to pass;
+                         runs no tests (`test` deploys the build it tested)
+                           --release      every VM downloads the latest GitHub release (SHA-256 checked)
                            --tag vX.Y.Z   ... or this release
-  fleet                  probe results of every node in the live mesh
   release-manifest V DIR sign DIR's dialtone-* binaries as release V (DIALTONE_RELEASE_KEY):
                          dialtone-release.json and .sig, which nodes verify updates with
   release-pubkey         the public key of DIALTONE_RELEASE_KEY
 
-`deploy`, `fleet` and `scale-fleet` read this fleet's hosts from fleet.local.env (never committed).";
+`test` (without --here), `dev` and `deploy` read the VMs from fleet.local.env (never committed).";
 
 fn main() {
     std::env::set_current_dir(root()).expect("cd to the repository");
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest = args.get(1..).unwrap_or_default();
     let result = match args.first().map(String::as_str) {
-        Some("check") => check(),
-        Some("lint") => lint(),
-        Some("scale") => scale::local(rest),
-        Some("scale-fleet") => scale::fleet(rest),
+        Some("test") => test::test(rest),
+        Some("dev") => fleet::dev(rest),
         Some("deploy") => fleet::deploy(rest),
-        Some("fleet") => fleet::report_live(),
         Some("release-manifest") => release::manifest(rest),
         Some("release-pubkey") => release::pubkey(),
         Some("help" | "-h" | "--help") | None => {
@@ -53,16 +62,20 @@ fn main() {
     }
 }
 
-pub fn check() -> R<()> {
+/// The checks that run no node: the leak gate, domain language, formatting and clippy.
+pub fn check_static() -> R<()> {
     lint()?;
     say("Format");
     run(cargo().args(["fmt", "--all", "--check"]))?;
-    say("Tests (unit, one node, three nodes)");
-    run(cargo().args(["test", "--workspace"]))?;
-    say("Release build");
-    build()?;
-    say("ALL CHECKS PASSED");
-    Ok(())
+    say("Clippy");
+    run(cargo().args([
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings",
+    ]))
 }
 
 pub fn build() -> R<()> {

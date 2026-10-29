@@ -1,4 +1,4 @@
-//! Scale tests: many nodes on this machine, or on every fleet machine as one mesh, gossip
+//! Scale tests: many nodes on this machine, or on every VM of the fleet as one mesh, gossip
 //! only; convergence time and traffic per node.
 
 use crate::fleet::Fleet;
@@ -14,7 +14,6 @@ struct Nodes {
     root: PathBuf,
     children: Vec<Child>,
     secret: &'static str,
-    fleet: Option<Fleet>,
 }
 
 impl Nodes {
@@ -26,7 +25,6 @@ impl Nodes {
             root,
             children: Vec::new(),
             secret,
-            fleet: None,
         })
     }
 
@@ -71,11 +69,6 @@ impl Drop for Nodes {
             let _ = c.wait();
         }
         let _ = std::fs::remove_dir_all(&self.root);
-        if let Some(fleet) = &self.fleet {
-            for node in &fleet.windows {
-                let _ = fleet.win(node, WIN_SCALE_STOP);
-            }
-        }
     }
 }
 
@@ -124,29 +117,13 @@ fn identity(dir: &PathBuf, node: &str, private: bool) -> R<(String, String)> {
     Ok((id, ip))
 }
 
-fn ensure_built() -> R<()> {
-    if release_bin().exists() {
-        Ok(())
-    } else {
-        crate::build()
-    }
-}
-
-fn arg<T: std::str::FromStr>(args: &[String], i: usize, default: T) -> R<T> {
-    args.get(i)
-        .map(|a| a.parse().map_err(|_| format!("not a number: {a}")))
-        .unwrap_or(Ok(default))
-}
-
-pub fn local(args: &[String]) -> R<()> {
-    let n: usize = arg(args, 0, 20)?;
-    let secs: f64 = arg(args, 1, 30.0)?;
+pub fn local(n: usize, secs: f64) -> R<()> {
     let budget: f64 = std::env::var("SCALE_BUDGET_KBPS")
         .ok()
         .and_then(|b| b.parse().ok())
         .unwrap_or(0.0);
     say(&format!("Scale test: {n} nodes, measuring for {secs}s"));
-    ensure_built()?;
+    crate::build()?;
     let mut nodes = Nodes::new("dialtone-scale", "dt-Scale_Local_Mesh_Secret_2026!")?;
 
     // Identities (in parallel), then each node allowlists everyone but dials only 3 seeds.
@@ -310,43 +287,37 @@ fn max(xs: &[f64]) -> f64 {
     xs.iter().cloned().fold(0.0, f64::max)
 }
 
-// PowerShell on a Windows node. __PREFIX__, __N__, __URL__ and __SECRET__ are filled in per node.
-// Scale nodes carry the scale secret on their command line (their state directory is only in
-// their environment); the node's own daemon never does.
-const WIN_SCALE_STOP: &str = r#"
-  Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "dialtone.exe" -and $_.CommandLine -like "*Scale_Fleet_Mesh_Secret*" } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  Start-Sleep -Milliseconds 800
-  Remove-Item -Recurse -Force (Join-Path $env:TEMP "dialtone-scale") -ErrorAction SilentlyContinue
+// Shell on a VM. __PREFIX__, __N__, __URL__ and __SECRET__ are filled in per VM. Scale nodes
+// carry the scale secret on their command line (their state directory is only in their
+// environment); the VM's own daemon never does.
+const SCALE_STOP: &str = r#"
+pkill -f Scale_Fleet_Mesh_Secret || true
+sleep 1
+rm -rf /tmp/dialtone-scale
 "#;
-const WIN_SCALE_IDS: &str = r#"
-  $root = Join-Path $env:TEMP "dialtone-scale"; $exe = "$env:USERPROFILE\.dialtone\bin\dialtone.exe"
-  1..__N__ | ForEach-Object {
-    $dir = Join-Path $root "s$_"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    $env:DIALTONE_STATE_DIR = $dir
-    $st = (& $exe status --node "__PREFIX__-s$_" | Out-String) | ConvertFrom-Json
-    Write-Output ("NODE __PREFIX__-s$_ " + $st.diagnostics.node_id + " " + $st.diagnostics.bound_non_tailnet_ipv4 + " " + $_)
-  }
+const SCALE_IDS: &str = r#"
+set -e
+root=/tmp/dialtone-scale; exe="$HOME/.dialtone/bin/dialtone"
+for k in $(seq 1 __N__); do
+  mkdir -p "$root/s$k"
+  echo "NODE $k $(DIALTONE_STATE_DIR="$root/s$k" "$exe" status --node "__PREFIX__-s$k" 2>/dev/null | tr -d '\n')"
+done
 "#;
-// Configs come from scale-configs.json (copied over first); nodes start through WMI so they
-// outlive the SSH session.
-const WIN_SCALE_START: &str = r#"
-  $root = Join-Path $env:TEMP "dialtone-scale"; $exe = "$env:USERPROFILE\.dialtone\bin\dialtone.exe"
-  $configs = Get-Content -Raw "$env:USERPROFILE\.dialtone\scale-configs.json" | ConvertFrom-Json
-  1..__N__ | ForEach-Object {
-    $dir = Join-Path $root "s$_"
-    [IO.File]::WriteAllText((Join-Path $dir "config.json"), $configs."s$_")
-    $line = "cmd.exe /c set DIALTONE_STATE_DIR=$dir&& `"$exe`" up --node __PREFIX__-s$_ --listen 127.0.0.1:$(21000 + $_) --quic-port $(20000 + $_) --relay-url __URL__ --secret __SECRET__ > `"$dir\node.log`" 2>&1"
-    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $line } | Out-Null
-  }
+// After the config files are written; setsid and nohup so the nodes outlive the SSH session.
+const SCALE_START: &str = r#"
+root=/tmp/dialtone-scale; exe="$HOME/.dialtone/bin/dialtone"
+for k in $(seq 1 __N__); do
+  DIALTONE_STATE_DIR="$root/s$k" setsid nohup "$exe" up --node "__PREFIX__-s$k" --listen "127.0.0.1:$((21000 + k))" --quic-port "$((20000 + k))" --relay-url "__URL__" --secret "__SECRET__" > "$root/s$k/node.log" 2>&1 < /dev/null &
+done
 "#;
-const WIN_SCALE_NET: &str = r#"
-  1..__N__ | ForEach-Object {
-    try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 "http://127.0.0.1:$(21000 + $_)/api/net").Content } catch { "{}" }
-  }
+const SCALE_NET: &str = r#"
+for k in $(seq 1 __N__); do
+  curl -s -m 5 "http://127.0.0.1:$((21000 + k))/api/net" | tr -d '\n'
+  echo
+done
 "#;
 
-/// A scale node anywhere in the fleet.
+/// A scale node on one of the VMs.
 #[derive(Clone)]
 struct ScaleNode {
     id: String,
@@ -355,73 +326,71 @@ struct ScaleNode {
     machine: String,
 }
 
-pub fn fleet(args: &[String]) -> R<()> {
-    let n: usize = arg(args, 0, 10)?;
-    let secs: f64 = arg(args, 1, 60.0)?;
+/// Stops every scale node on every VM when the test ends (or fails).
+struct ScaleStop<'a>(&'a Fleet);
+
+impl Drop for ScaleStop<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.each(|node| self.0.sh(node, SCALE_STOP));
+    }
+}
+
+/// N throwaway nodes on every VM (each runs the VM's installed binary), one mesh across them:
+/// convergence, then traffic per node per VM.
+pub fn on_fleet(fleet: &Fleet, n: usize, secs: f64) -> R<()> {
     let url = std::env::var("SCALE_RELAY_URL")
         .unwrap_or_else(|_| "https://usw1-1.relay.n0.iroh.link./".into());
     let secret = "dt-Scale_Fleet_Mesh_Secret_2026!";
-    let mut fleet = Fleet::load()?;
-    ensure_built()?;
     say(&format!(
-        "Fleet scale test: {n} nodes on each of: {} (relay {url}), measuring for {secs}s",
+        "Scale test: {n} nodes on each of: {} (relay {url}), measuring for {secs}s",
         fleet.nodes.join(" ")
     ));
-    fleet.pick_routes()?;
-    for node in &fleet.windows {
-        let _ = fleet.win(node, WIN_SCALE_STOP);
+    let _stop = ScaleStop(fleet);
+    for (_, r) in fleet.each(|node| fleet.sh(node, SCALE_STOP)) {
+        r?;
     }
-    let local = fleet.local.clone();
-    let mut nodes = Nodes::new("dialtone-scale-fleet", secret)?;
 
-    // Identities on every machine.
-    let mut all: Vec<ScaleNode> = std::thread::scope(|s| {
-        let jobs: Vec<_> = (1..=n)
-            .map(|k| {
-                let dir = nodes.dir(k);
-                let name = format!("{local}-s{k}");
-                s.spawn(move || identity(&dir, &name, false))
-            })
-            .collect();
-        jobs.into_iter()
-            .enumerate()
-            .map(|(i, j)| {
-                let (id, ip) = j.join().expect("identity thread")?;
-                Ok(ScaleNode {
-                    id,
-                    ip,
-                    index: i + 1,
-                    machine: local.clone(),
-                })
-            })
-            .collect::<R<Vec<_>>>()
-    })?;
-    for node in &fleet.windows {
-        let script = WIN_SCALE_IDS
-            .replace("__PREFIX__", node)
-            .replace("__N__", &n.to_string());
-        for line in fleet.win(node, &script)?.lines() {
-            let w: Vec<&str> = line.split_whitespace().collect();
-            if let ["NODE", _, id, ip, idx] = w[..] {
-                all.push(ScaleNode {
-                    id: id.into(),
-                    ip: ip.into(),
-                    index: idx.parse().map_err(|_| "bad index")?,
-                    machine: node.clone(),
-                });
-            }
+    // Identities on every VM.
+    let mut all: Vec<ScaleNode> = Vec::new();
+    for (machine, out) in fleet.each(|node| {
+        fleet.sh(
+            node,
+            &SCALE_IDS
+                .replace("__PREFIX__", node)
+                .replace("__N__", &n.to_string()),
+        )
+    }) {
+        for line in out?.lines() {
+            let mut w = line.splitn(3, ' ');
+            let (Some("NODE"), Some(idx), Some(status)) = (w.next(), w.next(), w.next()) else {
+                continue;
+            };
+            let v: Value = serde_json::from_str(status)
+                .map_err(|e| format!("status of a scale node on {machine}: {e}"))?;
+            let d = &v["diagnostics"];
+            all.push(ScaleNode {
+                id: d["node_id"].as_str().ok_or("status has no node_id")?.into(),
+                ip: d["bound_non_tailnet_ipv4"]
+                    .as_str()
+                    .unwrap_or("127.0.0.1")
+                    .into(),
+                index: idx.parse().map_err(|_| "bad index")?,
+                machine: machine.clone(),
+            });
         }
     }
-    let machines = 1 + fleet.windows.len();
     let total = all.len();
-    if total != n * machines {
-        return Err(format!("expected {} identities, got {total}", n * machines));
+    if total != n * fleet.nodes.len() {
+        return Err(format!(
+            "expected {} identities, got {total}",
+            n * fleet.nodes.len()
+        ));
     }
 
-    // Configs: everyone allowlists everyone; 3 random seeds anywhere in the fleet, reached
-    // directly (LAN address) or through the relay.
+    // Configs: everyone allowlists everyone; 3 random seeds on any VM, reached directly (the
+    // VM's own address) or through the relay.
     let mut rng = Rng::new(total as u64);
-    let mut by_machine: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut configs: BTreeMap<String, String> = BTreeMap::new();
     for me in &all {
         let others: Vec<ScaleNode> = all.iter().filter(|o| o.id != me.id).cloned().collect();
         let seeds = rng.sample(&others, 3);
@@ -429,55 +398,39 @@ pub fn fleet(args: &[String]) -> R<()> {
             "allowlist": others.iter().map(|o| &o.id).collect::<Vec<_>>(),
             "seeds": seeds.iter().map(|o| json!({"node_id": o.id, "relay_url": url, "ip_addrs": [format!("{}:{}", o.ip, 20000 + o.index)]})).collect::<Vec<_>>(),
         });
-        by_machine
+        configs
             .entry(me.machine.clone())
             .or_default()
-            .insert(format!("s{}", me.index), cfg.to_string());
-    }
-    for (k, cfg) in by_machine.get(&local).into_iter().flatten() {
-        std::fs::write(nodes.root.join(k).join("config.json"), cfg).map_err(|e| e.to_string())?;
-    }
-    for node in &fleet.windows {
-        let file = nodes.root.join(format!("configs-{node}.json"));
-        std::fs::write(&file, json!(by_machine.get(node)).to_string())
-            .map_err(|e| e.to_string())?;
-        fleet.copy_to(node, &file, ".dialtone/scale-configs.json")?;
+            .push_str(&format!(
+                "cat > \"/tmp/dialtone-scale/s{}/config.json\" <<'CONFIG'\n{cfg}\nCONFIG\n",
+                me.index
+            ));
     }
 
     // Start every node.
-    for k in 1..=n {
-        nodes.start(k, &format!("{local}-s{k}"), &["--relay-url", &url])?;
-    }
-    for node in &fleet.windows {
-        let script = WIN_SCALE_START
+    for (_, r) in fleet.each(|node| {
+        let start = SCALE_START
             .replace("__PREFIX__", node)
             .replace("__N__", &n.to_string())
             .replace("__URL__", &url)
             .replace("__SECRET__", secret);
-        fleet.win(node, &script)?;
+        let configs = configs.get(node).map(String::as_str).unwrap_or("");
+        fleet.sh(node, &format!("{configs}{start}"))
+    }) {
+        r?;
     }
     println!("    started {total} nodes");
-    nodes.fleet = Some(fleet);
-    let fleet = nodes.fleet.as_ref().expect("just set");
 
-    // Every node's /api/net, by node name, with its machine.
+    // Every node's /api/net, by node name, with its VM.
+    let net = SCALE_NET.replace("__N__", &n.to_string());
     let snapshot = || -> BTreeMap<String, (String, Value)> {
         let mut out = BTreeMap::new();
-        let mut add = |machine: &str, v: Value| {
-            if let Some(name) = v["node"].as_str() {
-                out.insert(name.to_string(), (machine.to_string(), v.clone()));
-            }
-        };
-        for k in 1..=n {
-            add(
-                &local,
-                util::get((21000 + k) as u16, "/api/net").unwrap_or(Value::Null),
-            );
-        }
-        for node in &fleet.windows {
-            let script = WIN_SCALE_NET.replace("__N__", &n.to_string());
-            for line in fleet.win(node, &script).unwrap_or_default().lines() {
-                add(node, serde_json::from_str(line).unwrap_or(Value::Null));
+        for (machine, text) in fleet.each(|node| fleet.sh(node, &net)) {
+            for line in text.unwrap_or_default().lines() {
+                let v: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+                if let Some(name) = v["node"].as_str() {
+                    out.insert(name.to_string(), (machine.clone(), v.clone()));
+                }
             }
         }
         out
@@ -508,7 +461,7 @@ pub fn fleet(args: &[String]) -> R<()> {
     println!("{status}");
     if !ok {
         return Err(format!(
-            "the fleet mesh of {total} nodes did not converge within about 4 minutes"
+            "the scale mesh of {total} nodes did not converge within about 4 minutes"
         ));
     }
     println!(

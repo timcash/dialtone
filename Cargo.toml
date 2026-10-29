@@ -21,7 +21,7 @@ path = "src/main.rs"
 # main.rs has no unit tests; its empty test harness would compile the binary a second time.
 test = false
 
-# `--release` is the everyday optimized build used by `cargo xtask check`, GitHub CI and fleet deploys:
+# `--release` is the everyday optimized build used by `./dialtone.sh test`, GitHub CI and deploys:
 # no LTO and parallel, incremental codegen, so a one-file change rebuilds in seconds.
 [profile.release]
 opt-level = 2
