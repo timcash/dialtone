@@ -1,4 +1,5 @@
-//! Three real nodes on this machine, then an open channel joined with only an invite.
+//! Three real nodes on this machine, an open channel joined with only an invite, and a
+//! node whose seed was down when it started.
 // A node is an index into NAMES, QUIC, API and the state directories together.
 #![allow(clippy::needless_range_loop)]
 mod common;
@@ -425,4 +426,72 @@ fn open_channel_invite() {
         "an expired invite was accepted"
     );
     println!("    5. Open channel: o-b joined o-a with only an invite (no allowlists); an expired one is refused");
+}
+
+/// A node that starts while its only seed is down joins it once the seed is back, even
+/// after its first dial to the seed failed (iroh-gossip never dials such a peer again).
+#[test]
+fn seed_back() {
+    let s = TempDir::new("seedback");
+    let (a, b) = (s.join("a"), s.join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    let a_args = [
+        "up",
+        "--node",
+        "s-a",
+        "--listen",
+        "127.0.0.1:18916",
+        "--private-mesh",
+        "--quic-port",
+        "19516",
+        "--secret",
+        "dt-E2E_Seed_Back_Secret_2026!",
+    ];
+    let mut sa = Node::start(&a, &s.join("a.log"), 18916, &a_args);
+    until_ok(30, "s-a API up", || get_json(18916, "/api/mesh").is_some());
+    let invite = run_ok(
+        Some(&a),
+        &["invite", "--listen", "127.0.0.1:18916", "--ttl", "10m"],
+    )
+    .trim()
+    .to_string();
+    run_ok(
+        Some(&b),
+        &[
+            "join",
+            &invite,
+            "--node",
+            "s-b",
+            "--listen",
+            "127.0.0.1:18917",
+            "--private-mesh",
+            "--once",
+        ],
+    );
+    sa.stop();
+    let _sb = Node::start(
+        &b,
+        &s.join("b.log"),
+        18917,
+        &[
+            "up",
+            "--node",
+            "s-b",
+            "--listen",
+            "127.0.0.1:18917",
+            "--private-mesh",
+            "--quic-port",
+            "19517",
+        ],
+    );
+    until_ok(30, "s-b API up", || get_json(18917, "/api/mesh").is_some());
+    // Long enough for s-b's first dial to its seed to fail.
+    sleep(Duration::from_secs(40));
+    let _sa = Node::start(&a, &s.join("a2.log"), 18916, &a_args);
+    let sees_two = |port: u16| {
+        get_json(port, "/api/mesh").is_some_and(|m| m["nodes"].as_array().map(Vec::len) == Some(2))
+    };
+    until_ok(60, "s-b joins s-a once it is back", || sees_two(18917));
+    println!("    6. A node that started while its seed was down joined it once the seed was back");
 }

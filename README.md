@@ -613,7 +613,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 
 Rust and cargo do everything: the dev tasks are a small crate, `xtask/`, and `./dialtone.sh <task>` is a one-line wrapper for `cargo xtask <task>`. Nothing else is needed on the machine (no Python, jq or curl); `deploy` and `scale-fleet` reach other machines with the system's `ssh` / `scp`, and `git` runs the leak gate. Only the `dialtone` binary is distributed and run.
 
-`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite).
+`cargo test` covers each capability with real iroh endpoints (signed gossip between two nodes, blob pulls through the node's downloader, the handshake allowlist, a two-node probe, the supervisor and the API), and runs real nodes from the built binary on every OS: `tests/node.rs` (one node: CLI, secrets, allowlist, API auth, supervisor, blobs, probe, hud) and `tests/e2e.rs` (three nodes: mesh, gossip only in steady state, probes, mesh deploys, a direct link, a stopped node caught, an open channel joined by invite, a node that started while its seed was down).
 
 ```bash
 ./dialtone.sh check     # lint, fmt, cargo test (one-node and three-node tests included), release build
@@ -627,15 +627,18 @@ cargo test --test e2e   # just the three-node test (about a minute)
 ./dialtone.sh fleet     # each node's latest probe in the live mesh
 ```
 
-`deploy` and `fleet` read your fleet's hosts from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine. Any machine with a node can drive a deploy: macOS (its node runs under launchd) or Windows, where the local build is the Windows binary every Windows node gets.
+`deploy` and `fleet` read your fleet's hosts from `fleet.local.env` next to the script. It is never committed (`*.local.env` is ignored), so host names and addresses stay on your machine. Any machine with a node can drive a deploy: macOS (its node runs under launchd) or Windows. The local build goes to every node of the same OS; the first node of the other OS builds the binary for its OS from the sources (so it needs cargo).
 
 ```bash
-FLEET_NODES="node-alpha node-beta node-gamma"   # every node; deploy waits for all of their probes
+FLEET_NODES="node-alpha node-beta node-gamma node-delta"   # every node; deploy waits for all of their probes
 LOCAL_NODE="node-alpha"                          # this machine (macOS or Windows)
 LOCAL_LAUNCHD="com.timcash.dialtone"             # macOS only
-WINDOWS_NODES="node-beta node-gamma"             # other Windows nodes; from macOS the first compiles the Windows binary
+WINDOWS_NODES="node-beta node-gamma"             # other Windows nodes, over SSH
+MAC_NODES="node-delta"                           # other macOS nodes, over SSH
+LAUNCHD_node_delta="com.timcash.dialtone"        # its launchd label (this is the default)
 SSH_node_beta="node-beta|-J node-gamma user@10.0.0.2"   # SSH alternatives; first that answers wins
 SSH_node_gamma="node-gamma"
+SSH_node_delta="user@node-delta"
 ```
 
 To check a single running node by hand, `./dialtone mesh-test --expect-peers 3` verifies its security posture, mesh convergence and a live blob transfer.

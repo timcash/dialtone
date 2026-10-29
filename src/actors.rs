@@ -699,6 +699,8 @@ fn random_below(max: u64) -> u64 {
 const MIN_NEIGHBORS: usize = 2;
 /// How many known peers, chosen at random, Mesh joins when it is short of neighbors.
 const JOIN_SAMPLE: usize = 3;
+/// A peer Mesh dials itself for gossip (`dial_for_gossip`) is dialed at most this often.
+const GOSSIP_DIAL_EVERY: Duration = Duration::from_secs(30);
 /// A neighbor whose beats this many times in a row do not list this node is joined again.
 const ONE_SIDED_BEATS: u32 = 2;
 /// Every this many beats, Mesh rebuilds its inventory to catch details that drift slowly
@@ -749,6 +751,8 @@ struct Mesh {
     /// (monotonic ms; see `rejoin_silent_neighbors`).
     neighbor_since: HashMap<EndpointId, u64>,
     silent_rejoined_at: HashMap<EndpointId, u64>,
+    /// When `dial_for_gossip` last dialed each peer (monotonic ms).
+    gossip_dialed_at: HashMap<EndpointId, u64>,
     /// What this node last announced for each program it deploys, by name, with when it was
     /// removed (monotonic ms) for programs it no longer deploys.
     announced: HashMap<String, (Deploy, Option<u64>)>,
@@ -819,6 +823,7 @@ impl Mesh {
             one_sided: HashMap::new(),
             neighbor_since: HashMap::new(),
             silent_rejoined_at: HashMap::new(),
+            gossip_dialed_at: HashMap::new(),
             announced: HashMap::new(),
             announced_all_at: 0,
             new_node_seen: false,
@@ -1003,6 +1008,7 @@ impl Mesh {
         if self.subscribed && self.good_neighbors(&self.receiver) < MIN_NEIGHBORS {
             let peers = self.join_candidates(Some(&self.receiver));
             if !peers.is_empty() {
+                self.dial_for_gossip(&peers);
                 let _ =
                     tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(peers))
                         .await;
@@ -1019,6 +1025,62 @@ impl Mesh {
                         .await;
                 }
             }
+        }
+    }
+
+    /// Dial peers for gossip and hand the connections to it. iroh-gossip (0.101) dials a peer
+    /// only when nothing is queued for it, and keeps what it queued when that dial fails, so a
+    /// seed that was down for a while when this node started is never dialed again and the
+    /// node stays alone after the seed is back. A connection made here sends what it queued.
+    fn dial_for_gossip(&mut self, peers: &[EndpointId]) -> Vec<EndpointId> {
+        let now = monotonic_now_ms();
+        let every = GOSSIP_DIAL_EVERY.as_millis() as u64;
+        let mut dialed = Vec::new();
+        for &peer in peers {
+            if self
+                .gossip_dialed_at
+                .get(&peer)
+                .is_some_and(|at| now.saturating_sub(*at) < every)
+            {
+                continue;
+            }
+            self.gossip_dialed_at.insert(peer, now);
+            dialed.push(peer);
+            let endpoint = self.ctx.endpoint.clone();
+            let gossip = self.gossip.clone();
+            tokio::spawn(async move {
+                let dial = endpoint.connect(peer, iroh_gossip::net::GOSSIP_ALPN);
+                if let Ok(Ok(conn)) = tokio::time::timeout(Duration::from_secs(20), dial).await {
+                    let _ = gossip.handle_connection(conn).await;
+                }
+            });
+        }
+        dialed
+    }
+
+    /// Join the seeds this node has heard no beat from. A group of nodes that are each
+    /// other's neighbors but split from the rest (they all started while the seed was down)
+    /// has neighbors enough, so `keep_neighbors` would never bring it back.
+    async fn join_unheard_seeds(&mut self) {
+        if !self.subscribed || self.keys.is_none() {
+            return;
+        }
+        let own = self.ctx.endpoint.id();
+        let heard: HashSet<String> = self
+            .ctx
+            .with_state(|st| st.nodes.iter().map(|n| n.node_id.clone()).collect())
+            .unwrap_or_default();
+        let unheard: Vec<EndpointId> = self
+            .seed_ids
+            .iter()
+            .filter(|id| **id != own && !heard.contains(&id.to_string()))
+            .copied()
+            .collect();
+        let dialed = self.dial_for_gossip(&unheard);
+        if !dialed.is_empty() {
+            let _ =
+                tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(dialed))
+                    .await;
         }
     }
 
@@ -1324,6 +1386,7 @@ impl Mesh {
         }
         self.ctx.scores(PeerScores::decay);
         self.keep_neighbors().await;
+        self.join_unheard_seeds().await;
         self.rejoin_silent_neighbors().await;
 
         let counter = self.counter;

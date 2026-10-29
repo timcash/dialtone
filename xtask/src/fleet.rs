@@ -1,11 +1,12 @@
-//! The fleet: hosts from fleet.local.env, PowerShell over SSH, deploy and the probe report.
+//! The fleet: hosts from fleet.local.env, PowerShell or sh over SSH, deploy and the probe report.
 
 use crate::util::{self, home, output, quietly, release_bin, run, say, R};
 use base64::Engine;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const LIVE_API: u16 = 8788;
 
@@ -17,6 +18,10 @@ pub struct Fleet {
     launchd: String,
     /// Windows nodes reached over SSH (from macOS the first compiles the Windows binary).
     pub windows: Vec<String>,
+    /// macOS nodes reached over SSH (from Windows the first compiles the macOS binary).
+    pub macs: Vec<String>,
+    /// Each macOS node's launchd label (LAUNCHD_<node>).
+    labels: HashMap<String, String>,
     ssh: HashMap<String, String>,
     routes: HashMap<String, Vec<String>>,
 }
@@ -61,33 +66,45 @@ impl Fleet {
             .cloned()
             .ok_or("LOCAL_NODE is not set")?;
         let windows = words("WINDOWS_NODES");
-        let ssh = windows
+        let macs = words("MAC_NODES");
+        let var = |prefix: &str, n: &str| {
+            vars.get(&format!("{prefix}_{}", n.replace('-', "_")))
+                .cloned()
+        };
+        let labels = macs
             .iter()
             .map(|n| {
-                let key = format!("SSH_{}", n.replace('-', "_"));
                 (
                     n.clone(),
-                    vars.get(&key).cloned().unwrap_or_else(|| n.clone()),
+                    var("LAUNCHD", n).unwrap_or_else(|| "com.timcash.dialtone".into()),
                 )
             })
+            .collect();
+        let ssh = windows
+            .iter()
+            .chain(&macs)
+            .map(|n| (n.clone(), var("SSH", n).unwrap_or_else(|| n.clone())))
             .collect();
         Ok(Fleet {
             nodes: words("FLEET_NODES"),
             local,
             launchd: vars.get("LOCAL_LAUNCHD").cloned().unwrap_or_default(),
             windows,
+            macs,
+            labels,
             ssh,
             routes: HashMap::new(),
         })
     }
 
-    /// For each Windows node, the first SSH alternative in SSH_<node> (`a|b|...`, SSH options
+    /// For each Windows and macOS node, the first SSH alternative in SSH_<node> (`a|b|...`, SSH options
     /// followed by the destination) that answers, tried in parallel per node.
     pub fn pick_routes(&mut self) -> R<()> {
         let found: Vec<(String, Option<Vec<String>>)> = std::thread::scope(|s| {
             let jobs: Vec<_> = self
                 .windows
                 .iter()
+                .chain(&self.macs)
                 .map(|node| {
                     let alts = self.ssh[node].clone();
                     s.spawn(move || {
@@ -193,6 +210,82 @@ impl Fleet {
             .filter(|s| s.len() == 64)
             .ok_or_else(|| format!("install on {node} did not report its binary"))
     }
+
+    /// Run a shell script on a macOS node over SSH (the script goes on stdin); returns stdout.
+    pub fn sh(&self, node: &str, script: &str) -> R<String> {
+        let route = self
+            .routes
+            .get(node)
+            .ok_or_else(|| format!("no SSH route to {node}"))?;
+        let mut child = Command::new("ssh")
+            .args(route)
+            .arg("/bin/sh -s")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("ssh {node}: {e}"))?;
+        child
+            .stdin
+            .take()
+            .expect("piped stdin")
+            .write_all(script.as_bytes())
+            .map_err(|e| format!("ssh {node}: {e}"))?;
+        let out = child
+            .wait_with_output()
+            .map_err(|e| format!("ssh {node}: {e}"))?;
+        if !out.status.success() {
+            return Err(format!("script on {node} failed ({})", out.status));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// Run `pre` (it puts the new binary at ~/.dialtone/deploy-new/dialtone), then install it
+    /// and restart the node's launchd job; returns the installed binary's SHA-256.
+    fn mac_install(&self, node: &str, pre: &str) -> R<String> {
+        let script = format!(
+            "set -e\nmkdir -p \"$HOME/.dialtone/deploy-new\"\n{pre}\n{}",
+            MAC_INSTALL.replace("LABEL", &self.labels[node])
+        );
+        self.sh(node, &script)?
+            .lines()
+            .find_map(|l| l.strip_prefix("SHA256="))
+            .map(|s| s.trim().to_string())
+            .filter(|s| s.len() == 64)
+            .ok_or_else(|| format!("install on {node} did not report its binary"))
+    }
+}
+
+/// Install ~/.dialtone/deploy-new/dialtone on a macOS node, restart its launchd job, print its SHA-256.
+const MAC_INSTALL: &str = r#"
+d="$HOME/.dialtone"
+mkdir -p "$d/bin"
+if [ -f "$d/bin/dialtone" ]; then cp "$d/bin/dialtone" "$d/bin/dialtone.bak"; fi
+chmod 755 "$d/deploy-new/dialtone"
+mv "$d/deploy-new/dialtone" "$d/bin/dialtone"
+launchctl kickstart -k "gui/$(id -u)/LABEL"
+echo "SHA256=$(shasum -a 256 "$d/bin/dialtone" | cut -d' ' -f1)"
+"#;
+
+/// On a macOS node: download the published binary and refuse it unless its SHA-256 matches.
+const MAC_DOWNLOAD: &str = r#"
+n="$HOME/.dialtone/deploy-new/dialtone"
+curl -fsSL "URL" -o "$n"
+want=$(curl -fsSL "URL.sha256" | cut -d' ' -f1)
+if [ "$want" != "$(shasum -a 256 "$n" | cut -d' ' -f1)" ]; then echo "the download does not match its published SHA-256" >&2; exit 1; fi
+"#;
+
+/// The sources a fleet node needs to build dialtone, as a .tgz under target/. The path is
+/// relative: GNU tar (Git Bash) reads `C:\...` as a remote host.
+fn source_tgz() -> R<PathBuf> {
+    std::fs::create_dir_all("target").map_err(|e| e.to_string())?;
+    let src = PathBuf::from("target/dialtone-src.tgz");
+    run(Command::new("tar")
+        .env("COPYFILE_DISABLE", "1")
+        .arg("czf")
+        .arg(&src)
+        .args(["Cargo.toml", "Cargo.lock", ".cargo", "src", "xtask"]))?;
+    Ok(src)
 }
 
 /// Stop the node, install .dialtone\deploy-new\dialtone.exe, restart it at logon, print its SHA-256.
@@ -329,12 +422,7 @@ pub fn deploy(args: &[String]) -> R<()> {
             fleet.windows.join(" ")
         ));
         let tmp = std::env::temp_dir();
-        let src = tmp.join("dialtone-src.tgz");
-        run(Command::new("tar")
-            .env("COPYFILE_DISABLE", "1")
-            .arg("czf")
-            .arg(&src)
-            .args(["Cargo.toml", "Cargo.lock", ".cargo", "src", "xtask"]))?;
+        let src = source_tgz()?;
         fleet.copy_to(builder, &src, ".dialtone/dialtone-src.tgz")?;
         fleet.win(
             builder,
@@ -362,6 +450,70 @@ pub fn deploy(args: &[String]) -> R<()> {
         }
         let _ = std::fs::remove_file(src);
         let _ = std::fs::remove_file(exe);
+    }
+
+    if let Some(tag) = &tag {
+        if !fleet.macs.is_empty() {
+            say(&format!(
+                "Download release {tag} on {}",
+                fleet.macs.join(" ")
+            ));
+        }
+        let download = MAC_DOWNLOAD.replace("URL", &format!("{releases}/dialtone-macos-arm64"));
+        for node in &fleet.macs {
+            let sha = fleet.mac_install(node, &download)?;
+            println!("    {node} {}  (SHA-256 matches the release)", &sha[..16]);
+            expect.insert(node.clone(), sha);
+        }
+    } else if cfg!(target_os = "macos") {
+        // This machine built the macOS binary already.
+        if !fleet.macs.is_empty() {
+            say(&format!("Install on {}", fleet.macs.join(" ")));
+        }
+        for node in &fleet.macs {
+            fleet.sh(node, "mkdir -p \"$HOME/.dialtone/deploy-new\"")?;
+            fleet.copy_to(node, &local, ".dialtone/deploy-new/dialtone")?;
+            let sha = fleet.mac_install(node, "")?;
+            println!("    {node} {}", &sha[..16]);
+            expect.insert(node.clone(), sha);
+        }
+    } else if let Some(builder) = fleet.macs.first() {
+        say(&format!(
+            "Build on {builder}, install on {}",
+            fleet.macs.join(" ")
+        ));
+        let src = source_tgz()?;
+        fleet.sh(builder, "mkdir -p \"$HOME/.dialtone/fleet-build\"")?;
+        fleet.copy_to(builder, &src, ".dialtone/dialtone-src.tgz")?;
+        fleet.sh(
+            builder,
+            r#"set -e
+cd "$HOME/.dialtone/fleet-build"
+tar -xzf "$HOME/.dialtone/dialtone-src.tgz"
+PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p dialtone"#,
+        )?;
+        let built = "cp \"$HOME/.dialtone/fleet-build/target/release/dialtone\" \"$HOME/.dialtone/deploy-new/dialtone\"";
+        let bin = std::env::temp_dir().join("dialtone-macos");
+        if fleet.macs.len() > 1 {
+            fleet.copy_from(
+                builder,
+                ".dialtone/fleet-build/target/release/dialtone",
+                &bin,
+            )?;
+        }
+        for node in &fleet.macs {
+            let sha = if node == builder {
+                fleet.mac_install(node, built)?
+            } else {
+                fleet.sh(node, "mkdir -p \"$HOME/.dialtone/deploy-new\"")?;
+                fleet.copy_to(node, &bin, ".dialtone/deploy-new/dialtone")?;
+                fleet.mac_install(node, "")?
+            };
+            println!("    {node} {}", &sha[..16]);
+            expect.insert(node.clone(), sha);
+        }
+        let _ = std::fs::remove_file(src);
+        let _ = std::fs::remove_file(bin);
     }
 
     say("Waiting for every node's gossip probe to pass on the new build (up to 150s)");
