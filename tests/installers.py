@@ -352,61 +352,84 @@ class Installers(unittest.TestCase):
         Fixture.files[self.asset_path] = b"bad binary"
         self.assertIn("TLS_STATE_RESTORED", self.run_installer(ok=False, error="SHA-256 mismatch"))
 
+    @property
+    def script_name(self):
+        return "install.sh" if UNIX else "install.ps1"
+
+    def to_fixture(self, command):
+        # Point an exact documented command at the fixture copy of the script.
+        source_url = f"https://raw.githubusercontent.com/timcash/dialtone/main/{self.script_name}"
+        self.assertEqual(command.count(source_url), 1, command)
+        self.assertNotIn("\n", command.strip())
+        return command.replace(source_url, f"http://127.0.0.1:{self.server.server_port}/bootstrap/{self.script_name}")
+
     def readme_bootstrap(self):
-        # The exact README Windows command, pointed at the fixture copy of install.ps1.
-        source_url = "https://raw.githubusercontent.com/timcash/dialtone/main/install.ps1"
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        bootstrap = re.search(r"```powershell\n(.*?)\n```", readme, re.S).group(1)
-        self.assertEqual(bootstrap.count(source_url), 1, bootstrap)
-        self.assertNotIn("\n", bootstrap.strip())
-        self.env["DIALTONE_INSTALL_DIR"] = str(self.destination)
-        return bootstrap.replace(source_url, f"http://127.0.0.1:{self.server.server_port}/bootstrap/install.ps1")
+        fence = "sh" if UNIX else "powershell"
+        self.env["DIALTONE_INSTALL_DIR"] = shell_path(self.destination) if UNIX else str(self.destination)
+        return self.to_fixture(re.search(r"```" + fence + r"\n(.*?)\n```", readme, re.S).group(1))
 
     def run_bootstrap(self, command):
-        result = subprocess.run(
-            [self.driver, "-NoProfile", "-NonInteractive", "-Command", command],
-            cwd=self.root, env=self.env, capture_output=True, timeout=45,
-        )
+        if UNIX:
+            argv = [self.driver, "-c", 'export PATH="$DIALTONE_TEST_TOOL_PATH:$PATH"; ' + command]
+        else:
+            argv = [self.driver, "-NoProfile", "-NonInteractive", "-Command", command]
+        result = subprocess.run(argv, cwd=self.root, env=self.env, capture_output=True, timeout=45)
         output = (result.stdout + result.stderr).decode(errors="replace")
         self.assertFalse((self.home / "node state").exists(), output)
         self.assertEqual(list(self.tmp.iterdir()), [], output)
         return result.returncode, output
 
-    @unittest.skipIf(UNIX, "README PowerShell bootstrap")
-    def test_readme_bootstrap_and_tls_restoration(self):
-        Fixture.files["/bootstrap/install.ps1"] = (ROOT / "install.ps1").read_bytes()
-        bootstrap = self.readme_bootstrap()
-        self.legacy_tls_setup()
-        command = self.ps_prefix + "try { " + bootstrap + " } finally { " + self.ps_finally + " }"
+    def test_readme_bootstrap(self):
+        Fixture.files["/bootstrap/" + self.script_name] = (ROOT / self.script_name).read_bytes()
+        command = self.readme_bootstrap()
+        if not UNIX:
+            self.legacy_tls_setup()
+            command = self.ps_prefix + "try { " + command + " } finally { " + self.ps_finally + " }"
         for success in (True, False):
             with self.subTest(bootstrap_download=success):
                 if not success:
-                    del Fixture.files["/bootstrap/install.ps1"]
+                    del Fixture.files["/bootstrap/" + self.script_name]
                 code, output = self.run_bootstrap(command)
                 self.assertEqual(code == 0, success, output)
-                self.assertIn("TLS_STATE_RESTORED", output)
+                if not UNIX:
+                    self.assertIn("TLS_STATE_RESTORED", output)
                 self.assertEqual(self.installed.read_bytes(), self.payloads["v0.5.3", self.asset])
 
-    @unittest.skipIf(UNIX, "README PowerShell bootstrap truncation")
     def test_readme_bootstrap_truncated_script_does_not_install(self):
-        source = (ROOT / "install.ps1").read_bytes()
+        source = (ROOT / self.script_name).read_bytes()
+        call = b'\nmain "$@"' if UNIX else b"\nInstall-Dialtone"
         cuts = {
-            "mid-function": source[: source.index(b"function Install-Dialtone") + 200],
-            "before-call": source[: source.rindex(b"\nInstall-Dialtone")],
+            "mid-function": source[:200],
+            "before-call": source[: source.rindex(call)],
+            # Every byte, parseable and complete, but the connection closes
+            # before the promised Content-Length: the download still failed.
+            "complete-but-short": source,
         }
         bootstrap = self.readme_bootstrap()
         for label, body in cuts.items():
             with self.subTest(cut=label):
-                # The server promises more bytes than it sends: curl reports a
-                # partial transfer after writing what it received.
-                Fixture.files["/bootstrap/install.ps1"] = body
-                Fixture.truncated = {"/bootstrap/install.ps1"}
+                Fixture.files["/bootstrap/" + self.script_name] = body
+                Fixture.truncated = {"/bootstrap/" + self.script_name}
                 Fixture.requests = []
                 code, output = self.run_bootstrap(bootstrap)
-                if label == "mid-function":
-                    self.assertNotEqual(code, 0, output)
+                self.assertNotEqual(code, 0, output)
                 self.assertFalse(self.installed.exists(), output)
                 self.assertEqual([p for p in Fixture.requests if p.startswith("/releases/")], [], output)
+
+    def test_documented_pinned_one_command_form(self):
+        Fixture.files["/bootstrap/" + self.script_name] = (ROOT / self.script_name).read_bytes()
+        docs = (ROOT / "docs/install.md").read_text(encoding="utf-8")
+        start = "sh -c 's=$(curl" if UNIX else "$s = curl.exe"
+        line = next(l for l in docs.splitlines() if l.startswith(start) and "v0.5.3" in l)
+        command = self.to_fixture(line.replace("v0.5.3", "v1.2.3-rc.1"))
+        if not UNIX:
+            # PowerShell's automatic $HOME comes from the profile; isolate it.
+            command = f"Set-Variable HOME '{str(self.home).replace(chr(39), chr(39) * 2)}' -Force; " + command
+        self.destination = self.home / "Applications" / "Dialtone tools"
+        code, output = self.run_bootstrap(command)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.installed.read_bytes(), self.payloads["v1.2.3-rc.1", self.asset])
 
     @unittest.skipUnless(OPTIONS.live_release, "Opt-in HTTPS release smoke test")
     def test_live_release_https(self):

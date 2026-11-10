@@ -25,7 +25,7 @@ An exact minimum glibc version for the existing ARM64 asset has not been verifie
 
 The bootstrap scripts live in the source repository; v0.5.3 release assets do **not** contain `install.sh` or `install.ps1`. The short README commands trust the current `main` script over HTTPS.
 
-The Windows command fetches the script with the built-in `curl.exe` (Windows 10 1803+, Windows 11, Server 2019+), which uses the OS TLS stack, so Windows PowerShell 5.1's legacy .NET TLS default does not apply to the bootstrap. Write `curl.exe`, not `curl`: in Windows PowerShell 5.1, `curl` is an alias for `Invoke-WebRequest`. `iex (...)` receives the whole script at once and parses it before running anything. If the download fails, `iex` gets nothing and reports an error. A cut-off script either fails to parse, or stops before its final `Install-Dialtone` line, so nothing is downloaded or installed. From `cmd.exe`, run `powershell -NoProfile -Command "iex (curl.exe -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.ps1 | Out-String)"`.
+The Windows command fetches the script with the built-in `curl.exe` (Windows 10 1803+, Windows 11, Server 2019+), which uses the OS TLS stack, so Windows PowerShell 5.1's legacy .NET TLS default does not apply to the bootstrap. Write `curl.exe`, not `curl`: in Windows PowerShell 5.1, `curl` is an alias for `Invoke-WebRequest`. Both one-line commands keep the whole script in memory (no temporary file) and run it only if the download succeeded: the Unix form with `&&` after the assignment, the Windows form by checking `$LASTEXITCODE` before `iex`. A failed or cut-off download (for example, a connection that closes before the promised length) therefore runs nothing and fails, even if the bytes received would parse. From `cmd.exe`, run `powershell -NoProfile -Command "$s = curl.exe -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.ps1 | Out-String; if ($LASTEXITCODE) { throw 'install.ps1 download failed' }; iex $s"`.
 
 Without `curl.exe` (older Windows), use PowerShell's own download with TLS 1.2 enabled for the session:
 
@@ -59,11 +59,13 @@ After downloading and reviewing the script:
 ```sh
 sh install.sh --version v0.5.3 --install-dir "$HOME/Applications/Dialtone tools"
 # Or pass options through the one-command form:
-curl -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.sh | sh -s -- --version v0.5.3 --install-dir "$HOME/Applications/Dialtone tools"
+sh -c 's=$(curl -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.sh) && eval "$s"' sh --version v0.5.3 --install-dir "$HOME/Applications/Dialtone tools"
 ```
 
 ```powershell
 & .\install.ps1 -Version v0.5.3 -InstallDir "$HOME\Applications\Dialtone tools"
+# Or pass options through the one-command form:
+$s = curl.exe -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.ps1 | Out-String; if ($LASTEXITCODE) { throw 'install.ps1 download failed' }; & ([ScriptBlock]::Create($s)) -Version v0.5.3 -InstallDir "$HOME\Applications\Dialtone tools"
 ```
 
 Both scripts also accept `DIALTONE_VERSION` and `DIALTONE_INSTALL_DIR` environment variables; explicit options take precedence. Versions must be explicit tags such as `v0.5.3` (or a prerelease tag); `latest` is deliberately rejected. An unavailable tag or asset fails without changing an existing executable. Custom directories can contain spaces and may be relative to your current directory. PowerShell resolves them against its current FileSystem provider location, including after `Set-Location`, rather than the process working directory. They must be writable by your user.

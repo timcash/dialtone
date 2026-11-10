@@ -3,13 +3,13 @@
 Install **v0.5.3** on Linux or macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.sh | sh
+sh -c 's=$(curl -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.sh) && eval "$s"'
 ```
 
 Windows x64 (PowerShell 5.1 or 7; Windows 10 1803+, Windows 11, or Server 2019+ for the built-in `curl.exe`):
 
 ```powershell
-iex (curl.exe -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.ps1 | Out-String)
+$s = curl.exe -fsSL https://raw.githubusercontent.com/timcash/dialtone/main/install.ps1 | Out-String; if ($LASTEXITCODE) { throw 'install.ps1 download failed' }; iex $s
 ```
 
 Dialtone is a single-binary peer-to-peer mesh, local web HUD, blob store, and process supervisor. Installation verifies SHA-256 and places only the executable in `~/.local/bin` (`$HOME\.local\bin` on Windows). It needs no administrator privileges and starts nothing.
