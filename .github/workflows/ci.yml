@@ -6,6 +6,37 @@ on:
   pull_request:
 
 jobs:
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Native Unix installer fixtures (no node starts)
+        if: runner.os != 'Windows'
+        run: python tests/installers.py
+      - name: Native Windows PowerShell 5.1 installer fixtures (no node starts)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: python tests/installers.py --powershell powershell
+      - name: Native PowerShell 7 installer fixtures (no node starts)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python tests/installers.py --powershell pwsh
+      # The real v0.5.3 asset over HTTPS into a temp dir; --help only after the checksum.
+      - name: Live release download (checksum, then --help; no node)
+        if: runner.os != 'Windows'
+        run: python tests/installers.py --live-release Installers.test_live_release_https
+      - name: Windows PowerShell 5.1 live release download (checksum, then --help; no node)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: python tests/installers.py --powershell powershell --live-release Installers.test_live_release_https
+
   test-and-verify:
     runs-on: ubuntu-latest
     steps:
@@ -22,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest]
+        os: [macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
