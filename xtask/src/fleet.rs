@@ -25,7 +25,7 @@ impl Fleet {
     pub fn load() -> R<Fleet> {
         let file = std::env::var("FLEET_FILE").unwrap_or_else(|_| "fleet.local.env".into());
         let text = std::fs::read_to_string(&file).map_err(|_| {
-            format!("{file} not found: it lists this fleet's VMs (see the dev tasks section of README.md)")
+            format!("{file} not found: it lists this fleet's VMs (see the dev tasks section of docs/guide.md)")
         })?;
         let home = crate::util::home().to_string_lossy().replace('\\', "/");
         let mut vars: HashMap<String, String> = HashMap::new();

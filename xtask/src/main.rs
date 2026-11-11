@@ -21,6 +21,8 @@ dialtone dev tasks: ./dialtone.sh <task>
                                           build (what GitHub CI runs)
                            --only lint    just the leak gate, domain language, fmt and clippy
                            --only suite   just cargo test (on the build VM, or --here)
+                           --only installers  local installer fixtures only (Python 3.10+, no nodes);
+                                          after -- pass options to tests/installers.py
                            --only rejoin  a node on the previous signed release joins the live
                                           channel by invite, goes away, rejoins and must update
                                           itself from what its peers' beats say

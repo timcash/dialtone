@@ -1,4 +1,5 @@
 /target
+/.installer-tests-*/
 /bin
 .DS_Store
 *.swp

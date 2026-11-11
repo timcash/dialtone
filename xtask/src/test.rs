@@ -6,7 +6,7 @@ use crate::fleet::{self, Fleet};
 use crate::util::{cargo, run, say, R};
 
 /// What `--only` can pick.
-const PARTS: [&str; 5] = ["lint", "suite", "rejoin", "scale", "probes"];
+const PARTS: [&str; 6] = ["lint", "suite", "installers", "rejoin", "scale", "probes"];
 
 struct Opts {
     here: bool,
@@ -14,7 +14,7 @@ struct Opts {
     /// Scale nodes per VM, or on this machine with `--here`.
     scale: Option<usize>,
     secs: f64,
-    /// After `--`: passed to `cargo test`.
+    /// After `--`: passed to `cargo test` or the installer fixture runner.
     cargo: Vec<String>,
 }
 
@@ -64,6 +64,12 @@ pub fn test(args: &[String]) -> R<()> {
     let o = parse(args)?;
     match (o.only.as_deref(), o.here) {
         (Some("lint"), _) => crate::check_static(),
+        (Some("installers"), _) => {
+            say("Installer fixtures (local only, no node starts; needs Python 3.10+)");
+            run(std::process::Command::new("python")
+                .arg("tests/installers.py")
+                .args(&o.cargo))
+        }
         (None, true) => {
             crate::check_static()?;
             suite_here(&o.cargo)?;
