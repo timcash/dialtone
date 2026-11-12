@@ -41,7 +41,7 @@ compatibility, or that name an Iroh library type, carry a `// compat` marker).
 | **Daemon** | The OS login service (launchd / systemd / Scheduled Task) that starts the node | `daemon` | — |
 | **HUD** | The node's local web UI | `hud` | dashboard, index page |
 | **API** | The node's local HTTP control surface on `127.0.0.1:8788` | `api` | control plane routes |
-| **Actor** | One task of the running node: Mesh, Stats, Supervisor, Devices, Paths, Allowlist, Probe, Deploy | `actors.rs` | worker, loop |
+| **Actor** | One task of the running node: Mesh, Stats, Supervisor, Devices, Paths, Allowlist, Probe, Deploy (and the Watchdog thread, which restarts a stuck node) | `actors.rs` | worker, loop |
 
 ### Code layout follows the words
 
@@ -77,6 +77,12 @@ and config field names) were accepted for a while after the rename and were remo
    longer `message_id_retention` removed the extra messages; cut the remaining duplicate gossip frames (IDONTWANT as
    in GossipSub v1.2); the API reading `watch` snapshots instead of locking
    node state.
+2. **Done — 2026-11-12: A stuck node restarts itself (issue #26).** A node whose gossip stopped delivering
+   (neighbors with a healthy Rtt, no beats, for 41 minutes) recovered only when restarted by hand. A watchdog
+   thread now restarts a node through its service when it has gossip neighbors but no gossip message for the peer
+   TTL, or when Mesh has not finished a beat for 6 beat intervals, and ends the process if that restart does not
+   finish in 30s; Mesh no longer waits on iroh-gossip without a timeout, and shutdown no longer waits on a stuck
+   endpoint. `MSH` fails when a node with seeds hears no peer, instead of passing with 0 peers.
 2. **Done — 2026-10-29: Every test on the VMs.** `./dialtone.sh test` runs every node and test end to end on
    the three Linux test VMs (only the lint checks run on the machine that drives it): the build VM runs the whole
    `cargo test` suite and the release build, every VM installs that build and passes its probes (gossip probe on

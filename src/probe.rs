@@ -71,6 +71,8 @@ pub struct ProbeInputs {
     pub store: Option<Store>,
     pub peers: Vec<PeerView>,
     pub allowlist: Vec<String>,
+    /// How many seeds (other than this node) it joins the mesh through.
+    pub seeds: usize,
     pub probe_program: Option<ProcessSpec>,
     /// Own probe blobs too old to keep.
     pub expired_blobs: Vec<String>,
@@ -126,7 +128,8 @@ pub fn run_probe_now(
 pub fn run(inputs: ProbeInputs) -> ProbeReport {
     let mut checks = Vec::new();
 
-    // MSH: every allowlisted peer has a live entry in the mesh.
+    // MSH: every allowlisted peer has a live entry in the mesh; on an open channel, a node
+    // with seeds hears at least one peer (alone, it would pass every other check).
     let listed: Vec<&String> = inputs
         .allowlist
         .iter()
@@ -142,15 +145,18 @@ pub fn run(inputs: ProbeInputs) -> ProbeReport {
         })
         .map(|id| id.chars().take(10).collect())
         .collect();
+    let live = inputs
+        .peers
+        .iter()
+        .filter(|p| p.node_id != inputs.node_id && p.age_secs <= DEFAULT_PEER_TTL_SECS)
+        .count();
+    let alone = listed.is_empty() && live == 0 && inputs.seeds > 0;
     checks.push(ProbeCheck {
         code: "MSH".to_string(),
-        ok: missing.is_empty(),
-        detail: if listed.is_empty() {
-            let live = inputs
-                .peers
-                .iter()
-                .filter(|p| p.node_id != inputs.node_id && p.age_secs <= DEFAULT_PEER_TTL_SECS)
-                .count();
+        ok: missing.is_empty() && !alone,
+        detail: if alone {
+            format!("alone: none of its {} seed(s) in the mesh", inputs.seeds)
+        } else if listed.is_empty() {
             format!("open channel, {live} peers in the mesh")
         } else if missing.is_empty() {
             format!(
@@ -483,6 +489,7 @@ mod tests {
             blobs: blobs.clone(),
             store,
             allowlist: peers.iter().map(|p| p.node_id.clone()).collect(),
+            seeds: 1,
             peers,
             probe_program: Some(running_probe_program()),
             expired_blobs: Vec::new(),
@@ -516,6 +523,19 @@ mod tests {
         let beat = report.check("BEAT").unwrap();
         assert!(beat.detail.contains("node-b hears 0/1"), "{}", beat.detail);
         assert!(beat.detail.contains("node-c silent 60s"), "{}", beat.detail);
+
+        // An open channel: a node with seeds that hears nobody fails MSH (dialtone#26),
+        // while one with no seeds (the first node of a channel) is fine alone.
+        let mut alone = inputs(&blobs, None, Vec::new());
+        let report = run(inputs(&blobs, None, Vec::new()));
+        let msh = report.check("MSH").unwrap();
+        assert!(
+            !msh.ok && msh.detail.contains("none of its 1 seed(s)"),
+            "{}",
+            msh.detail
+        );
+        alone.seeds = 0;
+        assert_eq!(run(alone).check("MSH").map(|c| c.ok), Some(true));
 
         blobs.close_blocking();
         let _ = std::fs::remove_dir_all(&dir);

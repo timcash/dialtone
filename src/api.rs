@@ -501,6 +501,12 @@ impl NodeState {
             .collect();
         let expired = crate::probe::expired(&self.probe_blobs);
         self.probe_blobs.retain(|d| !expired.contains(d));
+        let seeds = self
+            .mesh_config
+            .seeds
+            .iter()
+            .filter(|s| s.node_id != own_id)
+            .count();
         crate::probe::ProbeInputs {
             build: self
                 .installed_programs
@@ -517,6 +523,7 @@ impl NodeState {
             store: self.store.clone(),
             peers,
             allowlist: self.mesh_config.allowlist.clone(),
+            seeds,
             probe_program: self
                 .processes
                 .iter()

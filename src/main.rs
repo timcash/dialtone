@@ -1304,6 +1304,10 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
             .unwrap_or_default(),
         cancel: cancel.clone(),
     };
+    // A node run from its state dir's bin always has something that starts it again (a
+    // service, or `keep_running` above); a development build only logs when it is stuck.
+    let restarts = owns_run_dir && update_paths.as_ref().is_some_and(|p| p.managed());
+    actors::spawn_watchdog(ctx.net.clone(), restarts);
     let actors = actors::spawn_all(
         ctx,
         actors::MeshStart {
@@ -1337,7 +1341,13 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
             }
         }
     }
-    let _ = router.shutdown().await;
+    // A stuck gossip layer never finishes shutting down (dialtone#26).
+    if tokio::time::timeout(Duration::from_secs(5), router.shutdown())
+        .await
+        .is_err()
+    {
+        eprintln!("[shutdown] the endpoint did not close within 5s; exiting anyway");
+    }
     blobs.close().await;
     Ok(())
 }

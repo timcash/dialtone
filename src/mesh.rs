@@ -1901,6 +1901,10 @@ pub struct NetCounters {
     pub gossip_bytes_out: AtomicU64,
     /// Current gossip neighbors (iroh-gossip's active view).
     pub neighbors: AtomicU64,
+    /// When a gossip message last arrived, and when Mesh last finished a beat tick
+    /// (`monotonic_now_ms`); the watchdog reads both (`stuck_reason`).
+    pub last_in_ms: AtomicU64,
+    pub last_tick_ms: AtomicU64,
 }
 
 impl NetCounters {
@@ -1908,6 +1912,7 @@ impl NetCounters {
         self.gossip_msgs_in.fetch_add(1, Ordering::Relaxed);
         self.gossip_bytes_in
             .fetch_add(bytes as u64, Ordering::Relaxed);
+        self.last_in_ms.store(monotonic_now_ms(), Ordering::Relaxed);
     }
 
     pub fn count_out(&self, bytes: usize) {
@@ -1926,6 +1931,43 @@ impl NetCounters {
             "neighbors": get(&self.neighbors),
         })
     }
+}
+
+/// Mesh finishes a beat tick within a few seconds; this many beat intervals (at least
+/// `MESH_STALL_MIN_SECS`) without one means it is stuck.
+pub const MESH_STALL_BEATS: u64 = 6;
+pub const MESH_STALL_MIN_SECS: u64 = 120;
+
+/// Why a running node is stuck and should restart, or `None`. Times are `monotonic_now_ms`;
+/// `awake_since_ms` is when the watchdog last started watching (at start, or after this
+/// process was paused), so a node that was paused gets a full TTL to rejoin on its own.
+/// - Mesh has not finished a beat tick for `MESH_STALL_BEATS` intervals.
+/// - The node has gossip neighbors, yet no gossip message reached it for the peer TTL: its
+///   gossip stopped delivering (dialtone#26), which only a restart was seen to cure.
+pub fn stuck_reason(
+    net: &NetCounters,
+    now_ms: u64,
+    awake_since_ms: u64,
+    beat_interval_secs: u64,
+) -> Option<String> {
+    let since = |at: &AtomicU64| {
+        let at = at.load(Ordering::Relaxed).max(awake_since_ms);
+        now_ms.saturating_sub(at) / 1000
+    };
+    let stall = (MESH_STALL_BEATS * beat_interval_secs).max(MESH_STALL_MIN_SECS);
+    let ticked = since(&net.last_tick_ms);
+    if ticked > stall {
+        return Some(format!("Mesh has not finished a beat for {ticked}s"));
+    }
+    let neighbors = net.neighbors.load(Ordering::Relaxed);
+    let silent = since(&net.last_in_ms);
+    let ttl = DEFAULT_PEER_TTL_SECS.max(5 * beat_interval_secs);
+    if neighbors > 0 && silent > ttl {
+        return Some(format!(
+            "{neighbors} gossip neighbor(s), but no gossip message arrived for {silent}s"
+        ));
+    }
+    None
 }
 
 /// Rejects a beat unless it is strictly newer than the last one accepted from the same
@@ -3233,6 +3275,39 @@ mod tests {
 
         let keys = derive_channel_keys_v2("dialtone", "dt-StrongTestPassword_2026_Argon2id!"); // compat
         assert_ne!(keys.topic_id.as_bytes(), &legacy_public_bytes);
+    }
+
+    /// dialtone#26: a node with gossip neighbors that hears nothing for the peer TTL, or whose
+    /// Mesh stopped beating, is stuck; a quiet node with no neighbors, or one just woken from
+    /// a pause, is not.
+    #[test]
+    fn a_node_is_stuck_when_gossip_or_mesh_stops() {
+        let net = NetCounters::default();
+        let ms = |s: u64| s * 1000;
+        let at = |c: &AtomicU64, s: u64| c.store(ms(s), Ordering::Relaxed);
+        at(&net.last_tick_ms, 1_000);
+        at(&net.last_in_ms, 1_000);
+        net.neighbors.store(4, Ordering::Relaxed);
+        assert_eq!(stuck_reason(&net, ms(1_005), 0, 5), None);
+
+        // Neighbors, but no gossip message for over the peer TTL.
+        at(&net.last_tick_ms, 1_400);
+        let why = stuck_reason(&net, ms(1_401), 0, 5).expect("stuck");
+        assert!(why.contains("no gossip message arrived for 401s"), "{why}");
+        // ... unless the watchdog only woke up (the process was paused) since.
+        assert_eq!(stuck_reason(&net, ms(1_401), ms(1_390), 5), None);
+        // No neighbors: a node that is offline or alone waits; no restart helps it.
+        net.neighbors.store(0, Ordering::Relaxed);
+        assert_eq!(stuck_reason(&net, ms(1_401), 0, 5), None);
+
+        // Mesh stopped finishing beats: stuck whatever gossip does.
+        let why = stuck_reason(&net, ms(1_400 + MESH_STALL_MIN_SECS + 1), 0, 5).expect("stuck");
+        assert!(why.contains("Mesh has not finished a beat"), "{why}");
+        // Slow meshes beat less often and get longer.
+        assert_eq!(
+            stuck_reason(&net, ms(1_400 + MESH_STALL_MIN_SECS + 1), 0, 60),
+            None
+        );
     }
 
     #[test]

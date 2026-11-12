@@ -15,6 +15,8 @@
 //!   node (`Deploy` messages), and removes copies their origin no longer announces.
 //! - **Probe** checks the gossip mesh every 30s, and runs full probes (store, pulls,
 //!   programs) on request (see `probe.rs`).
+//! - **Watchdog** (a thread, not a task, so it runs when the tasks cannot) restarts a node
+//!   whose Mesh stopped beating or whose gossip stopped delivering (`mesh::stuck_reason`).
 //!
 //! The API runs on its own threads and reaches Mesh through `MeshControlCommand`.
 //! Actors share the node's state (`NodeState`) for reads and writes the HUD shows.
@@ -433,6 +435,65 @@ async fn probe_actor(ctx: Ctx, mut requests: mpsc::UnboundedReceiver<ProbeReques
         if let Some(reply) = reply {
             let _ = reply.send(result);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Watchdog
+// ---------------------------------------------------------------------------------------
+
+/// How often the watchdog looks; a gap well over this means the process was paused.
+const WATCHDOG_EVERY: Duration = Duration::from_secs(10);
+/// How long a restart may take before the watchdog ends the process itself.
+const WATCHDOG_EXIT_AFTER: Duration = Duration::from_secs(30);
+
+/// Watch Mesh from a plain thread: when the node is stuck (`stuck_reason`), restart it, the
+/// cure that worked by hand in dialtone#26. `restarts` says whether something starts the node
+/// again when it exits (a service, or `supervisor::keep_running`); without one it only logs.
+/// A restart that does not finish within `WATCHDOG_EXIT_AFTER` (the tasks are stuck too)
+/// ends the process with `EXIT_RESTART`; trees it leaves are reaped at the next start.
+pub(crate) fn spawn_watchdog(net: Arc<dialtone::mesh::NetCounters>, restarts: bool) {
+    let spawned = std::thread::Builder::new()
+        .name("dialtone-watchdog".into())
+        .spawn(move || {
+            let mut awake_since = monotonic_now_ms();
+            let mut last_look = awake_since;
+            let mut warned_at = 0;
+            loop {
+                std::thread::sleep(WATCHDOG_EVERY);
+                let now = monotonic_now_ms();
+                // Paused (a frozen container, a stopped process): start watching afresh.
+                if now.saturating_sub(last_look) > 3 * WATCHDOG_EVERY.as_millis() as u64 {
+                    awake_since = now;
+                }
+                last_look = now;
+                let interval = update::BEAT_INTERVAL_SECS
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .max(BEAT_INTERVAL_SECS);
+                let Some(reason) = dialtone::mesh::stuck_reason(&net, now, awake_since, interval)
+                else {
+                    continue;
+                };
+                if !restarts {
+                    if warned_at == 0 || now.saturating_sub(warned_at) >= 600_000 {
+                        eprintln!(
+                            "[watchdog] {reason}; restart this node (nothing restarts it here)"
+                        );
+                        warned_at = now;
+                    }
+                    continue;
+                }
+                eprintln!("[watchdog] {reason}; restarting the node");
+                update::request_restart();
+                std::thread::sleep(WATCHDOG_EXIT_AFTER);
+                eprintln!(
+                    "[watchdog] the node did not stop within {WATCHDOG_EXIT_AFTER:?}; exiting"
+                );
+                std::process::exit(update::EXIT_RESTART);
+            }
+        });
+    if let Err(e) = spawned {
+        eprintln!("[watchdog] could not start: {e}");
     }
 }
 
@@ -940,6 +1001,8 @@ const ONE_SIDED_BEATS: u32 = 2;
 const INVENTORY_REFRESH_EVERY: u64 = 6;
 /// Every this many beats, Mesh saves the peers it hears as its seeds (`refresh_seeds`).
 const SEED_REFRESH_EVERY: u64 = 12;
+/// How long Mesh waits for iroh-gossip to answer a subscribe.
+const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// When new nodes join, an origin re-announces its deploys at most this often.
 const NEW_NODE_ANNOUNCE_GAP: Duration = Duration::from_secs(60);
 /// How long an origin keeps announcing a program it removed (for nodes that missed it).
@@ -1156,9 +1219,22 @@ impl Mesh {
         }
     }
 
+    /// Subscribe to `topic`, giving up after `SUBSCRIBE_TIMEOUT` so a gossip layer that stopped
+    /// answering never stops Mesh (dialtone#26).
+    async fn subscribe(
+        &self,
+        topic: TopicId,
+        peers: Vec<EndpointId>,
+    ) -> Result<iroh_gossip::api::GossipTopic, String> {
+        match tokio::time::timeout(SUBSCRIBE_TIMEOUT, self.gossip.subscribe(topic, peers)).await {
+            Ok(r) => r.map_err(|e| e.to_string()),
+            Err(_) => Err(format!("no answer within {SUBSCRIBE_TIMEOUT:?}")),
+        }
+    }
+
     async fn resubscribe(&mut self) -> Result<(), Duration> {
         let first_peers = self.join_candidates(None);
-        match self.gossip.subscribe(self.topic_id, first_peers).await {
+        match self.subscribe(self.topic_id, first_peers).await {
             Ok(topic) => {
                 (self.sender, self.receiver) = topic.split();
                 self.subscribed = true;
@@ -1186,7 +1262,6 @@ impl Mesh {
         }
         let first_peers = self.join_candidates(None);
         match self
-            .gossip
             .subscribe(events_topic_id(self.topic_id), first_peers)
             .await
         {
@@ -1427,7 +1502,7 @@ impl Mesh {
                     }
                 }
 
-                if let Ok(topic) = self.gossip.subscribe(self.topic_id, boot_ids.clone()).await {
+                if let Ok(topic) = self.subscribe(self.topic_id, boot_ids.clone()).await {
                     (self.sender, self.receiver) = topic.split();
                     self.subscribed = true;
                     self.seed_ids = boot_ids.clone();
@@ -1716,6 +1791,10 @@ impl Mesh {
         self.broadcast(&Message::Beat(beat)).await;
         self.counter += 1;
         self.announce_deploys().await;
+        self.ctx
+            .net
+            .last_tick_ms
+            .store(monotonic_now_ms(), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Admit a message only if it opens with the channel key, its signature matches a

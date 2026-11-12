@@ -399,7 +399,7 @@ Every running node checks the gossip mesh every 30 seconds. These checks read wh
 
 | Check | What it proves |
 | :--- | :--- |
-| `MSH` | Every allowlisted peer is in the mesh |
+| `MSH` | Every allowlisted peer is in the mesh; on an open channel, a node with seeds hears at least one peer |
 | `NBR` | The node has at least two gossip neighbors (one in a two-node mesh) |
 | `BEAT` | Every peer's beats are fresh (within three of its beat intervals) and every peer hears as many nodes as this one |
 
@@ -420,6 +420,7 @@ Gossip is routed the way [libp2p GossipSub](https://docs.libp2p.io/concepts/pubs
 - **A few neighbors, not every node.** Each node keeps 2 to 5 gossip neighbors. Below two (GossipSub's `D_lo`) it joins up to three known peers chosen at random; nobody dials every other node. A message reaches the whole mesh along the broadcast tree, each node forwarding it once.
 - **Gossip only.** Once a node has joined, it talks to the mesh only through gossip: no node fetches from another unless someone asks (a HUD focusing a node, a full probe). The three-node test (`tests/e2e.rs`) checks that no node opens a connection in 20s of steady state.
 - **Small, fixed-size beats.** A beat is a compact binary record (postcard, `wire.rs`), about 255 bytes sealed for a healthy node and at most about 310: name, counter, load (CPU, memory, disk, network), coarse location, home relay and two addresses, the probe's checks, the inventory version and up to five gossip neighbors with their Rtt. No seed lists, no per-peer results, nothing that grows with the mesh. Rolling summaries are not gossiped.
+- **A stuck node restarts itself.** A watchdog thread restarts the node (through its service) when its Mesh actor has not finished a beat for 6 beat intervals (at least 2 minutes), or when it has gossip neighbors but no gossip message has reached it for the peer TTL (5 minutes): its gossip stopped delivering, which only a restart was seen to cure (issue #26). A paused process gets a full TTL after it wakes to rejoin by itself first. A development build run from outside its state dir only logs it.
 - **Rtt for free.** Each neighbor's Rtt is QUIC's own estimate on the gossip connection that is already open, read through a weak handle the allowlist hook keeps (the Paths actor); no ping is sent. So is whether the path is direct or through the relay.
 - **Separate topics.** Beats go on the channel's beats topic; inventories are broadcast on its events topic when they change. An inventory leaves out process pids, statuses and restart counts, so a restart does not re-broadcast it.
 - **Beat interval from a budget.** Every node hears every beat, so a node beats every `clamp(nodes × 500 B / 4 KB/s, 5, 120)` seconds: about 4 KB/s of incoming beats per node at any size (5s up to 40 nodes, 13s at 100, 120s at 1,000). Freshness checks use each peer's own interval (three of them). iroh-gossip remembers message ids for 6 minutes (three of the longest intervals; its default is 90s), so a beat still travelling is not delivered twice.
