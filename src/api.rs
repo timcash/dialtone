@@ -1248,6 +1248,88 @@ fn route_request(
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
+        ("POST", "/api/exec") => {
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let str_field = |k: &str| {
+                parsed
+                    .get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let command = str_field("command");
+            if command.trim().is_empty() {
+                return write_json(&mut stream, 400, &json!({ "error": "command is required" }));
+            }
+            let shell = match crate::exec::Shell::parse(&str_field("shell")) {
+                Ok(s) => s,
+                Err(err) => return write_json(&mut stream, 400, &json!({ "error": err })),
+            };
+            let cwd = parsed
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let timeout_secs = parsed.get("timeout_secs").and_then(Value::as_u64);
+            let req = crate::exec::ExecRequest {
+                shell,
+                command,
+                cwd,
+                timeout_secs,
+            };
+
+            let target = str_field("node").trim().to_string();
+            let self_node = st.node.clone();
+            let own_id = st.iroh_runtime.node_id.clone();
+            let is_local = target.is_empty()
+                || target.eq_ignore_ascii_case("local")
+                || target.eq_ignore_ascii_case("self")
+                || target == self_node
+                || (!own_id.is_empty() && target == own_id);
+
+            let runtime = st.runtime.clone();
+            if is_local {
+                drop(st);
+                let result = match runtime {
+                    Some(rt) => rt.block_on(crate::exec::run_local(&self_node, &req)),
+                    None => crate::exec::run_local_sync(&self_node, &req),
+                };
+                return match result {
+                    Ok(resp) => write_json(&mut stream, 200, &resp),
+                    Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
+                };
+            }
+
+            let peer = st
+                .nodes
+                .iter()
+                .find(|n| n.node == target || n.node_id == target)
+                .map(|n| n.node_id.clone());
+            let endpoint = st.store.as_ref().map(|s| s.endpoint.clone());
+            drop(st);
+            let Some(peer_str) = peer else {
+                return write_json(
+                    &mut stream,
+                    404,
+                    &json!({ "error": format!("no node '{target}' in the mesh") }),
+                );
+            };
+            let Ok(peer_id) = peer_str.parse::<iroh::EndpointId>() else {
+                return write_json(
+                    &mut stream,
+                    400,
+                    &json!({ "error": "invalid peer node_id" }),
+                );
+            };
+            let (Some(rt), Some(ep)) = (runtime, endpoint) else {
+                return write_json(&mut stream, 503, &json!({ "error": "node not running" }));
+            };
+            match rt.block_on(crate::exec::remote(&ep, peer_id, &req)) {
+                Ok(resp) => write_json(&mut stream, 200, &resp),
+                Err(err) => write_json(&mut stream, 502, &json!({ "error": err })),
+            }
+        }
         ("GET", "/api/links") => match st.links.clone() {
             Some(links) => {
                 drop(st);

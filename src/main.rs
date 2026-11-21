@@ -57,6 +57,7 @@ fn print_usage() {
          \x20 probe [--all]            Run one probe now: the gossip checks (MSH, NBR, BEAT; nodes run them\n\
          \x20                          every 30s), and with --all the store, pulls, programs and security\n\
          \x20                          (STO, PUL, PRC, SEC)\n\
+         \x20 exec [--node <peer>] [--shell auto|bash|powershell] [--] <cmd...>  Run a bash or PowerShell command on a node\n\
          \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
          \x20 status                   Print this node's NodeId and transport report\n\
          \x20 help                     Show this help\n\n\
@@ -67,11 +68,14 @@ fn print_usage() {
          \x20 --channel <name>         Channel name (default: dialtone)\n\
          \x20 --secret <secret>        Channel secret (or set DIALTONE_SECRET)\n\
          \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 7d; default: 24h)\n\
+         \x20 --shell <shell>          Shell for 'dialtone exec' (auto, bash, powershell; aliases --bash, --powershell)\n\
+         \x20 --cwd <dir>              Working directory for 'dialtone exec'\n\
+         \x20 --timeout <duration>     Timeout for 'dialtone exec' (e.g. 30s, 2m; default: 30s)\n\
          \x20 --addr <ip:port>         Direct address for 'dialtone allowlist add' (repeatable)\n\
          \x20 --force                  Pull over QUIC even if the blob is already in the store\n\
          \x20 --udp <ip:port>          'dialtone link': where the source sends (export) or packets go (import)\n\
          \x20 --tcp <ip:port>          'dialtone link': the service to connect to (export) or listen on (import)\n\
-         \x20 --json                   Print JSON ('devices', 'invite', 'link list')\n\
+         \x20 --json                   Print JSON ('devices', 'invite', 'link list', 'exec')\n\
          \x20 --once                   'up': boot, beat once and exit; 'join': only join, start nothing\n\
          \x20 --all                    'dialtone probe': also test the store, pulls, programs and security\n\n\
          transport (the default: relays on, no public DNS or DHT, Tailscale addresses left out):\n\
@@ -103,6 +107,10 @@ struct CliOptions {
     link_target: Option<String>,
     link_udp: Option<String>,
     link_tcp: Option<String>,
+    exec_shell: dialtone::exec::Shell,
+    exec_cwd: Option<String>,
+    exec_timeout_secs: u64,
+    exec_command: Vec<String>,
     force: bool,
     json: bool,
     invite_ttl_secs: u64,
@@ -154,6 +162,10 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         link_target: None,
         link_udp: None,
         link_tcp: None,
+        exec_shell: dialtone::exec::Shell::Auto,
+        exec_cwd: None,
+        exec_timeout_secs: dialtone::exec::DEFAULT_TIMEOUT_SECS,
+        exec_command: Vec::new(),
         force: false,
         json: false,
         invite_ttl_secs: 86_400,
@@ -232,6 +244,34 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "invite" if !action_set => {
                 opts.action = "invite".to_string();
                 action_set = true;
+            }
+            "exec" if !action_set => {
+                opts.action = "exec".to_string();
+                action_set = true;
+            }
+            "--shell" => {
+                idx += 1;
+                let raw = args.get(idx).ok_or("missing --shell value")?;
+                opts.exec_shell = dialtone::exec::Shell::parse(raw)?;
+            }
+            "--bash" => {
+                opts.exec_shell = dialtone::exec::Shell::Bash;
+            }
+            "--powershell" | "--pwsh" => {
+                opts.exec_shell = dialtone::exec::Shell::Powershell;
+            }
+            "--cwd" => {
+                idx += 1;
+                opts.exec_cwd = Some(args.get(idx).ok_or("missing --cwd value")?.clone());
+            }
+            "--timeout" => {
+                idx += 1;
+                let raw = args.get(idx).ok_or("missing --timeout value")?;
+                opts.exec_timeout_secs = parse_duration_secs(raw)?;
+            }
+            "--" if opts.action == "exec" => {
+                opts.exec_command.extend(args[idx + 1..].iter().cloned());
+                break;
             }
             "devices" if !action_set => {
                 opts.action = "devices".to_string();
@@ -355,6 +395,9 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             }
             other if other.starts_with("-psn_") => {
                 // Ignore macOS Finder LaunchServices ProcessSerialNumber argument on double-click
+            }
+            other if opts.action == "exec" && !other.starts_with('-') => {
+                opts.exec_command.push(other.to_string());
             }
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -1026,6 +1069,10 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         )
         .accept(dialtone::link::ALPN, links)
         .accept(dialtone::join::ALPN, joins)
+        .accept(
+            dialtone::exec::ALPN,
+            dialtone::exec::ExecHandler::new(opts.node.clone()),
+        )
         .spawn();
 
     if let Some(st_arc) = &shared_state {
@@ -1584,6 +1631,71 @@ async fn main() {
                 "{}",
                 serde_json::to_string_pretty(&resp).unwrap_or_default()
             );
+            Ok(())
+        })(),
+        "exec" => (|| -> Result<(), String> {
+            let command = opts.exec_command.join(" ").trim().to_string();
+            if command.is_empty() {
+                return Err(
+                    "usage: dialtone exec [--node <peer>] [--shell auto|bash|powershell] [--bash|--powershell] [--cwd <dir>] [--timeout <dur>] [--json] [--] <command...>"
+                        .to_string(),
+                );
+            }
+            let cfg = load_mesh_config(&default_config_path());
+            let listen = match (&cfg.listen_addr, opts.listen_explicit) {
+                (Some(saved), false) => saved.clone(),
+                _ => opts.listen.clone(),
+            };
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+            let target_node = if opts.node_explicit {
+                opts.node.clone()
+            } else {
+                String::new()
+            };
+            let body = json!({
+                "node": target_node,
+                "shell": opts.exec_shell.as_str(),
+                "command": command,
+                "cwd": opts.exec_cwd,
+                "timeout_secs": opts.exec_timeout_secs,
+            });
+            let http_timeout = opts.exec_timeout_secs.saturating_add(15);
+            let resp = local_daemon_http_json(
+                &listen,
+                "POST",
+                "/api/exec",
+                Some(&body),
+                &api_token,
+                http_timeout,
+            )?;
+            if opts.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&resp).unwrap_or_default()
+                );
+            } else {
+                if let Some(out) = resp.get("stdout").and_then(|v| v.as_str()) {
+                    print!("{out}");
+                }
+                if let Some(err) = resp.get("stderr").and_then(|v| v.as_str()) {
+                    eprint!("{err}");
+                }
+            }
+            let exit_code = resp.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(1) as i32;
+            let timed_out = resp
+                .get("timed_out")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if timed_out {
+                return Err("command timed out".to_string());
+            }
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
             Ok(())
         })(),
         "devices" => dialtone::devices::list_devices().map(|devices| {
