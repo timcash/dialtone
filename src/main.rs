@@ -65,6 +65,7 @@ fn print_usage() {
          \x20 shell capture <name> [--node <peer>] [--lines 100] Read scrollback output from a session\n\
          \x20 shell ls [--node <peer>] [--json] List running terminal sessions\n\
          \x20 shell attach <name> [--node <peer>] Attach interactively to a local or remote session\n\
+         \x20 shell interrupt <name> [--node <peer>] Interrupt/reset a running session in place (keeps scrollback)\n\
          \x20 shell kill <name> [--node <peer>] Stop a running terminal session\n\
          \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
          \x20 status                   Print this node's NodeId and transport report\n\
@@ -304,7 +305,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     opts.shell_subcmd = sub.clone();
                     if matches!(
                         opts.shell_subcmd.as_str(),
-                        "new" | "send" | "capture" | "kill" | "attach"
+                        "new" | "send" | "capture" | "kill" | "attach" | "interrupt"
                     ) {
                         if let Some(name) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
                             idx += 1;
@@ -1845,9 +1846,14 @@ async fn main() {
             ) {
                 Ok(v) => v,
                 Err(daemon_err) if opts.plugin_ticket.is_none() => {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| format!("create tokio runtime: {e}"))?;
                     let store_dir = default_store_dir();
                     let plugins_dir = dialtone::plugin::plugins_dir_for_store(&store_dir);
-                    let blobs = Blobs::open_blocking(&store_dir)
+                    let blobs = rt
+                        .block_on(Blobs::open(&store_dir))
                         .map_err(|e| format!("{daemon_err}; offline open failed: {e}"))?;
                     let res = if let Some(file_path) = opts.plugin_file.as_deref() {
                         dialtone::plugin::install_plugin_from_file(
@@ -1859,7 +1865,7 @@ async fn main() {
                     } else {
                         dialtone::plugin::install_builtin_plugin(&blobs, &plugins_dir, name)
                     };
-                    blobs.close_blocking();
+                    rt.block_on(blobs.close());
                     let manifest = res?;
                     serde_json::to_value(&manifest).unwrap_or_default()
                 }
@@ -1906,12 +1912,16 @@ async fn main() {
                     ) {
                         Ok(v) => v,
                         Err(_) => {
+                            let rt = tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .map_err(|e| format!("create tokio runtime: {e}"))?;
                             let store_dir = default_store_dir();
                             let plugins_dir = dialtone::plugin::plugins_dir_for_store(&store_dir);
-                            let blobs = Blobs::open_blocking(&store_dir)?;
+                            let blobs = rt.block_on(Blobs::open(&store_dir))?;
                             let list =
                                 dialtone::plugin::list_installed_plugins(&blobs, &plugins_dir)?;
-                            blobs.close_blocking();
+                            rt.block_on(blobs.close());
                             json!({ "plugins": list })
                         }
                     };
@@ -2162,6 +2172,23 @@ async fn main() {
                                 );
                             }
                         }
+                    }
+                    Ok(())
+                }
+                "interrupt" | "ctrl-c" => {
+                    let name = opts
+                        .shell_name
+                        .clone()
+                        .ok_or("usage: dialtone shell interrupt <name> [--node <peer>]")?;
+                    let req = dialtone::shell::ShellRequest::Interrupt { name: name.clone() };
+                    let resp = call_shell(&req, 15)?;
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else {
+                        println!("interrupted session '{name}'");
                     }
                     Ok(())
                 }

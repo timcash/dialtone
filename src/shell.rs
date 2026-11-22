@@ -61,6 +61,9 @@ pub enum ShellRequest {
     Kill {
         name: String,
     },
+    Interrupt {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +122,11 @@ pub enum ShellResponse {
     Killed {
         name: String,
         node: String,
+    },
+    Interrupted {
+        name: String,
+        node: String,
+        restarted: bool,
     },
     Error {
         error: String,
@@ -504,7 +512,7 @@ impl PersistentSession {
             )
         } else {
             format!(
-                "{normalized_cmd}\n__dt_ec=$?\nprintf '\\n{marker}%d\\n' \"$__dt_ec\"\nprintf '\\n{marker}%d\\n' \"$__dt_ec\" >&2\n"
+                "{normalized_cmd}\n__dt_ec=$?\nprintf '{marker}%d\\n' \"$__dt_ec\"\nprintf '{marker}%d\\n' \"$__dt_ec\" >&2\n"
             )
         };
 
@@ -630,8 +638,11 @@ fn push_bounded_output(
     stderr_buf: &mut String,
     scrollback: &Arc<Mutex<ScrollbackBuffer>>,
 ) {
-    // Filter PowerShell interactive prompt echoes if any leak on stderr/stdout.
+    // Filter PowerShell interactive prompt echoes and empty stderr lines.
     if line.starts_with("PS ") && line.ends_with("> ") {
+        return;
+    }
+    if kind == StreamKind::Stderr && line.is_empty() {
         return;
     }
     let target = match kind {
@@ -827,6 +838,46 @@ impl ShellManager {
         }
     }
 
+    /// Interrupt a running or stalled command in a named session and keep the session name ready.
+    pub fn interrupt_session(&self, raw_name: &str) -> Result<(String, bool), String> {
+        let name = validate_session_name(raw_name)?;
+        let existing = {
+            let map = self
+                .sessions
+                .lock()
+                .map_err(|_| "shell manager lock poisoned".to_string())?;
+            map.get(&name)
+                .cloned()
+                .ok_or_else(|| format!("shell session '{name}' not found"))?
+        };
+        let shell = Shell::parse(&existing.shell_label).unwrap_or(Shell::Auto);
+        let prev_scrollback = existing.scrollback.clone();
+        existing.kill();
+
+        let replacement = Arc::new(PersistentSession::spawn(
+            name.clone(),
+            self.node_name.clone(),
+            shell,
+            None,
+            self.max_scrollback_lines,
+            self.max_scrollback_bytes,
+        )?);
+        if let (Ok(old_sb), Ok(mut new_sb)) =
+            (prev_scrollback.lock(), replacement.scrollback.lock())
+        {
+            for line in &old_sb.lines {
+                new_sb.push_line(line.clone());
+            }
+            new_sb.push_line("^C [interrupted & reset session]".to_string());
+        }
+        let mut map = self
+            .sessions
+            .lock()
+            .map_err(|_| "shell manager lock poisoned".to_string())?;
+        map.insert(name.clone(), replacement);
+        Ok((name, true))
+    }
+
     pub fn handle_request(&self, req: ShellRequest) -> ShellResponse {
         match req {
             ShellRequest::New { name, shell, cwd } => {
@@ -855,6 +906,14 @@ impl ShellManager {
                 Ok(killed) => ShellResponse::Killed {
                     name: killed,
                     node: self.node_name.clone(),
+                },
+                Err(error) => ShellResponse::Error { error },
+            },
+            ShellRequest::Interrupt { name } => match self.interrupt_session(&name) {
+                Ok((interrupted, restarted)) => ShellResponse::Interrupted {
+                    name: interrupted,
+                    node: self.node_name.clone(),
+                    restarted,
                 },
                 Err(error) => ShellResponse::Error { error },
             },
@@ -1169,14 +1228,21 @@ mod tests {
         assert!(res.timed_out, "expected timeout");
         assert_eq!(res.exit_code, -1);
 
-        // Manager stays healthy: we can kill the timed-out session and recreate it cleanly.
-        mgr.kill_session("hang").unwrap();
-        mgr.create_session("hang", Shell::Auto, None).unwrap();
+        // Manager stays healthy: interrupt recovers the session in place while preserving scrollback.
+        let (name, restarted) = mgr.interrupt_session("hang").unwrap();
+        assert_eq!(name, "hang");
+        assert!(restarted);
         let fast = mgr
             .send_command("hang", "echo recovered", Some(15))
             .unwrap();
         assert_eq!(fast.exit_code, 0);
         assert!(fast.stdout.contains("recovered"));
+        let cap = mgr.capture("hang", Some(20)).unwrap();
+        assert!(
+            cap.lines.iter().any(|l| l.contains("^C [interrupted")),
+            "interrupt marker missing from scrollback: {:?}",
+            cap.lines
+        );
     }
 
     #[test]

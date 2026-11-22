@@ -2822,6 +2822,54 @@ if (tourStops.length > 0) {
 }
 detectNodeFxEvents(meshState.nodes || [], false);
 requestAnimationFrame(renderFrame);
+async function pollPluginsAndShell() {
+  const lbl = document.getElementById("menu-shell-state-label");
+  const out = document.getElementById("menu-shell-output");
+  if (!lbl || !out) return;
+  try {
+    const [pResp, sResp] = await Promise.all([
+      fetch("/api/plugins", { cache: "no-store" }),
+      fetch("/api/shell/sessions", { cache: "no-store" }),
+    ]);
+    const pData = pResp.ok ? await pResp.json() : { plugins: [] };
+    const sData = sResp.ok ? await sResp.json() : { plugin_installed: false, sessions: [] };
+    const plugins = Array.isArray(pData.plugins) ? pData.plugins : [];
+    const sessions = Array.isArray(sData.sessions) ? sData.sessions : [];
+    lbl.textContent = sData.plugin_installed
+      ? `SHELL PLUGIN ACTIVE // ${sessions.length} SESSION(S)`
+      : `SHELL NOT INSTALLED // RUN: dialtone install shell`;
+
+    const lines = [];
+    lines.push("Installed plugins (blob-verified):");
+    if (plugins.length === 0) {
+      lines.push("  (none)  run: dialtone install shell");
+    } else {
+      for (const p of plugins) {
+        const m = p.manifest || p;
+        lines.push(`  ${m.name || "?"}  verified=${Boolean(p.verified)}  ${(m.artifact_digest || "").slice(0, 22)}...`);
+      }
+    }
+    lines.push("");
+    lines.push(`Active shell sessions on ${sData.node || "this node"}:`);
+    if (sessions.length === 0) {
+      lines.push("  (none)  run: dialtone shell new dev");
+    } else {
+      for (const s of sessions) {
+        lines.push(`  ${s.name}  [${s.os}/${s.shell}]  pid=${s.pid}  cmds=${s.commands_run}  lines=${s.scrollback_lines}`);
+      }
+    }
+    lines.push("");
+    lines.push("CLI commands (local or --node <peer>):");
+    lines.push("  dialtone shell new dev [--node <peer>] [--shell auto|bash|powershell]");
+    lines.push("  dialtone shell send dev [--node <peer>] -- <command>");
+    lines.push("  dialtone shell capture dev [--node <peer>] --lines 50");
+    lines.push("  dialtone shell attach|interrupt|kill dev [--node <peer>]");
+    out.textContent = lines.join("\n");
+  } catch (_) {}
+}
+
 setInterval(pollGossipState, 1500);
 pollLinks();
 setInterval(pollLinks, 3000);
+pollPluginsAndShell();
+setInterval(pollPluginsAndShell, 3000);

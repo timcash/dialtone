@@ -1343,6 +1343,32 @@ fn route_request(
                 Err(err) => write_json(&mut stream, 500, &json!({ "error": err })),
             }
         }
+        ("GET", "/api/shell/sessions") => {
+            let node = st.node.clone();
+            let blobs = st.blobs.clone();
+            let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
+            let mgr = st.shell_manager.clone();
+            drop(st);
+            let installed = crate::plugin::is_plugin_installed_and_verified(
+                &blobs,
+                &plugins_dir,
+                crate::plugin::SHELL_PLUGIN_NAME,
+            );
+            let sessions = if installed {
+                mgr.list_sessions()
+            } else {
+                Vec::new()
+            };
+            write_json(
+                &mut stream,
+                200,
+                &json!({
+                    "node": node,
+                    "plugin_installed": installed,
+                    "sessions": sessions,
+                }),
+            )
+        }
         ("POST", "/api/plugins/install") => {
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
             let name = parsed

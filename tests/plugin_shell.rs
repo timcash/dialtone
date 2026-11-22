@@ -177,6 +177,27 @@ fn cli_dialtone_install_shell_and_local_session_workflow() {
         serde_json::from_str(&run_ok(d, &["shell", "ls", "--listen", &listen, "--json"])).unwrap();
     assert_eq!(ls_json["sessions"].as_array().unwrap().len(), 1);
 
+    // Read-only HUD endpoint GET /api/shell/sessions reports plugin installed + active session.
+    let hud_sessions = get_json(api_port, "/api/shell/sessions").expect("GET /api/shell/sessions");
+    assert_eq!(hud_sessions["plugin_installed"].as_bool(), Some(true));
+    assert_eq!(hud_sessions["sessions"].as_array().unwrap().len(), 1);
+
+    // Interrupt recovers session in place and preserves scrollback.
+    run_ok(d, &["shell", "interrupt", "work", "--listen", &listen]);
+    let after_int = run_ok(
+        d,
+        &[
+            "shell",
+            "send",
+            "work",
+            "--listen",
+            &listen,
+            "--",
+            "echo alive_after_int",
+        ],
+    );
+    assert!(after_int.contains("alive_after_int"));
+
     // Kill the session and verify list is empty.
     run_ok(d, &["shell", "kill", "work", "--listen", &listen]);
     let ls_after: Value =
