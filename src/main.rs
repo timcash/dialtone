@@ -1811,7 +1811,7 @@ async fn main() {
             }
             Ok(())
         })(),
-        "install" => (|| -> Result<(), String> {
+        "install" => (async {
             let name = opts
                 .plugin_name
                 .as_deref()
@@ -1846,14 +1846,10 @@ async fn main() {
             ) {
                 Ok(v) => v,
                 Err(daemon_err) if opts.plugin_ticket.is_none() => {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .map_err(|e| format!("create tokio runtime: {e}"))?;
                     let store_dir = default_store_dir();
                     let plugins_dir = dialtone::plugin::plugins_dir_for_store(&store_dir);
-                    let blobs = rt
-                        .block_on(Blobs::open(&store_dir))
+                    let blobs = Blobs::open(&store_dir)
+                        .await
                         .map_err(|e| format!("{daemon_err}; offline open failed: {e}"))?;
                     let res = if let Some(file_path) = opts.plugin_file.as_deref() {
                         dialtone::plugin::install_plugin_from_file(
@@ -1865,7 +1861,7 @@ async fn main() {
                     } else {
                         dialtone::plugin::install_builtin_plugin(&blobs, &plugins_dir, name)
                     };
-                    rt.block_on(blobs.close());
+                    blobs.close().await;
                     let manifest = res?;
                     serde_json::to_value(&manifest).unwrap_or_default()
                 }
@@ -1887,9 +1883,9 @@ async fn main() {
                     resp.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0),
                 );
             }
-            Ok(())
-        })(),
-        "plugin" => (|| -> Result<(), String> {
+            Ok::<(), String>(())
+        }).await,
+        "plugin" => (async {
             let cfg = load_mesh_config(&default_config_path());
             let listen = match (&cfg.listen_addr, opts.listen_explicit) {
                 (Some(saved), false) => saved.clone(),
@@ -1912,16 +1908,12 @@ async fn main() {
                     ) {
                         Ok(v) => v,
                         Err(_) => {
-                            let rt = tokio::runtime::Builder::new_current_thread()
-                                .enable_all()
-                                .build()
-                                .map_err(|e| format!("create tokio runtime: {e}"))?;
                             let store_dir = default_store_dir();
                             let plugins_dir = dialtone::plugin::plugins_dir_for_store(&store_dir);
-                            let blobs = rt.block_on(Blobs::open(&store_dir))?;
+                            let blobs = Blobs::open(&store_dir).await?;
                             let list =
                                 dialtone::plugin::list_installed_plugins(&blobs, &plugins_dir)?;
-                            rt.block_on(blobs.close());
+                            blobs.close().await;
                             json!({ "plugins": list })
                         }
                     };
@@ -2014,7 +2006,7 @@ async fn main() {
                     "unknown plugin subcommand '{other}' (expected list, share, or remove)"
                 )),
             }
-        })(),
+        }).await,
         "shell" => (|| -> Result<(), String> {
             let cfg = load_mesh_config(&default_config_path());
             let listen = match (&cfg.listen_addr, opts.listen_explicit) {
