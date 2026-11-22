@@ -2846,7 +2846,7 @@ async function pollPluginsAndShell() {
     } else {
       for (const p of plugins) {
         const m = p.manifest || p;
-        lines.push(`  ${m.name || "?"}  verified=${Boolean(p.verified)}  ${(m.artifact_digest || "").slice(0, 22)}...`);
+        lines.push(`  ${m.name || "?"}  verified=${Boolean(p.verified)}  ${(m.blob_digest || "").slice(0, 22)}...`);
       }
     }
     lines.push("");

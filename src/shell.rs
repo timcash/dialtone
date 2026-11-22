@@ -1357,7 +1357,7 @@ mod tests {
 
     #[test]
     fn remote_shell_new_send_capture_ls_kill_over_iroh_quic() {
-        let root = temp_dir("quic-e2e");
+        let root = temp_dir("quic-probe");
         let blobs = Blobs::open_blocking(&root.join("blobs")).unwrap();
         let plugins_dir = root.join("plugins");
         install_builtin_plugin(&blobs, &plugins_dir, SHELL_PLUGIN_NAME).unwrap();
@@ -1371,7 +1371,7 @@ mod tests {
             lookup.add_endpoint_info(server_ep.addr());
             client_ep.address_lookup().unwrap().add(lookup);
 
-            let mgr = Arc::new(ShellManager::new("remote-worker"));
+            let mgr = Arc::new(ShellManager::new("remote-peer"));
             let router = Router::builder(server_ep.clone())
                 .accept(
                     ALPN,
@@ -1432,7 +1432,7 @@ mod tests {
             match s2 {
                 ShellResponse::Sent { result } => {
                     assert_eq!(result.exit_code, 0);
-                    assert_eq!(result.node, "remote-worker");
+                    assert_eq!(result.node, "remote-peer");
                     assert!(
                         result.stdout.contains("mesh_ok_42"),
                         "stdout={}",

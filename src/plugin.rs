@@ -27,7 +27,7 @@ pub struct PluginManifest {
     pub description: String,
     #[serde(default)]
     pub protocols: Vec<String>,
-    pub artifact_digest: String,
+    pub blob_digest: String,
     pub blake3_hash: String,
     pub bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,7 +47,7 @@ pub struct PluginStatus {
 pub struct PluginShareReport {
     pub name: String,
     pub version: String,
-    pub artifact_digest: String,
+    pub blob_digest: String,
     pub blake3_hash: String,
     pub bytes: u64,
     pub ticket_uri: String,
@@ -171,7 +171,7 @@ pub fn install_plugin_from_bytes(
     let canonical = validate_plugin_name(name)?;
     if bytes.is_empty() || bytes.len() > MAX_PLUGIN_BYTES {
         return Err(format!(
-            "plugin '{canonical}' artifact size {} bytes is out of bounds (1..={MAX_PLUGIN_BYTES})",
+            "plugin '{canonical}' blob size {} bytes is out of bounds (1..={MAX_PLUGIN_BYTES})",
             bytes.len()
         ));
     }
@@ -183,7 +183,7 @@ pub fn install_plugin_from_bytes(
         kind: kind.to_string(),
         description: description.to_string(),
         protocols,
-        artifact_digest: digest,
+        blob_digest: digest,
         blake3_hash: hash.to_string(),
         bytes: bytes.len() as u64,
         ticket_uri,
@@ -233,7 +233,7 @@ pub fn install_plugin_from_ticket(
         kind,
         description,
         protocols,
-        artifact_digest: report.digest,
+        blob_digest: report.digest,
         blake3_hash: report.blake3_hash,
         bytes: report.bytes,
         ticket_uri: Some(ticket_uri.to_string()),
@@ -293,7 +293,7 @@ pub fn verify_installed_plugin(
     name: &str,
 ) -> Result<PluginManifest, String> {
     let manifest = load_plugin_manifest(plugins_dir, name)?;
-    let expected = normalize_digest(&manifest.artifact_digest)?;
+    let expected = normalize_digest(&manifest.blob_digest)?;
     let bytes = blobs.get_blocking(&expected).map_err(|e| {
         format!(
             "plugin '{}' blob {} missing from store: {e}",
@@ -328,15 +328,15 @@ pub fn share_installed_plugin(
     name: &str,
 ) -> Result<PluginShareReport, String> {
     let manifest = verify_installed_plugin(&store.blobs, plugins_dir, name)?;
-    let bytes = store.blobs.get_blocking(&manifest.artifact_digest)?;
-    let report = store.share_blob(&bytes, Some(&manifest.artifact_digest))?;
+    let bytes = store.blobs.get_blocking(&manifest.blob_digest)?;
+    let report = store.share_blob(&bytes, Some(&manifest.blob_digest))?;
     let mut updated = manifest.clone();
     updated.ticket_uri = Some(report.ticket_uri.clone());
     let _ = write_manifest(plugins_dir, &updated);
     Ok(PluginShareReport {
         name: manifest.name,
         version: manifest.version,
-        artifact_digest: report.digest,
+        blob_digest: report.digest,
         blake3_hash: report.blake3_hash,
         bytes: report.bytes,
         ticket_uri: report.ticket_uri,
@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(manifest.name, "shell");
         assert_eq!(manifest.kind, "builtin-protocol");
         assert!(manifest.protocols.iter().any(|p| p == "dialtone/shell/1"));
-        assert!(blobs.has_blocking(&manifest.artifact_digest));
+        assert!(blobs.has_blocking(&manifest.blob_digest));
         assert!(is_plugin_installed_and_verified(
             &blobs,
             &plugins_dir,
@@ -459,8 +459,8 @@ mod tests {
     fn plugin_tamper_detection_fails_closed_on_digest_mismatch() {
         let (root, plugins_dir, blobs) = temp_plugin_env("tamper");
         let mut manifest = install_builtin_plugin(&blobs, &plugins_dir, "shell").unwrap();
-        // Tamper manifest to reference a different digest not matching the artifact.
-        manifest.artifact_digest = digest_of(b"tampered payload");
+        // Tamper manifest to reference a different digest not matching the blob.
+        manifest.blob_digest = digest_of(b"tampered payload");
         write_manifest(&plugins_dir, &manifest).unwrap();
 
         assert!(!is_plugin_installed_and_verified(
@@ -548,7 +548,7 @@ mod tests {
             install_plugin_from_ticket(&store_b, &plugins_b, "shell", &shared.ticket_uri, false)
                 .unwrap();
         assert_eq!(installed_b.name, "shell");
-        assert_eq!(installed_b.artifact_digest, shared.artifact_digest);
+        assert_eq!(installed_b.blob_digest, shared.blob_digest);
         assert!(is_plugin_installed_and_verified(
             &blobs_b, &plugins_b, "shell"
         ));

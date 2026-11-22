@@ -116,7 +116,7 @@ fn cli_dialtone_install_shell_and_local_session_workflow() {
     ))
     .unwrap();
     assert_eq!(inst_json["name"].as_str(), Some("shell"));
-    assert!(inst_json["artifact_digest"]
+    assert!(inst_json["blob_digest"]
         .as_str()
         .unwrap_or("")
         .starts_with("sha256:"));

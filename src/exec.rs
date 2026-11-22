@@ -275,7 +275,7 @@ pub fn run_local_sync(node_name: &str, req: &ExecRequest) -> Result<ExecResponse
     })
 }
 
-/// Async wrapper that keeps subprocess execution off tokio worker threads.
+/// Async wrapper that keeps process execution off tokio runtime threads.
 pub async fn run_local(node_name: &str, req: &ExecRequest) -> Result<ExecResponse, String> {
     let node = node_name.to_string();
     let req = req.clone();

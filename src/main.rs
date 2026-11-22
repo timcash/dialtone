@@ -81,7 +81,7 @@ fn print_usage() {
          \x20 --cwd <dir>              Working directory for 'dialtone exec'\n\
          \x20 --timeout <duration>     Timeout for 'dialtone exec' / 'dialtone shell send' (e.g. 30s, 2m; default: 30s)\n\
          \x20 --ticket <uri>           Blob ticket URI for 'dialtone install <plugin>'\n\
-         \x20 --file <path>            Local artifact path for 'dialtone install <plugin>'\n\
+         \x20 --file <path>            Local blob path for 'dialtone install <plugin>'\n\
          \x20 --lines <n>              Number of scrollback lines for 'dialtone shell capture' (default: 100)\n\
          \x20 --addr <ip:port>         Direct address for 'dialtone allowlist add' (repeatable)\n\
          \x20 --force                  Pull over QUIC even if the blob is already in the store\n\
@@ -1877,7 +1877,7 @@ async fn main() {
                     "installed plugin '{}' ({}) digest={} bytes={}",
                     resp.get("name").and_then(|v| v.as_str()).unwrap_or(name),
                     resp.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
-                    resp.get("artifact_digest")
+                    resp.get("blob_digest")
                         .and_then(|v| v.as_str())
                         .unwrap_or(""),
                     resp.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -1934,7 +1934,7 @@ async fn main() {
                                         .and_then(|v| v.as_bool())
                                         .unwrap_or(false),
                                     m.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
-                                    m.get("artifact_digest")
+                                    m.get("blob_digest")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or(""),
                                 );
