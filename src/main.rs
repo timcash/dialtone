@@ -58,6 +58,14 @@ fn print_usage() {
          \x20                          every 30s), and with --all the store, pulls, programs and security\n\
          \x20                          (STO, PUL, PRC, SEC)\n\
          \x20 exec [--node <peer>] [--shell auto|bash|powershell] [--] <cmd...>  Run a bash or PowerShell command on a node\n\
+         \x20 install <plugin> [--ticket <ticket>] [--file <path>] Install a blob-backed plugin (e.g. 'dialtone install shell')\n\
+         \x20 plugin [list|share <name>|remove <name>] Manage installed plugins\n\
+         \x20 shell new <name> [--node <peer>] [--shell auto|bash|powershell] [--cwd <dir>] Start a persistent terminal session\n\
+         \x20 shell send <name> [--node <peer>] [--timeout 30s] [--] <cmd...> Run a bash/ps1 command in a running session\n\
+         \x20 shell capture <name> [--node <peer>] [--lines 100] Read scrollback output from a session\n\
+         \x20 shell ls [--node <peer>] [--json] List running terminal sessions\n\
+         \x20 shell attach <name> [--node <peer>] Attach interactively to a local or remote session\n\
+         \x20 shell kill <name> [--node <peer>] Stop a running terminal session\n\
          \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
          \x20 status                   Print this node's NodeId and transport report\n\
          \x20 help                     Show this help\n\n\
@@ -70,7 +78,10 @@ fn print_usage() {
          \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 7d; default: 24h)\n\
          \x20 --shell <shell>          Shell for 'dialtone exec' (auto, bash, powershell; aliases --bash, --powershell)\n\
          \x20 --cwd <dir>              Working directory for 'dialtone exec'\n\
-         \x20 --timeout <duration>     Timeout for 'dialtone exec' (e.g. 30s, 2m; default: 30s)\n\
+         \x20 --timeout <duration>     Timeout for 'dialtone exec' / 'dialtone shell send' (e.g. 30s, 2m; default: 30s)\n\
+         \x20 --ticket <uri>           Blob ticket URI for 'dialtone install <plugin>'\n\
+         \x20 --file <path>            Local artifact path for 'dialtone install <plugin>'\n\
+         \x20 --lines <n>              Number of scrollback lines for 'dialtone shell capture' (default: 100)\n\
          \x20 --addr <ip:port>         Direct address for 'dialtone allowlist add' (repeatable)\n\
          \x20 --force                  Pull over QUIC even if the blob is already in the store\n\
          \x20 --udp <ip:port>          'dialtone link': where the source sends (export) or packets go (import)\n\
@@ -111,6 +122,14 @@ struct CliOptions {
     exec_cwd: Option<String>,
     exec_timeout_secs: u64,
     exec_command: Vec<String>,
+    plugin_subcmd: String,
+    plugin_name: Option<String>,
+    plugin_ticket: Option<String>,
+    plugin_file: Option<String>,
+    shell_subcmd: String,
+    shell_name: Option<String>,
+    shell_lines: usize,
+    shell_command: Vec<String>,
     force: bool,
     json: bool,
     invite_ttl_secs: u64,
@@ -166,6 +185,14 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         exec_cwd: None,
         exec_timeout_secs: dialtone::exec::DEFAULT_TIMEOUT_SECS,
         exec_command: Vec::new(),
+        plugin_subcmd: "list".to_string(),
+        plugin_name: None,
+        plugin_ticket: None,
+        plugin_file: None,
+        shell_subcmd: "ls".to_string(),
+        shell_name: None,
+        shell_lines: 100,
+        shell_command: Vec::new(),
         force: false,
         json: false,
         invite_ttl_secs: 86_400,
@@ -249,6 +276,58 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 opts.action = "exec".to_string();
                 action_set = true;
             }
+            "install" if !action_set => {
+                opts.action = "install".to_string();
+                action_set = true;
+                if let Some(name) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                    idx += 1;
+                    opts.plugin_name = Some(name.clone());
+                }
+            }
+            "plugin" if !action_set => {
+                opts.action = "plugin".to_string();
+                action_set = true;
+                if let Some(sub) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                    idx += 1;
+                    opts.plugin_subcmd = sub.clone();
+                    if let Some(name) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                        idx += 1;
+                        opts.plugin_name = Some(name.clone());
+                    }
+                }
+            }
+            "shell" if !action_set => {
+                opts.action = "shell".to_string();
+                action_set = true;
+                if let Some(sub) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                    idx += 1;
+                    opts.shell_subcmd = sub.clone();
+                    if matches!(
+                        opts.shell_subcmd.as_str(),
+                        "new" | "send" | "capture" | "kill" | "attach"
+                    ) {
+                        if let Some(name) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                            idx += 1;
+                            opts.shell_name = Some(name.clone());
+                        }
+                    }
+                }
+            }
+            "--ticket" => {
+                idx += 1;
+                opts.plugin_ticket = Some(args.get(idx).ok_or("missing --ticket value")?.clone());
+            }
+            "--file" => {
+                idx += 1;
+                opts.plugin_file = Some(args.get(idx).ok_or("missing --file value")?.clone());
+            }
+            "--lines" => {
+                idx += 1;
+                let raw = args.get(idx).ok_or("missing --lines value")?;
+                opts.shell_lines = raw
+                    .parse::<usize>()
+                    .map_err(|e| format!("invalid --lines value: {e}"))?;
+            }
             "--shell" => {
                 idx += 1;
                 let raw = args.get(idx).ok_or("missing --shell value")?;
@@ -271,6 +350,10 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             }
             "--" if opts.action == "exec" => {
                 opts.exec_command.extend(args[idx + 1..].iter().cloned());
+                break;
+            }
+            "--" if opts.action == "shell" => {
+                opts.shell_command.extend(args[idx + 1..].iter().cloned());
                 break;
             }
             "devices" if !action_set => {
@@ -398,6 +481,25 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             }
             other if opts.action == "exec" && !other.starts_with('-') => {
                 opts.exec_command.push(other.to_string());
+            }
+            other if opts.action == "shell" && !other.starts_with('-') => {
+                if opts.shell_name.is_none()
+                    && matches!(
+                        opts.shell_subcmd.as_str(),
+                        "new" | "send" | "capture" | "kill" | "attach"
+                    )
+                {
+                    opts.shell_name = Some(other.to_string());
+                } else {
+                    opts.shell_command.push(other.to_string());
+                }
+            }
+            other
+                if opts.action == "install"
+                    && opts.plugin_name.is_none()
+                    && !other.starts_with('-') =>
+            {
+                opts.plugin_name = Some(other.to_string());
             }
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -1060,6 +1162,12 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
     if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
         st.joins = Some(joins.clone());
     }
+    let shell_manager = shared_state
+        .as_ref()
+        .and_then(|s| s.lock().ok())
+        .map(|st| st.shell_manager.clone())
+        .unwrap_or_else(|| Arc::new(dialtone::shell::ShellManager::new(opts.node.clone())));
+    let plugins_dir = dialtone::plugin::plugins_dir_for_store(blobs.dir());
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
         .accept(iroh_blobs::ALPN, blobs_proto)
@@ -1072,6 +1180,10 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         .accept(
             dialtone::exec::ALPN,
             dialtone::exec::ExecHandler::new(opts.node.clone()),
+        )
+        .accept(
+            dialtone::shell::ALPN,
+            dialtone::shell::ShellHandler::new(shell_manager, blobs.clone(), plugins_dir),
         )
         .spawn();
 
@@ -1697,6 +1809,450 @@ async fn main() {
                 std::process::exit(exit_code);
             }
             Ok(())
+        })(),
+        "install" => (|| -> Result<(), String> {
+            let name = opts
+                .plugin_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or("usage: dialtone install <plugin> [--ticket <ticket>] [--file <path>] [--force] [--json]")?;
+            let cfg = load_mesh_config(&default_config_path());
+            let listen = match (&cfg.listen_addr, opts.listen_explicit) {
+                (Some(saved), false) => saved.clone(),
+                _ => opts.listen.clone(),
+            };
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+            let body = json!({
+                "name": name,
+                "ticket": opts.plugin_ticket,
+                "file": opts.plugin_file,
+                "force": opts.force,
+            });
+            // Prefer the live daemon's HTTP API so we don't contend on store.lock;
+            // if no daemon is running and no peer ticket pull is requested, install offline directly.
+            let resp = match local_daemon_http_json(
+                &listen,
+                "POST",
+                "/api/plugins/install",
+                Some(&body),
+                &api_token,
+                60,
+            ) {
+                Ok(v) => v,
+                Err(daemon_err) if opts.plugin_ticket.is_none() => {
+                    let store_dir = default_store_dir();
+                    let plugins_dir = dialtone::plugin::plugins_dir_for_store(&store_dir);
+                    let blobs = Blobs::open_blocking(&store_dir)
+                        .map_err(|e| format!("{daemon_err}; offline open failed: {e}"))?;
+                    let res = if let Some(file_path) = opts.plugin_file.as_deref() {
+                        dialtone::plugin::install_plugin_from_file(
+                            &blobs,
+                            &plugins_dir,
+                            name,
+                            std::path::Path::new(file_path),
+                        )
+                    } else {
+                        dialtone::plugin::install_builtin_plugin(&blobs, &plugins_dir, name)
+                    };
+                    blobs.close_blocking();
+                    let manifest = res?;
+                    serde_json::to_value(&manifest).unwrap_or_default()
+                }
+                Err(err) => return Err(err),
+            };
+            if opts.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&resp).unwrap_or_default()
+                );
+            } else {
+                println!(
+                    "installed plugin '{}' ({}) digest={} bytes={}",
+                    resp.get("name").and_then(|v| v.as_str()).unwrap_or(name),
+                    resp.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
+                    resp.get("artifact_digest")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    resp.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0),
+                );
+            }
+            Ok(())
+        })(),
+        "plugin" => (|| -> Result<(), String> {
+            let cfg = load_mesh_config(&default_config_path());
+            let listen = match (&cfg.listen_addr, opts.listen_explicit) {
+                (Some(saved), false) => saved.clone(),
+                _ => opts.listen.clone(),
+            };
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+            match opts.plugin_subcmd.as_str() {
+                "list" | "ls" => {
+                    let resp = match local_daemon_http_json(
+                        &listen,
+                        "GET",
+                        "/api/plugins",
+                        None,
+                        &api_token,
+                        10,
+                    ) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            let store_dir = default_store_dir();
+                            let plugins_dir = dialtone::plugin::plugins_dir_for_store(&store_dir);
+                            let blobs = Blobs::open_blocking(&store_dir)?;
+                            let list =
+                                dialtone::plugin::list_installed_plugins(&blobs, &plugins_dir)?;
+                            blobs.close_blocking();
+                            json!({ "plugins": list })
+                        }
+                    };
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else {
+                        println!("{:<16} {:<10} {:<18} DIGEST", "PLUGIN", "VERIFIED", "KIND");
+                        if let Some(arr) = resp.get("plugins").and_then(|v| v.as_array()) {
+                            for item in arr {
+                                let m = item.get("manifest").unwrap_or(item);
+                                println!(
+                                    "{:<16} {:<10} {:<18} {}",
+                                    m.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                                    item.get("verified")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false),
+                                    m.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
+                                    m.get("artifact_digest")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or(""),
+                                );
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                "share" => {
+                    let name = opts
+                        .plugin_name
+                        .as_deref()
+                        .ok_or("usage: dialtone plugin share <plugin> [--json]")?;
+                    let resp = local_daemon_http_json(
+                        &listen,
+                        "POST",
+                        "/api/plugins/share",
+                        Some(&json!({ "name": name })),
+                        &api_token,
+                        20,
+                    )?;
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else {
+                        println!(
+                            "{}",
+                            resp.get("ticket_uri")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                        );
+                    }
+                    Ok(())
+                }
+                "remove" | "rm" => {
+                    let name = opts
+                        .plugin_name
+                        .as_deref()
+                        .ok_or("usage: dialtone plugin remove <plugin>")?;
+                    let resp = match local_daemon_http_json(
+                        &listen,
+                        "POST",
+                        "/api/plugins/remove",
+                        Some(&json!({ "name": name })),
+                        &api_token,
+                        10,
+                    ) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            let plugins_dir =
+                                dialtone::plugin::plugins_dir_for_store(&default_store_dir());
+                            dialtone::plugin::remove_installed_plugin(&plugins_dir, name)?;
+                            json!({ "status": "removed", "name": name })
+                        }
+                    };
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else {
+                        println!("removed plugin '{name}'");
+                    }
+                    Ok(())
+                }
+                other => Err(format!(
+                    "unknown plugin subcommand '{other}' (expected list, share, or remove)"
+                )),
+            }
+        })(),
+        "shell" => (|| -> Result<(), String> {
+            let cfg = load_mesh_config(&default_config_path());
+            let listen = match (&cfg.listen_addr, opts.listen_explicit) {
+                (Some(saved), false) => saved.clone(),
+                _ => opts.listen.clone(),
+            };
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+            let target_node = if opts.node_explicit {
+                opts.node.clone()
+            } else {
+                String::new()
+            };
+
+            let call_shell = |req: &dialtone::shell::ShellRequest,
+                              http_timeout: u64|
+             -> Result<serde_json::Value, String> {
+                let body = json!({
+                    "node": target_node,
+                    "request": req,
+                });
+                local_daemon_http_json(
+                    &listen,
+                    "POST",
+                    "/api/shell",
+                    Some(&body),
+                    &api_token,
+                    http_timeout,
+                )
+            };
+
+            match opts.shell_subcmd.as_str() {
+                "new" => {
+                    let name = opts
+                        .shell_name
+                        .clone()
+                        .ok_or("usage: dialtone shell new <name> [--node <peer>] [--shell auto|bash|powershell] [--cwd <dir>]")?;
+                    let req = dialtone::shell::ShellRequest::New {
+                        name,
+                        shell: opts.exec_shell,
+                        cwd: opts.exec_cwd.clone(),
+                    };
+                    let resp = call_shell(&req, 20)?;
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else if let Some(s) = resp.get("session") {
+                        println!(
+                            "session '{}' started on {} ({}/{}, pid={})",
+                            s.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                            s.get("node").and_then(|v| v.as_str()).unwrap_or(""),
+                            s.get("os").and_then(|v| v.as_str()).unwrap_or(""),
+                            s.get("shell").and_then(|v| v.as_str()).unwrap_or(""),
+                            s.get("pid").and_then(|v| v.as_u64()).unwrap_or(0),
+                        );
+                    }
+                    Ok(())
+                }
+                "send" => {
+                    let name = opts
+                        .shell_name
+                        .clone()
+                        .ok_or("usage: dialtone shell send <name> [--node <peer>] [--timeout 30s] [--] <command...>")?;
+                    let command = opts.shell_command.join(" ").trim().to_string();
+                    if command.is_empty() {
+                        return Err(
+                            "usage: dialtone shell send <name> [--node <peer>] [--timeout 30s] [--] <command...>"
+                                .to_string(),
+                        );
+                    }
+                    let req = dialtone::shell::ShellRequest::Send {
+                        name,
+                        command,
+                        timeout_secs: Some(opts.exec_timeout_secs),
+                    };
+                    let resp = call_shell(&req, opts.exec_timeout_secs.saturating_add(15))?;
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else if let Some(r) = resp.get("result") {
+                        if let Some(out) = r.get("stdout").and_then(|v| v.as_str()) {
+                            print!("{out}");
+                        }
+                        if let Some(err) = r.get("stderr").and_then(|v| v.as_str()) {
+                            eprint!("{err}");
+                        }
+                    }
+                    let r = resp.get("result").unwrap_or(&resp);
+                    if r.get("timed_out").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        return Err("shell command timed out".to_string());
+                    }
+                    let exit_code = r.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                    if exit_code != 0 {
+                        std::process::exit(exit_code);
+                    }
+                    Ok(())
+                }
+                "capture" => {
+                    let name = opts
+                        .shell_name
+                        .clone()
+                        .ok_or("usage: dialtone shell capture <name> [--node <peer>] [--lines 100]")?;
+                    let req = dialtone::shell::ShellRequest::Capture {
+                        name,
+                        lines: Some(opts.shell_lines),
+                    };
+                    let resp = call_shell(&req, 15)?;
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else if let Some(lines) = resp
+                        .get("capture")
+                        .and_then(|c| c.get("lines"))
+                        .and_then(|v| v.as_array())
+                    {
+                        for line in lines {
+                            if let Some(s) = line.as_str() {
+                                println!("{s}");
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                "ls" | "list" => {
+                    let resp = call_shell(&dialtone::shell::ShellRequest::List, 15)?;
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else {
+                        println!(
+                            "{:<16} {:<12} {:<10} {:<8} {:<6} CMDS",
+                            "SESSION", "SHELL", "OS", "PID", "ALIVE"
+                        );
+                        if let Some(sessions) = resp.get("sessions").and_then(|v| v.as_array()) {
+                            for s in sessions {
+                                println!(
+                                    "{:<16} {:<12} {:<10} {:<8} {:<6} {}",
+                                    s.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                                    s.get("shell").and_then(|v| v.as_str()).unwrap_or(""),
+                                    s.get("os").and_then(|v| v.as_str()).unwrap_or(""),
+                                    s.get("pid").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    s.get("alive").and_then(|v| v.as_bool()).unwrap_or(false),
+                                    s.get("commands_run").and_then(|v| v.as_u64()).unwrap_or(0),
+                                );
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                "kill" | "rm" => {
+                    let name = opts
+                        .shell_name
+                        .clone()
+                        .ok_or("usage: dialtone shell kill <name> [--node <peer>]")?;
+                    let req = dialtone::shell::ShellRequest::Kill { name: name.clone() };
+                    let resp = call_shell(&req, 15)?;
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&resp).unwrap_or_default()
+                        );
+                    } else {
+                        println!("killed session '{name}'");
+                    }
+                    Ok(())
+                }
+                "attach" => {
+                    let name = opts
+                        .shell_name
+                        .clone()
+                        .ok_or("usage: dialtone shell attach <name> [--node <peer>]")?;
+                    // Print recent scrollback first, like attaching to a tmux pane.
+                    let cap = call_shell(
+                        &dialtone::shell::ShellRequest::Capture {
+                            name: name.clone(),
+                            lines: Some(40),
+                        },
+                        15,
+                    )?;
+                    if let Some(lines) = cap
+                        .get("capture")
+                        .and_then(|c| c.get("lines"))
+                        .and_then(|v| v.as_array())
+                    {
+                        for line in lines {
+                            if let Some(s) = line.as_str() {
+                                println!("{s}");
+                            }
+                        }
+                    }
+                    let peer_label = if target_node.is_empty() {
+                        "local"
+                    } else {
+                        target_node.as_str()
+                    };
+                    let stdin = std::io::stdin();
+                    let mut line = String::new();
+                    loop {
+                        print!("[dialtone:{peer_label}/{name}]> ");
+                        let _ = std::io::stdout().flush();
+                        line.clear();
+                        match stdin.read_line(&mut line) {
+                            Ok(0) => break,
+                            Ok(_) => {
+                                let trimmed = line.trim();
+                                if trimmed.is_empty() {
+                                    continue;
+                                }
+                                if trimmed == "detach" || trimmed == ":detach" {
+                                    break;
+                                }
+                                let resp = call_shell(
+                                    &dialtone::shell::ShellRequest::Send {
+                                        name: name.clone(),
+                                        command: trimmed.to_string(),
+                                        timeout_secs: Some(opts.exec_timeout_secs),
+                                    },
+                                    opts.exec_timeout_secs.saturating_add(15),
+                                )?;
+                                if let Some(r) = resp.get("result") {
+                                    if let Some(out) = r.get("stdout").and_then(|v| v.as_str()) {
+                                        print!("{out}");
+                                    }
+                                    if let Some(err) = r.get("stderr").and_then(|v| v.as_str()) {
+                                        eprint!("{err}");
+                                    }
+                                }
+                            }
+                            Err(e) => return Err(format!("read stdin: {e}")),
+                        }
+                    }
+                    Ok(())
+                }
+                other => Err(format!(
+                    "unknown shell subcommand '{other}' (expected new, send, capture, ls, attach, or kill)"
+                )),
+            }
         })(),
         "devices" => dialtone::devices::list_devices().map(|devices| {
             if opts.json {

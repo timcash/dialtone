@@ -207,6 +207,9 @@ pub struct NodeState {
     /// Asks the Probe actor for a run (`POST /api/probe`), when the node runs actors.
     #[serde(skip)]
     pub probe_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::probe::ProbeRequest>>,
+    /// Long-running cross-OS terminal session manager for the `shell` plugin (`dialtone/shell/1`).
+    #[serde(skip)]
+    pub shell_manager: Arc<crate::shell::ShellManager>,
 }
 
 impl NodeState {
@@ -681,6 +684,7 @@ impl NodeState {
             probe_tx: None,
             links: None,
             joins: None,
+            shell_manager: Arc::new(crate::shell::ShellManager::new(node.to_string())),
         };
         st.record_event(
             "mesh.boot",
@@ -1326,6 +1330,196 @@ fn route_request(
                 return write_json(&mut stream, 503, &json!({ "error": "node not running" }));
             };
             match rt.block_on(crate::exec::remote(&ep, peer_id, &req)) {
+                Ok(resp) => write_json(&mut stream, 200, &resp),
+                Err(err) => write_json(&mut stream, 502, &json!({ "error": err })),
+            }
+        }
+        ("GET", "/api/plugins") => {
+            let blobs = st.blobs.clone();
+            let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
+            drop(st);
+            match crate::plugin::list_installed_plugins(&blobs, &plugins_dir) {
+                Ok(plugins) => write_json(&mut stream, 200, &json!({ "plugins": plugins })),
+                Err(err) => write_json(&mut stream, 500, &json!({ "error": err })),
+            }
+        }
+        ("POST", "/api/plugins/install") => {
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let name = parsed
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let ticket = parsed
+                .get("ticket")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let file = parsed
+                .get("file")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let force = parsed
+                .get("force")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let blobs = st.blobs.clone();
+            let store = st.store.clone();
+            let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
+            drop(st);
+
+            let res = if let Some(ticket_uri) = ticket {
+                match store {
+                    Some(bridge) => crate::plugin::install_plugin_from_ticket(
+                        &bridge,
+                        &plugins_dir,
+                        &name,
+                        &ticket_uri,
+                        force,
+                    ),
+                    None => Err("node store not ready for peer ticket pull".to_string()),
+                }
+            } else if let Some(file_path) = file {
+                crate::plugin::install_plugin_from_file(
+                    &blobs,
+                    &plugins_dir,
+                    &name,
+                    std::path::Path::new(&file_path),
+                )
+            } else {
+                crate::plugin::install_builtin_plugin(&blobs, &plugins_dir, &name)
+            };
+            match res {
+                Ok(manifest) => write_json(&mut stream, 200, &manifest),
+                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
+            }
+        }
+        ("POST", "/api/plugins/share") => {
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let name = parsed
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let store = st.store.clone();
+            let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
+            drop(st);
+            let Some(bridge) = store else {
+                return write_json(&mut stream, 503, &json!({ "error": "node not running" }));
+            };
+            match crate::plugin::share_installed_plugin(&bridge, &plugins_dir, &name) {
+                Ok(report) => write_json(&mut stream, 200, &report),
+                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
+            }
+        }
+        ("POST", "/api/plugins/remove") => {
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let name = parsed
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
+            drop(st);
+            match crate::plugin::remove_installed_plugin(&plugins_dir, &name) {
+                Ok(()) => write_json(
+                    &mut stream,
+                    200,
+                    &json!({ "status": "removed", "name": name }),
+                ),
+                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
+            }
+        }
+        ("POST", "/api/shell") => {
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let target = parsed
+                .get("node")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let req_val = parsed.get("request").cloned().unwrap_or_else(|| json!({}));
+            let req: crate::shell::ShellRequest = match serde_json::from_value(req_val) {
+                Ok(r) => r,
+                Err(err) => {
+                    return write_json(
+                        &mut stream,
+                        400,
+                        &json!({ "error": format!("invalid shell request: {err}") }),
+                    );
+                }
+            };
+
+            let self_node = st.node.clone();
+            let own_id = st.iroh_runtime.node_id.clone();
+            let is_local = target.is_empty()
+                || target.eq_ignore_ascii_case("local")
+                || target.eq_ignore_ascii_case("self")
+                || target == self_node
+                || (!own_id.is_empty() && target == own_id);
+
+            let runtime = st.runtime.clone();
+            if is_local {
+                let blobs = st.blobs.clone();
+                let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
+                let mgr = st.shell_manager.clone();
+                drop(st);
+                if !crate::plugin::is_plugin_installed_and_verified(
+                    &blobs,
+                    &plugins_dir,
+                    crate::plugin::SHELL_PLUGIN_NAME,
+                ) {
+                    return write_json(
+                        &mut stream,
+                        400,
+                        &json!({
+                            "error": "plugin 'shell' is not installed; run 'dialtone install shell'"
+                        }),
+                    );
+                }
+                let resp = mgr.handle_request(req);
+                return match resp {
+                    crate::shell::ShellResponse::Error { error } => {
+                        write_json(&mut stream, 400, &json!({ "error": error }))
+                    }
+                    other => write_json(&mut stream, 200, &other),
+                };
+            }
+
+            let peer = st
+                .nodes
+                .iter()
+                .find(|n| n.node == target || n.node_id == target)
+                .map(|n| n.node_id.clone());
+            let endpoint = st.store.as_ref().map(|s| s.endpoint.clone());
+            drop(st);
+            let Some(peer_str) = peer else {
+                return write_json(
+                    &mut stream,
+                    404,
+                    &json!({ "error": format!("no node '{target}' in the mesh") }),
+                );
+            };
+            let Ok(peer_id) = peer_str.parse::<iroh::EndpointId>() else {
+                return write_json(
+                    &mut stream,
+                    400,
+                    &json!({ "error": "invalid peer node_id" }),
+                );
+            };
+            let (Some(rt), Some(ep)) = (runtime, endpoint) else {
+                return write_json(&mut stream, 503, &json!({ "error": "node not running" }));
+            };
+            match rt.block_on(crate::shell::remote_shell(&ep, peer_id, &req)) {
+                Ok(crate::shell::ShellResponse::Error { error }) => {
+                    write_json(&mut stream, 400, &json!({ "error": error }))
+                }
                 Ok(resp) => write_json(&mut stream, 200, &resp),
                 Err(err) => write_json(&mut stream, 502, &json!({ "error": err })),
             }
