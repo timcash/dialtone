@@ -1123,7 +1123,12 @@ mod tests {
             assert_eq!(ok.exit_code, 0);
             assert!(ok.stdout.contains("ps_ok"), "stdout={}", ok.stdout);
 
-            let fail = mgr.send_command("ps1", "cmd /c exit 7", Some(15)).unwrap();
+            let fail_cmd = if cfg!(windows) {
+                "cmd /c exit 7"
+            } else {
+                "sh -c 'exit 7'"
+            };
+            let fail = mgr.send_command("ps1", fail_cmd, Some(15)).unwrap();
             assert_eq!(fail.exit_code, 7, "expected exit 7, got {:?}", fail);
         }
 
