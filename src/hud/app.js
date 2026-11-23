@@ -115,18 +115,21 @@ function renderMesh(mesh) {
   document.getElementById("boot-stages").textContent = stages;
 }
 
-function renderProbe(probe) {
+function renderProbe(data) {
+  const probe = data?.probe && typeof data.probe === "object" ? data.probe : data;
   const checks = Array.isArray(probe?.checks) ? probe.checks : [];
-  const passed = checks.filter((c) => c.passed).length;
+  const isOk = (c) => Boolean(c.ok ?? c.passed);
+  const passed = checks.filter(isOk).length;
   document.getElementById("probe-summary").textContent = checks.length
     ? `${passed}/${checks.length} passed`
     : "no probe report yet";
   document.getElementById("probe-checks").innerHTML = checks.length
     ? checks
         .map((c) => {
-          const cls = c.passed ? "ok" : "err";
+          const ok = isOk(c);
+          const cls = ok ? "ok" : "err";
           const code = c.code || c.name || "CHK";
-          return `<span class="chip ${cls}" title="${esc(c.detail || "")}">${esc(code)}: ${c.passed ? "PASS" : "FAIL"}</span>`;
+          return `<span class="chip ${cls}" title="${esc(c.detail || "")}">${esc(code)}: ${ok ? "PASS" : "FAIL"}</span>`;
         })
         .join("")
     : `<span class="muted">Probes run automatically every 30s (or run: dialtone probe --all).</span>`;
