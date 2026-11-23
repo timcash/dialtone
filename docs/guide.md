@@ -1,8 +1,8 @@
 # Dialtone User Guide
 
-`dialtone` is a single-binary Rust + **Iroh 1.3** peer-to-peer mesh control plane, zero-dependency local status HUD, content-addressed blob store (`iroh-blobs`), and process supervisor. It runs without SSH, Git, or Tailscale/VPN runtime dependencies (the 3D H3 globe and multi-panel workspace live in `timcash/dialtone-earth`).
+`dialtone` is a single-binary Rust + **Iroh 1.5** peer-to-peer mesh control plane, zero-dependency local status HUD, content-addressed blob store (`iroh-blobs`), and process supervisor. It runs without SSH, Git, or Tailscale/VPN runtime dependencies (the 3D H3 globe and multi-panel workspace live in `timcash/dialtone-earth`).
 
-This guide uses the project's [domain language](../goal.md#domain-language): one word per concept (Node, NodeId, Peer, Mesh, Channel, Secret, Allowlist, Invite, Seed, Message, Beat, Inventory, Stats, Blob, Digest, Store, Ticket, Program, Process, Probe, HUD, API).
+This guide uses the project's domain language: one word per concept (Node, NodeId, Peer, Mesh, Channel, Secret, Allowlist, Invite, Seed, Message, Beat, Inventory, Stats, Blob, Digest, Store, Ticket, Program, Process, Probe, HUD, API).
 
 ```text
 $ dialtone --help

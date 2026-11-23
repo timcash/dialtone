@@ -125,7 +125,7 @@ fn lint() -> R<()> {
         }
     }
 
-    say("Domain language: one word per concept (goal.md), no banned synonyms in src/");
+    say("Domain language: one word per concept, no banned synonyms in src/");
     // banned pattern (extended regex, case-insensitive) => word to use instead.
     // A line that must keep an old name (or names an iroh type) ends with `// compat`.
     let rules = [

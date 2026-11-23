@@ -151,11 +151,10 @@ Every concept in Dialtone has **one word** across CLI, code, API, HUD, and docs 
 | **Daemon** | The OS login service (`launchd`, `systemd --user`, Scheduled Task) that restarts the node on boot or crash. |
 | **HUD** | The node's local web UI and bearer-authenticated HTTP **API** on `127.0.0.1:8788`. |
 
-See [`goal.md`](goal.md#domain-language) for the full enforced lexicon and banned-synonym table.
+Enforced by `./dialtone.sh test --only lint` (`.\dialtone.ps1 test --only lint` on Windows).
 
 ## 6. Docs
 
 - [`docs/install.md`](docs/install.md) — Supported platforms, SHA-256 verification, PATH setup, manual downloads, source builds, and installer tests
 - [`docs/guide.md`](docs/guide.md) — User guide, quick start, HUD controls, HTTP API reference, environment variables, and `./dialtone.sh` tasks
 - [`docs/plugins.md`](docs/plugins.md) — Blob-backed plugins and cross-OS persistent terminal sessions (`dialtone shell`)
-- [`goal.md`](goal.md) — Complete domain language, architecture, security model, and roadmap
