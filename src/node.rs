@@ -412,14 +412,12 @@ impl EndpointHooks for AllowlistHook {
         let remote = conn.remote_id();
         let alpn = conn.alpn();
         let admitted = if self.allowlist.is_empty() {
-            alpn == iroh_gossip::net::GOSSIP_ALPN
-                || alpn == crate::join::ALPN
-                || self.members.contains(&remote)
+            alpn == iroh_gossip::ALPN || alpn == crate::join::ALPN || self.members.contains(&remote)
         } else {
             self.allowlist.contains(&remote)
         };
         if admitted {
-            if alpn == iroh_gossip::net::GOSSIP_ALPN {
+            if alpn == iroh_gossip::ALPN {
                 self.gossip.add(conn);
             }
             return AfterHandshakeOutcome::accept();

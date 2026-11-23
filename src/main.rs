@@ -30,7 +30,7 @@ use dialtone::node::{
 use dialtone::stats::{sample_stats, StatsWindow};
 use iroh::address_lookup::memory::MemoryLookup;
 use iroh::protocol::Router;
-use iroh_gossip::net::{Gossip, GOSSIP_ALPN};
+use iroh_gossip::{Gossip, ALPN as GOSSIP_ALPN};
 use serde_json::json;
 
 mod actors;
@@ -38,7 +38,7 @@ mod actors;
 fn print_usage() {
     println!(
         "usage: dialtone [action] [flags]\n\n\
-         Single-binary Iroh 1.3 + Rust mesh control plane, local status HUD, blob store & daemon.\n\
+         Single-binary Iroh 1.5 + Rust mesh control plane, local status HUD, blob store & daemon.\n\
          Running `dialtone` with no arguments boots in dependency order and prints the local Web HUD URL.\n\n\
          actions:\n\
          \x20 up                       Start the node: HUD -> store -> Iroh QUIC -> mesh\n\
@@ -1157,7 +1157,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
     );
 
     // =========================================================================
-    // [BOOT 4/5] Iroh 1.3 QUIC Endpoint & Non-Tailnet Physical NIC
+    // [BOOT 4/5] Iroh 1.5 QUIC Endpoint & Non-Tailnet Physical NIC
     // =========================================================================
     let key_path = default_secret_key_path();
     let secret_key = load_or_create_secret_key_at(&key_path)?;
@@ -1194,10 +1194,9 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
 
     // Remember message ids for three of the longest beat intervals: a beat still travelling
     // after iroh-gossip forgot its id would be delivered again (the default is 90s).
-    let broadcast_config = iroh_gossip::proto::PlumtreeConfig {
-        message_id_retention: Duration::from_secs(3 * dialtone::mesh::MAX_BEAT_INTERVAL_SECS),
-        ..Default::default()
-    };
+    let mut broadcast_config = iroh_gossip::BroadcastConfig::default();
+    broadcast_config.message_id_retention =
+        Duration::from_secs(3 * dialtone::mesh::MAX_BEAT_INTERVAL_SECS);
     let gossip = Gossip::builder()
         .max_message_size(65_536)
         .broadcast_config(broadcast_config)
@@ -1288,7 +1287,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         ),
     );
     println!(
-        "[BOOT 4/5] Iroh 1.3 QUIC Endpoint (No-Tailnet NIC) ....... [READY] id={}.. ip={}",
+        "[BOOT 4/5] Iroh 1.5 QUIC Endpoint (No-Tailnet NIC) ....... [READY] id={}.. ip={}",
         &node_id[..16],
         diagnostics
             .bound_non_tailnet_ipv4

@@ -52,9 +52,10 @@ use dialtone::wire::{neighbor_prefix, MAX_NEIGHBORS};
 use futures_lite::StreamExt;
 use iroh::address_lookup::memory::MemoryLookup;
 use iroh::{EndpointAddr, EndpointId};
-use iroh_gossip::api::{Event as GossipEvent, GossipReceiver, GossipSender};
-use iroh_gossip::net::Gossip;
-use iroh_gossip::proto::TopicId;
+use iroh_gossip::{
+    Error as GossipError, Event as GossipEvent, Gossip, GossipReceiver, GossipSender, GossipTopic,
+    TopicId,
+};
 use iroh_mdns_address_lookup::{DiscoveryEvent, MdnsAddressLookup};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -1057,8 +1058,6 @@ const MIN_NEIGHBORS: usize = 2;
 const JOIN_SAMPLE: usize = 3;
 /// A peer Mesh dials itself for gossip (`dial_for_gossip`) is dialed at most this often.
 const GOSSIP_DIAL_EVERY: Duration = Duration::from_secs(30);
-/// A neighbor whose beats this many times in a row do not list this node is joined again.
-const ONE_SIDED_BEATS: u32 = 2;
 /// Every this many beats, Mesh rebuilds its inventory to catch details that drift slowly
 /// (the public-IP lookup, addresses); it is broadcast only when it changed.
 const INVENTORY_REFRESH_EVERY: u64 = 6;
@@ -1159,12 +1158,6 @@ struct Mesh {
     /// Latest inventory per peer NodeId, applied again when its entry is first created.
     inventories: HashMap<String, Inventory>,
     own_inventory_version: u64,
-    /// Neighbors by how many beats in a row did not list this node (see `on_beat`).
-    one_sided: HashMap<EndpointId, u32>,
-    /// When each current neighbor became one, and when a silent one was last joined again
-    /// (monotonic ms; see `rejoin_silent_neighbors`).
-    neighbor_since: HashMap<EndpointId, u64>,
-    silent_rejoined_at: HashMap<EndpointId, u64>,
     /// When `dial_for_gossip` last dialed each peer (monotonic ms).
     gossip_dialed_at: HashMap<EndpointId, u64>,
     /// What this node last announced for each program it deploys, by name, with when it was
@@ -1189,9 +1182,7 @@ struct Mesh {
 }
 
 /// The next event on a topic, or never when not subscribed.
-async fn next_event(
-    rx: &mut Option<GossipReceiver>,
-) -> Option<Result<GossipEvent, iroh_gossip::api::ApiError>> {
+async fn next_event(rx: &mut Option<GossipReceiver>) -> Option<Result<GossipEvent, GossipError>> {
     match rx {
         Some(rx) => rx.next().await,
         None => std::future::pending().await,
@@ -1259,9 +1250,6 @@ impl Mesh {
             replay_guard: ReplayGuard::default(),
             inventories: HashMap::new(),
             own_inventory_version: 0,
-            one_sided: HashMap::new(),
-            neighbor_since: HashMap::new(),
-            silent_rejoined_at: HashMap::new(),
             gossip_dialed_at: HashMap::new(),
             announced: HashMap::new(),
             announced_all_at: 0,
@@ -1316,13 +1304,11 @@ impl Mesh {
                 }
                 event = self.receiver.next(), if self.subscribed => {
                     let ended = match event {
-                        Some(Ok(GossipEvent::NeighborUp(peer))) => {
-                            self.neighbor_since.insert(peer, monotonic_now_ms());
+                        Some(Ok(GossipEvent::NeighborUp(_))) => {
                             self.neighbors_changed();
                             None
                         }
-                        Some(Ok(GossipEvent::NeighborDown(peer))) => {
-                            self.neighbor_since.remove(&peer);
+                        Some(Ok(GossipEvent::NeighborDown(_))) => {
                             self.neighbors_changed();
                             self.keep_neighbors().await;
                             None
@@ -1336,6 +1322,7 @@ impl Mesh {
                             eprintln!("[gossip-lagged] channel '{}': this node fell behind and missed gossip events", self.channel);
                             None
                         }
+                        Some(Ok(_)) => None,
                         Some(Err(err)) => Some(err.to_string()),
                         None => Some(format!("subscription to '{}' ended", self.channel)),
                     };
@@ -1369,7 +1356,7 @@ impl Mesh {
         &self,
         topic: TopicId,
         peers: Vec<EndpointId>,
-    ) -> Result<iroh_gossip::api::GossipTopic, String> {
+    ) -> Result<GossipTopic, String> {
         match tokio::time::timeout(SUBSCRIBE_TIMEOUT, self.gossip.subscribe(topic, peers)).await {
             Ok(r) => r.map_err(|e| e.to_string()),
             Err(_) => Err(format!("no answer within {SUBSCRIBE_TIMEOUT:?}")),
@@ -1522,7 +1509,7 @@ impl Mesh {
             let endpoint = self.ctx.endpoint.clone();
             let gossip = self.gossip.clone();
             tokio::spawn(async move {
-                let dial = endpoint.connect(peer, iroh_gossip::net::GOSSIP_ALPN);
+                let dial = endpoint.connect(peer, iroh_gossip::ALPN);
                 if let Ok(Ok(conn)) = tokio::time::timeout(Duration::from_secs(20), dial).await {
                     let _ = gossip.handle_connection(conn).await;
                 }
@@ -2118,7 +2105,6 @@ impl Mesh {
         self.upgrade_relayed_lan_peers().await;
         self.keep_neighbors().await;
         self.join_unheard_seeds().await;
-        self.rejoin_silent_neighbors().await;
         self.heal_wan_and_network_changes().await;
 
         let counter = self.counter;
@@ -2280,97 +2266,10 @@ impl Mesh {
                 version: beat.version.clone(),
             });
         }
-        self.rejoin_if_one_sided(&beat).await;
         // Stamp with our clock once admitted, so clock skew between hosts cannot cause
         // early TTL pruning.
         beat.updated_at_unix = now_unix();
         self.merge_peer_beat(beat);
-    }
-
-    /// A neighbor that does not count this node as its neighbor sends it nothing, so its
-    /// beats never arrive (when it has no other neighbors, they go nowhere at all). A
-    /// neighbor this node has not heard a fresh beat from for three beat intervals is joined
-    /// again, which completes the link on both sides; at most once per three intervals.
-    async fn rejoin_silent_neighbors(&mut self) {
-        let now = monotonic_now_ms();
-        let grace = 3 * self.beat_interval_secs * 1000;
-        let neighbors: Vec<EndpointId> = self.receiver.neighbors().collect();
-        self.neighbor_since.retain(|id, _| neighbors.contains(id));
-        self.silent_rejoined_at
-            .retain(|id, _| neighbors.contains(id));
-        let unix = now_unix();
-        let silent: Vec<(EndpointId, String)> = self
-            .ctx
-            .with_state(|st| {
-                neighbors
-                    .iter()
-                    .filter(|id| {
-                        let id = id.to_string();
-                        !st.nodes.iter().any(|n| {
-                            n.node_id == id
-                                && unix.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n)
-                        })
-                    })
-                    .map(|id| {
-                        let name = st
-                            .nodes
-                            .iter()
-                            .find(|n| n.node_id == id.to_string())
-                            .map(|n| n.node.clone())
-                            .unwrap_or_else(|| id.fmt_short().to_string());
-                        (*id, name)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        for (id, name) in silent {
-            let since = *self.neighbor_since.entry(id).or_insert(now);
-            let last = self.silent_rejoined_at.get(&id).copied().unwrap_or(0);
-            if now.saturating_sub(since) < grace || now.saturating_sub(last) < grace {
-                continue;
-            }
-            self.silent_rejoined_at.insert(id, now);
-            println!(
-                "[mesh] neighbor '{name}' has sent no beat for {}s; joining it again",
-                grace / 1000
-            );
-            let _ =
-                tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(vec![id]))
-                    .await;
-        }
-    }
-
-    /// iroh-gossip's HyParView can lose the one `Neighbor` reply that completes a link and
-    /// never send it again, leaving this node with a neighbor that does not know it. Each
-    /// beat lists its sender's neighbors: when a neighbor's beats leave this node out
-    /// `ONE_SIDED_BEATS` times in a row, a Join sent to it completes the link on both sides.
-    async fn rejoin_if_one_sided(&mut self, beat: &Beat) {
-        let Ok(peer) = beat.node_id.parse::<EndpointId>() else {
-            return;
-        };
-        if !self.receiver.neighbors().any(|n| n == peer) {
-            self.one_sided.remove(&peer);
-            return;
-        }
-        let own = neighbor_prefix(&self.ctx.node_id);
-        let rounds = self.one_sided.entry(peer).or_default();
-        *rounds = if beat.neighbors.iter().any(|n| n.node_id_prefix == own) {
-            0
-        } else {
-            *rounds + 1
-        };
-        if *rounds >= ONE_SIDED_BEATS {
-            *rounds = 0;
-            println!(
-                "[mesh] neighbor '{}' does not list this node as its neighbor; joining it again",
-                beat.node
-            );
-            let _ = tokio::time::timeout(
-                Duration::from_millis(600),
-                self.sender.join_peers(vec![peer]),
-            )
-            .await;
-        }
     }
 
     /// Merge an admitted peer beat into the node state (with its inventory, the first time).

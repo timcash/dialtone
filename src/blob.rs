@@ -543,12 +543,12 @@ impl Store {
     ) -> Self {
         // iroh-blobs gives a connection 1s by default; a relayed path or a high-Rtt link
         // needs longer to handshake, and a pooled connection is reused across pulls.
-        let pool = iroh_blobs::util::connection_pool::Options {
-            connect_timeout: DOWNLOAD_CONNECT_TIMEOUT,
-            idle_timeout: Duration::from_secs(30),
-            ..Default::default()
-        };
-        let downloader = Downloader::new_with_opts(blobs.api(), &endpoint, pool);
+        let mut pool = iroh_blobs::util::connection_pool::Options::default();
+        pool.connect_timeout = DOWNLOAD_CONNECT_TIMEOUT;
+        pool.idle_timeout = Duration::from_secs(30);
+        let downloader = Downloader::builder(blobs.api(), &endpoint)
+            .pool_options(pool)
+            .build();
         Store {
             endpoint,
             blobs,

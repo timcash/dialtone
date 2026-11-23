@@ -11,7 +11,7 @@ use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
 };
 use iroh::EndpointAddr;
-use iroh_gossip::proto::TopicId;
+use iroh_gossip::TopicId;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -1016,7 +1016,7 @@ pub fn node_role_for(_node: &str) -> String {
 /// What every dialtone node can do (the same on every node; nothing here is configured).
 pub fn node_capabilities_for(_node: &str) -> Vec<String> {
     [
-        "iroh-1.3-quic-endpoint",
+        "iroh-1.5-quic-endpoint",
         "iroh-gossip-mesh",
         "iroh-blobs-digest-store",
         "no-tailnet-physical-bind",
@@ -2205,10 +2205,7 @@ mod tests {
     use futures_lite::StreamExt;
     use iroh::address_lookup::memory::MemoryLookup;
     use iroh::protocol::Router;
-    use iroh_gossip::{
-        api::Event as GossipEvent,
-        net::{Gossip, GOSSIP_ALPN},
-    };
+    use iroh_gossip::{Event as GossipEvent, Gossip, ALPN as GOSSIP_ALPN};
     use std::time::Duration;
 
     /// Live in-process two-peer `iroh-gossip` beat exchange over QUIC protected by Argon2id + XChaCha20-Poly1305.

@@ -121,7 +121,7 @@ pub fn default_boot_stages(listen: &str, blob_dir: &std::path::Path) -> Vec<Boot
         BootStageStatus {
             step: 4,
             id: "iroh_endpoint".to_string(),
-            title: "Iroh 1.3 QUIC Endpoint (No-Tailnet NIC)".to_string(),
+            title: "Iroh 1.5 QUIC Endpoint (No-Tailnet NIC)".to_string(),
             status: "ready".to_string(),
             detail: "Persistent Ed25519 identity bound to physical IPv4".to_string(),
             updated_at_unix: now,
@@ -188,7 +188,7 @@ pub struct NodeState {
     pub scores: Arc<Mutex<crate::mesh::PeerScores>>,
     /// iroh-gossip's own counters (data and control messages), for `GET /api/net`.
     #[serde(skip)]
-    pub gossip_metrics: Option<Arc<iroh_gossip::metrics::Metrics>>,
+    pub gossip_metrics: Option<Arc<iroh_gossip::Metrics>>,
     /// The node's async runtime, for API routes that fetch from a peer (`/api/details`).
     #[serde(skip)]
     pub runtime: Option<tokio::runtime::Handle>,
@@ -2624,7 +2624,7 @@ mod tests {
         // 1. GET / hud UI
         let resp_ui = raw_http_request(addr, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
         assert!(resp_ui.contains("200 OK"));
-        assert!(resp_ui.contains("Dialtone Iroh 1.3 Mesh Control Plane"));
+        assert!(resp_ui.contains("Dialtone Iroh 1.5 Mesh Control Plane"));
 
         // 2. GET /api/state
         let resp_state =
