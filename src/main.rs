@@ -58,7 +58,7 @@ fn print_usage() {
          \x20                          every 30s), and with --all the store, pulls, programs and security\n\
          \x20                          (STO, PUL, PRC, SEC)\n\
          \x20 exec [--node <peer>] [--shell auto|bash|powershell] [--] <cmd...>  Run a bash or PowerShell command on a node\n\
-         \x20 install <plugin> [--ticket <ticket>] [--file <path>] Install a blob-backed plugin (e.g. 'dialtone install shell')\n\
+         \x20 install <plugin> [--repo <owner/repo>] [--ticket <ticket>] [--file <path>] Install a blob-backed plugin\n\
          \x20 plugin [list|share <name>|remove <name>] Manage installed plugins\n\
          \x20 shell new <name> [--node <peer>] [--shell auto|bash|powershell] [--cwd <dir>] Start a persistent terminal session\n\
          \x20 shell send <name> [--node <peer>] [--timeout 30s] [--] <cmd...> Run a bash/ps1 command in a running session\n\
@@ -81,6 +81,7 @@ fn print_usage() {
          \x20 --cwd <dir>              Working directory for 'dialtone exec'\n\
          \x20 --timeout <duration>     Timeout for 'dialtone exec' / 'dialtone shell send' (e.g. 30s, 2m; default: 30s)\n\
          \x20 --ticket <uri>           Blob ticket URI for 'dialtone install <plugin>'\n\
+         \x20 --repo <owner/repo>      GitHub plugin repo for 'dialtone install <plugin>' (e.g. timcash/dialtone-shell)\n\
          \x20 --file <path>            Local blob path for 'dialtone install <plugin>'\n\
          \x20 --lines <n>              Number of scrollback lines for 'dialtone shell capture' (default: 100)\n\
          \x20 --addr <ip:port>         Direct address for 'dialtone allowlist add' (repeatable)\n\
@@ -127,6 +128,7 @@ struct CliOptions {
     plugin_name: Option<String>,
     plugin_ticket: Option<String>,
     plugin_file: Option<String>,
+    plugin_repo: Option<String>,
     shell_subcmd: String,
     shell_name: Option<String>,
     shell_lines: usize,
@@ -190,6 +192,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         plugin_name: None,
         plugin_ticket: None,
         plugin_file: None,
+        plugin_repo: None,
         shell_subcmd: "ls".to_string(),
         shell_name: None,
         shell_lines: 100,
@@ -321,6 +324,10 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "--file" => {
                 idx += 1;
                 opts.plugin_file = Some(args.get(idx).ok_or("missing --file value")?.clone());
+            }
+            "--repo" => {
+                idx += 1;
+                opts.plugin_repo = Some(args.get(idx).ok_or("missing --repo value")?.clone());
             }
             "--lines" => {
                 idx += 1;
@@ -1832,6 +1839,7 @@ async fn main() {
                 "name": name,
                 "ticket": opts.plugin_ticket,
                 "file": opts.plugin_file,
+                "repo": opts.plugin_repo,
                 "force": opts.force,
             });
             // Prefer the live daemon's HTTP API so we don't contend on store.lock;
@@ -1852,11 +1860,19 @@ async fn main() {
                         .await
                         .map_err(|e| format!("{daemon_err}; offline open failed: {e}"))?;
                     let res = if let Some(file_path) = opts.plugin_file.as_deref() {
-                        dialtone::plugin::install_plugin_from_file(
+                        dialtone::plugin::install_plugin_from_file_with_repo(
                             &blobs,
                             &plugins_dir,
                             name,
                             std::path::Path::new(file_path),
+                            opts.plugin_repo.as_deref(),
+                        )
+                    } else if let Some(repo_slug) = opts.plugin_repo.as_deref() {
+                        dialtone::plugin::install_plugin_from_repo(
+                            &blobs,
+                            &plugins_dir,
+                            name,
+                            repo_slug,
                         )
                     } else {
                         dialtone::plugin::install_builtin_plugin(&blobs, &plugins_dir, name)

@@ -8,7 +8,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::blob::Blobs;
 use crate::exec::Shell;
 use crate::now_unix;
-use crate::plugin::{is_plugin_installed_and_verified, SHELL_PLUGIN_NAME};
+use crate::plugin::{stage_plugin_binary, SHELL_PLUGIN_NAME};
 
 pub const ALPN: &[u8] = b"dialtone/shell/1";
 pub const ALPN_STR: &str = "dialtone/shell/1";
@@ -689,12 +689,73 @@ fn spawn_reader_thread<R: std::io::Read + Send + 'static>(
     });
 }
 
+struct ExternalShellProcess {
+    digest: String,
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
+impl ExternalShellProcess {
+    fn spawn(digest: String, bin_path: &Path, node_name: &str) -> Result<Self, String> {
+        let mut child = Command::new(bin_path)
+            .args(["--serve", "--node", node_name])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("spawn external shell plugin {}: {e}", bin_path.display()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "external shell plugin stdin unavailable".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "external shell plugin stdout unavailable".to_string())?;
+        Ok(Self {
+            digest,
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+        })
+    }
+
+    fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
+    fn call(&mut self, req: &ShellRequest) -> Result<ShellResponse, String> {
+        let line = serde_json::to_string(req).map_err(|e| format!("encode request: {e}"))?;
+        writeln!(self.stdin, "{line}")
+            .and_then(|_| self.stdin.flush())
+            .map_err(|e| format!("write to external shell plugin: {e}"))?;
+        let mut reply = String::new();
+        let n = self
+            .stdout
+            .read_line(&mut reply)
+            .map_err(|e| format!("read from external shell plugin: {e}"))?;
+        if n == 0 {
+            return Err("external shell plugin closed stdout".to_string());
+        }
+        serde_json::from_str(&reply).map_err(|e| format!("decode external shell plugin reply: {e}"))
+    }
+}
+
+impl Drop for ExternalShellProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 /// Manages all named persistent terminal sessions on a Dialtone node.
 pub struct ShellManager {
     node_name: String,
     max_scrollback_lines: usize,
     max_scrollback_bytes: usize,
     sessions: Mutex<HashMap<String, Arc<PersistentSession>>>,
+    external: Mutex<Option<ExternalShellProcess>>,
 }
 
 impl std::fmt::Debug for ShellManager {
@@ -720,6 +781,7 @@ impl ShellManager {
             max_scrollback_lines,
             max_scrollback_bytes,
             sessions: Mutex::new(HashMap::new()),
+            external: Mutex::new(None),
         }
     }
 
@@ -919,10 +981,73 @@ impl ShellManager {
             },
         }
     }
+    fn call_external_plugin(
+        &self,
+        digest: &str,
+        bin_path: &Path,
+        req: &ShellRequest,
+    ) -> ShellResponse {
+        let Ok(mut slot) = self.external.lock() else {
+            return ShellResponse::Error {
+                error: "external shell plugin lock poisoned".to_string(),
+            };
+        };
+        let needs_spawn = match slot.as_mut() {
+            Some(proc) => proc.digest != digest || !proc.is_alive(),
+            None => true,
+        };
+        if needs_spawn {
+            *slot = None;
+            match ExternalShellProcess::spawn(digest.to_string(), bin_path, &self.node_name) {
+                Ok(proc) => *slot = Some(proc),
+                Err(error) => return ShellResponse::Error { error },
+            }
+        }
+        let Some(proc) = slot.as_mut() else {
+            return ShellResponse::Error {
+                error: "external shell plugin unavailable".to_string(),
+            };
+        };
+        match proc.call(req) {
+            Ok(resp) => resp,
+            Err(error) => {
+                *slot = None;
+                ShellResponse::Error { error }
+            }
+        }
+    }
+
+    /// Dispatch a `ShellRequest` through the installed, verified `shell` plugin:
+    /// - If `kind == "blob-binary"` (e.g. standalone `timcash/dialtone-shell`), stages & verifies
+    ///   the executable from `iroh-blobs` and dispatches over stdio JSON-line RPC.
+    /// - If `kind == "builtin-protocol"`, handles in-process.
+    /// - Fails closed if the `shell` plugin is missing or its blob digest does not match.
+    pub fn handle_with_plugin(
+        &self,
+        blobs: &Blobs,
+        plugins_dir: &Path,
+        req: ShellRequest,
+    ) -> ShellResponse {
+        match stage_plugin_binary(blobs, plugins_dir, SHELL_PLUGIN_NAME) {
+            Ok(Some((digest, bin_path))) => self.call_external_plugin(&digest, &bin_path, &req),
+            Ok(None) => self.handle_request(req),
+            Err(error) => ShellResponse::Error { error },
+        }
+    }
+
+    pub fn list_sessions_with_plugin(&self, blobs: &Blobs, plugins_dir: &Path) -> Vec<SessionInfo> {
+        match self.handle_with_plugin(blobs, plugins_dir, ShellRequest::List) {
+            ShellResponse::Listed { sessions, .. } => sessions,
+            _ => Vec::new(),
+        }
+    }
 }
 
 impl Drop for ShellManager {
     fn drop(&mut self) {
+        if let Ok(mut ext) = self.external.lock() {
+            *ext = None;
+        }
         if let Ok(mut map) = self.sessions.lock() {
             for (_, sess) in map.drain() {
                 sess.kill();
@@ -972,13 +1097,7 @@ impl ShellHandler {
             let manager = self.manager.clone();
 
             let resp = tokio::task::spawn_blocking(move || {
-                if !is_plugin_installed_and_verified(&blobs, &plugins_dir, SHELL_PLUGIN_NAME) {
-                    return ShellResponse::Error {
-                        error: "plugin 'shell' is not installed; run 'dialtone install shell'"
-                            .to_string(),
-                    };
-                }
-                manager.handle_request(req)
+                manager.handle_with_plugin(&blobs, &plugins_dir, req)
             })
             .await
             .map_err(|e| format!("shell task join: {e}"))?;

@@ -1355,7 +1355,7 @@ fn route_request(
                 crate::plugin::SHELL_PLUGIN_NAME,
             );
             let sessions = if installed {
-                mgr.list_sessions()
+                mgr.list_sessions_with_plugin(&blobs, &plugins_dir)
             } else {
                 Vec::new()
             };
@@ -1389,6 +1389,12 @@ fn route_request(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string);
+            let repo = parsed
+                .get("repo")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
             let force = parsed
                 .get("force")
                 .and_then(Value::as_bool)
@@ -1410,12 +1416,15 @@ fn route_request(
                     None => Err("node store not ready for peer ticket pull".to_string()),
                 }
             } else if let Some(file_path) = file {
-                crate::plugin::install_plugin_from_file(
+                crate::plugin::install_plugin_from_file_with_repo(
                     &blobs,
                     &plugins_dir,
                     &name,
                     std::path::Path::new(&file_path),
+                    repo.as_deref(),
                 )
+            } else if let Some(repo_slug) = repo {
+                crate::plugin::install_plugin_from_repo(&blobs, &plugins_dir, &name, &repo_slug)
             } else {
                 crate::plugin::install_builtin_plugin(&blobs, &plugins_dir, &name)
             };
@@ -1496,20 +1505,7 @@ fn route_request(
                 let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
                 let mgr = st.shell_manager.clone();
                 drop(st);
-                if !crate::plugin::is_plugin_installed_and_verified(
-                    &blobs,
-                    &plugins_dir,
-                    crate::plugin::SHELL_PLUGIN_NAME,
-                ) {
-                    return write_json(
-                        &mut stream,
-                        400,
-                        &json!({
-                            "error": "plugin 'shell' is not installed; run 'dialtone install shell'"
-                        }),
-                    );
-                }
-                let resp = mgr.handle_request(req);
+                let resp = mgr.handle_with_plugin(&blobs, &plugins_dir, req);
                 return match resp {
                     crate::shell::ShellResponse::Error { error } => {
                         write_json(&mut stream, 400, &json!({ "error": error }))

@@ -32,6 +32,8 @@ pub struct PluginManifest {
     pub bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ticket_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_repo: Option<String>,
     pub installed_at_unix: u64,
 }
 
@@ -187,6 +189,7 @@ pub fn install_plugin_from_bytes(
         blake3_hash: hash.to_string(),
         bytes: bytes.len() as u64,
         ticket_uri,
+        source_repo: None,
         installed_at_unix: now_unix(),
     };
     write_manifest(plugins_dir, &manifest)?;
@@ -199,11 +202,25 @@ pub fn install_plugin_from_file(
     name: &str,
     file_path: &Path,
 ) -> Result<PluginManifest, String> {
+    install_plugin_from_file_with_repo(blobs, plugins_dir, name, file_path, None)
+}
+
+pub fn install_plugin_from_file_with_repo(
+    blobs: &Blobs,
+    plugins_dir: &Path,
+    name: &str,
+    file_path: &Path,
+    source_repo: Option<&str>,
+) -> Result<PluginManifest, String> {
     let canonical = validate_plugin_name(name)?;
+    let validated_repo = match source_repo.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(r) => Some(validate_plugin_repo(r)?),
+        None => None,
+    };
     let bytes = fs::read(file_path)
         .map_err(|e| format!("read plugin file {}: {e}", file_path.display()))?;
     let (kind, description, protocols) = inspect_bundle_metadata(&canonical, &bytes);
-    install_plugin_from_bytes(
+    let mut manifest = install_plugin_from_bytes(
         blobs,
         plugins_dir,
         &canonical,
@@ -212,7 +229,196 @@ pub fn install_plugin_from_file(
         protocols,
         &bytes,
         None,
-    )
+    )?;
+    if validated_repo.is_some() {
+        manifest.source_repo = validated_repo;
+        write_manifest(plugins_dir, &manifest)?;
+    }
+    Ok(manifest)
+}
+
+pub fn validate_plugin_repo(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim().trim_end_matches(".git");
+    let Some((owner, repo)) = trimmed.split_once('/') else {
+        return Err(format!(
+            "invalid plugin repo {raw:?}: expected 'owner/repo' (e.g. timcash/dialtone-shell)"
+        ));
+    };
+    let valid_part = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 100
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+    };
+    if !valid_part(owner) || !valid_part(repo) || repo.contains('/') {
+        return Err(format!(
+            "invalid plugin repo {raw:?}: expected 'owner/repo'"
+        ));
+    }
+    Ok(format!("{owner}/{repo}"))
+}
+
+pub fn plugin_asset_name(name: &str) -> Result<String, String> {
+    let canonical = validate_plugin_name(name)?;
+    let suffix = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => "windows-x86_64.exe",
+        ("macos", "aarch64") => "macos-arm64",
+        ("linux", "x86_64") => "linux-x86_64",
+        ("linux", "aarch64") => "linux-arm64",
+        (os, arch) => {
+            return Err(format!(
+                "unsupported platform {os}/{arch} for plugin '{canonical}'"
+            ))
+        }
+    };
+    Ok(format!("dialtone-{canonical}-{suffix}"))
+}
+
+/// Download a standalone plugin binary from its own GitHub repository (`owner/repo`),
+/// store it in Dialtone's blob store, and record its verified manifest.
+/// Supports private repos when `gh` is authenticated locally or `GH_TOKEN`/`GITHUB_TOKEN` is set.
+pub fn install_plugin_from_repo(
+    blobs: &Blobs,
+    plugins_dir: &Path,
+    name: &str,
+    repo: &str,
+) -> Result<PluginManifest, String> {
+    let canonical = validate_plugin_name(name)?;
+    let validated_repo = validate_plugin_repo(repo)?;
+    let asset = plugin_asset_name(&canonical)?;
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "dialtone-plugin-dl-{}-{}",
+        std::process::id(),
+        now_unix()
+    ));
+    let _ = fs::remove_dir_all(&tmp_dir);
+    fs::create_dir_all(&tmp_dir)
+        .map_err(|e| format!("create temp dir {}: {e}", tmp_dir.display()))?;
+
+    let downloaded = tmp_dir.join(&asset);
+    let gh_status = std::process::Command::new("gh")
+        .args([
+            "release",
+            "download",
+            "--repo",
+            &validated_repo,
+            "--pattern",
+            &asset,
+            "--dir",
+            &tmp_dir.to_string_lossy(),
+            "--clobber",
+        ])
+        .output();
+
+    let got_via_gh = matches!(&gh_status, Ok(o) if o.status.success() && downloaded.is_file());
+    if !got_via_gh {
+        // Fallback: direct HTTPS download from latest release (with optional GH_TOKEN/GITHUB_TOKEN).
+        let url = format!("https://github.com/{validated_repo}/releases/latest/download/{asset}");
+        let token = std::env::var("GH_TOKEN")
+            .or_else(|_| std::env::var("GITHUB_TOKEN"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let dl_url = url.clone();
+        let body = std::thread::spawn(move || -> Result<Vec<u8>, String> {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("create http runtime: {e}"))?;
+            rt.block_on(async move {
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(60))
+                    .build()
+                    .map_err(|e| format!("build http client: {e}"))?;
+                let mut req = client.get(&dl_url);
+                if let Some(tok) = token {
+                    req = req.bearer_auth(tok);
+                }
+                let resp = req
+                    .send()
+                    .await
+                    .map_err(|e| format!("download plugin from {dl_url}: {e}"))?;
+                if !resp.status().is_success() {
+                    return Err(format!("HTTP {}", resp.status()));
+                }
+                resp.bytes()
+                    .await
+                    .map(|b| b.to_vec())
+                    .map_err(|e| format!("read plugin response body: {e}"))
+            })
+        })
+        .join()
+        .map_err(|_| "plugin download thread panicked".to_string())?;
+        let body = match body {
+            Ok(b) => b,
+            Err(http_err) => {
+                let gh_hint = match gh_status {
+                    Ok(o) => String::from_utf8_lossy(&o.stderr).trim().to_string(),
+                    Err(e) => format!("gh unavailable: {e}"),
+                };
+                let _ = fs::remove_dir_all(&tmp_dir);
+                return Err(format!(
+                    "download {asset} from {validated_repo} failed ({http_err}); gh: {gh_hint}"
+                ));
+            }
+        };
+        fs::write(&downloaded, &body)
+            .map_err(|e| format!("write {}: {e}", downloaded.display()))?;
+    }
+
+    let res = install_plugin_from_file_with_repo(
+        blobs,
+        plugins_dir,
+        &canonical,
+        &downloaded,
+        Some(&validated_repo),
+    );
+    let _ = fs::remove_dir_all(&tmp_dir);
+    res
+}
+
+/// Verify an installed `blob-binary` plugin against the `iroh-blobs` store and stage its
+/// executable file under `<plugins_dir>/<name>/bin/`. Returns `Ok(None)` for non-binary plugins.
+pub fn stage_plugin_binary(
+    blobs: &Blobs,
+    plugins_dir: &Path,
+    name: &str,
+) -> Result<Option<(String, PathBuf)>, String> {
+    let manifest = verify_installed_plugin(blobs, plugins_dir, name)?;
+    if manifest.kind != "blob-binary" {
+        return Ok(None);
+    }
+    let bytes = blobs.get_blocking(&manifest.blob_digest)?;
+    let short_hex = manifest
+        .blob_digest
+        .strip_prefix("sha256:")
+        .unwrap_or(&manifest.blob_digest);
+    let short = &short_hex[..short_hex.len().min(12)];
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let bin_dir = plugins_dir.join(&manifest.name).join("bin");
+    fs::create_dir_all(&bin_dir)
+        .map_err(|e| format!("create plugin bin dir {}: {e}", bin_dir.display()))?;
+    let bin_path = bin_dir.join(format!("dialtone-{}-{short}{ext}", manifest.name));
+    if !bin_path.is_file()
+        || fs::read(&bin_path)
+            .map(|b| digest_of(&b) != manifest.blob_digest)
+            .unwrap_or(true)
+    {
+        let tmp = bin_dir.join(format!(".stage-{}-{}.tmp", std::process::id(), now_unix()));
+        fs::write(&tmp, &bytes)
+            .map_err(|e| format!("stage plugin binary {}: {e}", tmp.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755))
+                .map_err(|e| format!("chmod staged plugin {}: {e}", tmp.display()))?;
+        }
+        fs::rename(&tmp, &bin_path).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("install staged plugin {}: {e}", bin_path.display())
+        })?;
+    }
+    Ok(Some((manifest.blob_digest, bin_path)))
 }
 
 pub fn install_plugin_from_ticket(
@@ -237,10 +443,28 @@ pub fn install_plugin_from_ticket(
         blake3_hash: report.blake3_hash,
         bytes: report.bytes,
         ticket_uri: Some(ticket_uri.to_string()),
+        source_repo: None,
         installed_at_unix: now_unix(),
     };
     write_manifest(plugins_dir, &manifest)?;
     Ok(manifest)
+}
+
+fn looks_like_executable(bytes: &[u8]) -> bool {
+    if bytes.len() < 4 {
+        return false;
+    }
+    // ELF, PE/MZ, Mach-O (32/64/universal), or POSIX shebang script
+    bytes.starts_with(b"\x7fELF")
+        || bytes.starts_with(b"MZ")
+        || bytes.starts_with(b"#!")
+        || matches!(
+            &bytes[..4],
+            [0xcf, 0xfa, 0xed, 0xfe]
+                | [0xce, 0xfa, 0xed, 0xfe]
+                | [0xfe, 0xed, 0xfa, 0xcf]
+                | [0xca, 0xfe, 0xba, 0xbe]
+        )
 }
 
 fn inspect_bundle_metadata(name: &str, bytes: &[u8]) -> (String, String, Vec<String>) {
@@ -248,6 +472,18 @@ fn inspect_bundle_metadata(name: &str, bytes: &[u8]) -> (String, String, Vec<Str
         if bundle.schema == PLUGIN_MANIFEST_SCHEMA {
             return (bundle.kind, bundle.description, bundle.protocols);
         }
+    }
+    if looks_like_executable(bytes) {
+        let protocols = if name == SHELL_PLUGIN_NAME {
+            vec![crate::shell::ALPN_STR.to_string()]
+        } else {
+            Vec::new()
+        };
+        return (
+            "blob-binary".to_string(),
+            format!("Standalone blob-backed Dialtone plugin binary '{name}'"),
+            protocols,
+        );
     }
     (
         "blob-bundle".to_string(),
