@@ -23,9 +23,9 @@ use dialtone::mesh::{
     DEFAULT_CHANNEL_NAME, INVITE_PREFIX, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
-    advertised_endpoint_addr, build_diagnostics, build_endpoint_builder, default_secret_key_path,
-    load_or_create_secret_key_at, AllowlistHook, IrohRelayPolicy, IrohTransportConfig,
-    IrohTransportDiagnostics,
+    advertised_endpoint_addr, attach_mdns_lookup, build_diagnostics, build_endpoint_builder,
+    build_endpoint_builder_without_mdns, default_secret_key_path, load_or_create_secret_key_at,
+    AllowlistHook, IrohRelayPolicy, IrohTransportConfig, IrohTransportDiagnostics,
 };
 use dialtone::stats::{sample_stats, StatsWindow};
 use iroh::address_lookup::memory::MemoryLookup;
@@ -501,6 +501,9 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "--lan" => {
                 opts.transport.local_discovery = true;
                 opts.transport.profile = "lan_only".to_string();
+            }
+            "--no-lan" => {
+                opts.transport.local_discovery = false;
             }
             "--relay-only" => {
                 opts.transport.relay_mode = IrohRelayPolicy::RelayOnly;
@@ -1167,7 +1170,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
     let memory_lookup = MemoryLookup::new();
     // Weak handles to the open gossip connections: their QUIC Rtt and path, read for free.
     let gossip_conns = dialtone::node::GossipConnections::default();
-    let endpoint = build_endpoint_builder(&opts.transport)?
+    let endpoint = build_endpoint_builder_without_mdns(&opts.transport)?
         .address_lookup(memory_lookup.clone())
         .secret_key(secret_key)
         .hooks(
@@ -1178,6 +1181,11 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         .bind()
         .await
         .map_err(|e| format!("bind iroh endpoint: {e}"))?;
+    let mdns = if opts.transport.local_discovery && !opts.once {
+        attach_mdns_lookup(&endpoint)
+    } else {
+        None
+    };
     let node_id = endpoint.id().to_string();
 
     if opts.transport.relay_mode != IrohRelayPolicy::Disabled && !opts.once {
@@ -1528,6 +1536,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
             topic_id,
             seed_ids,
             known_peer_addrs,
+            mdns,
             update: update_paths.clone().filter(|_| auto_update),
             control_rx,
         },

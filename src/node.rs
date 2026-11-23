@@ -29,17 +29,70 @@ pub fn is_tailnet_ip(ip: IpAddr) -> bool {
     }
 }
 
-pub fn detect_non_tailnet_ipv4() -> Option<Ipv4Addr> {
-    let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
-    sock.connect("1.1.1.1:80").ok()?;
-    match sock.local_addr().ok()?.ip() {
-        IpAddr::V4(v4)
-            if !is_tailnet_ip(IpAddr::V4(v4)) && !v4.is_loopback() && !v4.is_unspecified() =>
-        {
-            Some(v4)
-        }
-        _ => None,
+/// True for RFC1918 private LAN IPv4 addresses (excluding loopback, link-local, and tailnet).
+pub fn is_private_lan_ipv4(ip: Ipv4Addr) -> bool {
+    if ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || is_tailnet_ip(IpAddr::V4(ip))
+    {
+        return false;
     }
+    let o = ip.octets();
+    o[0] == 10 || (o[0] == 172 && (16..=31).contains(&o[1])) || (o[0] == 192 && o[1] == 168)
+}
+
+/// True when two private LAN IPv4 addresses share the same `/24` local subnet.
+pub fn same_lan_subnet(a: Ipv4Addr, b: Ipv4Addr) -> bool {
+    if !is_private_lan_ipv4(a) || !is_private_lan_ipv4(b) {
+        return false;
+    }
+    let ao = a.octets();
+    let bo = b.octets();
+    ao[0] == bo[0] && ao[1] == bo[1] && ao[2] == bo[2]
+}
+
+/// Extract only private LAN IPv4 socket addresses from `addr` (dropping relay URLs and WAN IPs)
+/// so same-LAN peers can prefer or upgrade to a direct local path without hairpinning through a relay.
+pub fn lan_only_endpoint_addr(addr: &EndpointAddr) -> Option<EndpointAddr> {
+    let mut lan = EndpointAddr::new(addr.id);
+    let mut count = 0usize;
+    for sock in addr.ip_addrs() {
+        if let IpAddr::V4(v4) = sock.ip() {
+            if is_private_lan_ipv4(v4) {
+                lan = lan.with_ip_addr(*sock);
+                count += 1;
+            }
+        }
+    }
+    (count > 0).then_some(lan)
+}
+
+pub fn detect_non_tailnet_ipv4() -> Option<Ipv4Addr> {
+    // Try public default route first; fall back to common private LAN routes so nodes
+    // booting while the internet is down still bind their physical LAN interface.
+    const PROBE_TARGETS: &[&str] = &[
+        "1.1.1.1:80",
+        "192.168.1.1:80",
+        "192.168.0.1:80",
+        "10.0.0.1:80",
+        "172.16.0.1:80",
+    ];
+    for target in PROBE_TARGETS {
+        let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else {
+            continue;
+        };
+        if sock.connect(target).is_err() {
+            continue;
+        }
+        if let Ok(SocketAddr::V4(v4_sock)) = sock.local_addr() {
+            let v4 = *v4_sock.ip();
+            if !is_tailnet_ip(IpAddr::V4(v4)) && !v4.is_loopback() && !v4.is_unspecified() {
+                return Some(v4);
+            }
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,7 +126,7 @@ impl Default for IrohTransportConfig {
         Self {
             profile: "wan_with_relay".to_string(),
             dns_lookup: false,
-            local_discovery: false,
+            local_discovery: true,
             dht_lookup: false,
             relay_mode: IrohRelayPolicy::Default,
             relay_urls: Vec::new(),
@@ -101,7 +154,7 @@ impl IrohTransportConfig {
         Self {
             profile: "private_mesh".to_string(),
             dns_lookup: false,
-            local_discovery: false,
+            local_discovery: true,
             dht_lookup: false,
             relay_mode: IrohRelayPolicy::Disabled,
             relay_urls: Vec::new(),
@@ -386,6 +439,40 @@ impl EndpointHooks for AllowlistHook {
 pub fn build_endpoint_builder(
     config: &IrohTransportConfig,
 ) -> Result<iroh::endpoint::Builder, String> {
+    build_endpoint_builder_inner(config, config.local_discovery)
+}
+
+/// Build an endpoint without registering `MdnsAddressLookup` on the builder so the caller
+/// can attach a subscribable `MdnsAddressLookup` via [`attach_mdns_lookup`] after bind.
+pub fn build_endpoint_builder_without_mdns(
+    config: &IrohTransportConfig,
+) -> Result<iroh::endpoint::Builder, String> {
+    build_endpoint_builder_inner(config, false)
+}
+
+/// Attach a subscribable `MdnsAddressLookup` to a bound endpoint so same-LAN peers discover
+/// each other automatically with zero internet. Fails gracefully if multicast is unavailable.
+pub fn attach_mdns_lookup(endpoint: &Endpoint) -> Option<MdnsAddressLookup> {
+    match MdnsAddressLookup::builder().build(endpoint.id()) {
+        Ok(mdns) => {
+            if let Ok(services) = endpoint.address_lookup() {
+                services.add(mdns.clone());
+                Some(mdns)
+            } else {
+                None
+            }
+        }
+        Err(err) => {
+            eprintln!("[mdns] local LAN discovery unavailable: {err}");
+            None
+        }
+    }
+}
+
+fn build_endpoint_builder_inner(
+    config: &IrohTransportConfig,
+    include_mdns: bool,
+) -> Result<iroh::endpoint::Builder, String> {
     let mut builder = match (config.dns_lookup, config.relay_mode) {
         (true, IrohRelayPolicy::Disabled) => Endpoint::builder(presets::N0DisableRelay),
         (true, _) => Endpoint::builder(presets::N0),
@@ -432,7 +519,7 @@ pub fn build_endpoint_builder(
             .collect::<Result<Vec<_>, _>>()?;
         builder = builder.relay_mode(RelayMode::custom(parsed));
     }
-    if config.local_discovery {
+    if include_mdns {
         builder = builder.address_lookup(MdnsAddressLookup::builder());
     }
     if config.dht_lookup {
@@ -573,5 +660,45 @@ mod tests {
         let filtered = advertised_endpoint_addr(&addr, &IrohTransportConfig::default());
         let ips: Vec<String> = filtered.ip_addrs().map(|a| a.to_string()).collect();
         assert_eq!(ips, vec!["192.168.1.212:57987".to_string()]);
+    }
+
+    #[test]
+    fn default_transport_enables_mdns_lan_discovery_and_identifies_lan_subnets() {
+        let def = IrohTransportConfig::default();
+        assert!(
+            def.local_discovery,
+            "default transport should enable mDNS LAN discovery"
+        );
+        assert!(def
+            .active_lookup_modes()
+            .contains(&"mdns-local".to_string()));
+        assert!(IrohTransportConfig::private_mesh(None).local_discovery);
+        assert!(!IrohTransportConfig::local_offline().local_discovery);
+
+        assert!(is_private_lan_ipv4("192.168.1.40".parse().unwrap()));
+        assert!(is_private_lan_ipv4("10.0.0.15".parse().unwrap()));
+        assert!(is_private_lan_ipv4("172.20.1.5".parse().unwrap()));
+        assert!(!is_private_lan_ipv4("100.108.221.4".parse().unwrap()));
+        assert!(!is_private_lan_ipv4("127.0.0.1".parse().unwrap()));
+        assert!(!is_private_lan_ipv4("172.113.98.47".parse().unwrap()));
+
+        assert!(same_lan_subnet(
+            "192.168.1.40".parse().unwrap(),
+            "192.168.1.220".parse().unwrap(),
+        ));
+        assert!(!same_lan_subnet(
+            "192.168.1.40".parse().unwrap(),
+            "192.168.50.27".parse().unwrap(),
+        ));
+
+        let id = SecretKey::generate().public();
+        let mixed = EndpointAddr::new(id)
+            .with_relay_url("https://usw1-1.relay.n0.iroh.link./".parse().unwrap())
+            .with_ip_addr("172.113.98.47:60554".parse().unwrap())
+            .with_ip_addr("192.168.1.220:60554".parse().unwrap());
+        let lan = lan_only_endpoint_addr(&mixed).expect("should extract LAN addr");
+        assert_eq!(lan.relay_urls().count(), 0);
+        let lan_ips: Vec<String> = lan.ip_addrs().map(|a| a.to_string()).collect();
+        assert_eq!(lan_ips, vec!["192.168.1.220:60554".to_string()]);
     }
 }

@@ -21,7 +21,8 @@
 //! The API runs on its own threads and reaches Mesh through `MeshControlCommand`.
 //! Actors share the node's state (`NodeState`) for reads and writes the HUD shows.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -40,7 +41,8 @@ use dialtone::mesh::{
     SeedList, BEAT_INTERVAL_SECS, DEFAULT_PEER_TTL_SECS, SUMMARY_INTERVAL_SECS,
 };
 use dialtone::node::{
-    advertised_endpoint_addr, build_diagnostics, GossipConnections, IrohTransportConfig,
+    advertised_endpoint_addr, build_diagnostics, detect_non_tailnet_ipv4, is_private_lan_ipv4,
+    lan_only_endpoint_addr, same_lan_subnet, GossipConnections, IrohTransportConfig,
 };
 use dialtone::probe::{ProbeRequest, PULL_SAMPLE};
 use dialtone::service::ProcessSpec;
@@ -53,6 +55,7 @@ use iroh::{EndpointAddr, EndpointId};
 use iroh_gossip::api::{Event as GossipEvent, GossipReceiver, GossipSender};
 use iroh_gossip::net::Gossip;
 use iroh_gossip::proto::TopicId;
+use iroh_mdns_address_lookup::{DiscoveryEvent, MdnsAddressLookup};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -111,6 +114,8 @@ pub(crate) struct MeshStart {
     pub seed_ids: Vec<EndpointId>,
     pub known_peer_addrs: HashMap<EndpointId, EndpointAddr>,
     pub control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
+    /// Optional local mDNS LAN discovery service for zero-internet peer discovery.
+    pub mdns: Option<MdnsAddressLookup>,
     /// Where this node updates itself, when it does (`dialtone::update`).
     pub update: Option<update::Paths>,
 }
@@ -119,7 +124,10 @@ pub(crate) struct MeshStart {
 pub(crate) fn spawn_all(ctx: Ctx, mut start: MeshStart) -> Vec<JoinHandle<()>> {
     let (update_tx, update_rx) = mpsc::unbounded_channel();
     let update_paths = start.update.take();
+    let mdns = start.mdns.take();
     let (rtt_tx, rtt_rx) = watch::channel(BTreeMap::new());
+    let (direct_tx, direct_rx) = watch::channel(HashMap::new());
+    let (mdns_tx, mdns_rx) = mpsc::unbounded_channel();
     let (summary_tx, summary_rx) = watch::channel(None);
     let (inventory_tx, inventory_rx) = mpsc::unbounded_channel();
     let (deploy_tx, deploy_rx) = mpsc::unbounded_channel();
@@ -132,6 +140,8 @@ pub(crate) fn spawn_all(ctx: Ctx, mut start: MeshStart) -> Vec<JoinHandle<()>> {
         ctx.clone(),
         start,
         rtt_rx.clone(),
+        direct_rx,
+        mdns_rx,
         summary_rx,
         inventory_rx,
         deploy_tx,
@@ -142,15 +152,43 @@ pub(crate) fn spawn_all(ctx: Ctx, mut start: MeshStart) -> Vec<JoinHandle<()>> {
         tokio::spawn(stats_actor(ctx.clone(), rtt_rx, summary_tx)),
         tokio::spawn(supervisor_actor(ctx.clone(), inventory_tx.clone())),
         tokio::spawn(devices_actor(ctx.clone())),
-        tokio::spawn(paths_actor(ctx.clone(), rtt_tx)),
+        tokio::spawn(paths_actor(ctx.clone(), rtt_tx, direct_tx)),
         tokio::spawn(allowlist_actor(ctx.clone())),
         tokio::spawn(probe_actor(ctx.clone(), probe_rx)),
         tokio::spawn(deploy_actor(ctx.clone(), deploy_rx)),
     ];
+    if let Some(mdns) = mdns {
+        actors.push(tokio::spawn(mdns_actor(mdns, mdns_tx, ctx.cancel.clone())));
+    }
     if let Some(paths) = update_paths {
         actors.push(tokio::spawn(update_actor(ctx, paths, update_rx)));
     }
     actors
+}
+
+/// Forward local LAN peers discovered via mDNS into Mesh so same-LAN nodes find and
+/// reconnect to each other even when the internet is completely down.
+async fn mdns_actor(
+    mdns: MdnsAddressLookup,
+    tx: mpsc::UnboundedSender<EndpointAddr>,
+    cancel: CancellationToken,
+) {
+    let mut events = mdns.subscribe().await;
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => break,
+            event = events.next() => match event {
+                Some(DiscoveryEvent::Discovered { endpoint_info, .. }) => {
+                    let addr = EndpointAddr::from(endpoint_info);
+                    if tx.send(addr).is_err() {
+                        break;
+                    }
+                }
+                Some(DiscoveryEvent::Expired { .. }) | Some(_) => {}
+                None => break,
+            },
+        }
+    }
 }
 
 fn every(period: Duration) -> tokio::time::Interval {
@@ -293,13 +331,21 @@ async fn devices_actor(ctx: Ctx) {
 
 /// How often Paths reads the gossip neighbors' connections.
 const PATHS_INTERVAL: Duration = Duration::from_secs(5);
+/// Rolling window of recent direct-path QUIC RTT samples (15s) used to filter single-beat
+/// Wi-Fi DTIM power-save wakeup spikes while tracking sustained latency changes promptly.
+const DIRECT_RTT_WINDOW: usize = 3;
 
 /// Every `PATHS_INTERVAL`, read QUIC's Rtt estimate and selected path to each gossip
 /// neighbor from the connection iroh-gossip already has open (`GossipConnections`), and how
 /// iroh reaches it (direct IP, relay, tailnet). Nothing is sent: QUIC measures the Rtt from
 /// the acknowledgements of the gossip itself. The Rtts, by NodeId, go into this node's beats.
-async fn paths_actor(ctx: Ctx, rtt_tx: watch::Sender<BTreeMap<String, f64>>) {
+async fn paths_actor(
+    ctx: Ctx,
+    rtt_tx: watch::Sender<BTreeMap<String, f64>>,
+    direct_tx: watch::Sender<HashMap<EndpointId, bool>>,
+) {
     let mut tick = every(PATHS_INTERVAL);
+    let mut direct_window: HashMap<EndpointId, VecDeque<f64>> = HashMap::new();
     loop {
         tokio::select! {
             _ = ctx.cancel.cancelled() => break,
@@ -314,11 +360,27 @@ async fn paths_actor(ctx: Ctx, rtt_tx: watch::Sender<BTreeMap<String, f64>>) {
                     .collect()
             })
             .unwrap_or_default();
+        let neighbor_set: HashSet<EndpointId> = neighbors.iter().copied().collect();
+        direct_window.retain(|id, _| neighbor_set.contains(id));
+
         let mut rtt = BTreeMap::new();
+        let mut direct_map = HashMap::new();
         for pid in &neighbors {
             if let Some(path) = ctx.gossip_conns.path(pid) {
+                direct_map.insert(*pid, path.direct);
                 if path.rtt_ms > 0.0 {
-                    rtt.insert(pid.to_string(), path.rtt_ms);
+                    let reported = if path.direct {
+                        let samples = direct_window.entry(*pid).or_default();
+                        samples.push_back(path.rtt_ms);
+                        while samples.len() > DIRECT_RTT_WINDOW {
+                            samples.pop_front();
+                        }
+                        samples.iter().copied().fold(f64::INFINITY, f64::min)
+                    } else {
+                        direct_window.remove(pid);
+                        path.rtt_ms
+                    };
+                    rtt.insert(pid.to_string(), reported);
                 }
             }
             let observed = tokio::time::timeout(
@@ -339,6 +401,7 @@ async fn paths_actor(ctx: Ctx, rtt_tx: watch::Sender<BTreeMap<String, f64>>) {
             }
         }
         rtt_tx.send_replace(rtt);
+        direct_tx.send_replace(direct_map);
     }
 }
 
@@ -1007,6 +1070,51 @@ const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(5);
 const NEW_NODE_ANNOUNCE_GAP: Duration = Duration::from_secs(60);
 /// How long an origin keeps announcing a program it removed (for nodes that missed it).
 const REMOVED_ANNOUNCE_FOR: Duration = Duration::from_secs(3600);
+/// How often Mesh triggers `endpoint.network_change()` + WAN peer healing while WAN peers are silent.
+const WAN_HEAL_EVERY: Duration = Duration::from_secs(30);
+/// Max previously seen WAN peers cached across an internet outage so the LAN island rejoins cleanly.
+const MAX_CACHED_WAN_PEERS: usize = 32;
+
+/// True when `addr` looks like a peer on the same local LAN (either same `/24` private subnet
+/// as `local_lan_ip` or shares our public IPv4 while advertising a private RFC1918 LAN IP).
+fn is_same_lan_addr(
+    addr: &EndpointAddr,
+    local_lan_ip: Option<Ipv4Addr>,
+    local_public_ip: Option<Ipv4Addr>,
+) -> bool {
+    let mut has_private_lan = false;
+    let mut shares_public = false;
+    for sock in addr.ip_addrs() {
+        let IpAddr::V4(v4) = sock.ip() else {
+            continue;
+        };
+        if let Some(local) = local_lan_ip {
+            if same_lan_subnet(local, v4) {
+                return true;
+            }
+        }
+        if is_private_lan_ipv4(v4) {
+            has_private_lan = true;
+        } else if let Some(pub_ip) = local_public_ip {
+            if v4 == pub_ip {
+                shares_public = true;
+            }
+        }
+    }
+    has_private_lan && shares_public
+}
+
+/// Extract our own non-private public IPv4 from our advertised endpoint address, if known.
+fn own_public_ipv4(endpoint: &iroh::Endpoint) -> Option<Ipv4Addr> {
+    for sock in endpoint.addr().ip_addrs() {
+        if let IpAddr::V4(v4) = sock.ip() {
+            if !is_private_lan_ipv4(v4) && !v4.is_loopback() && !v4.is_link_local() {
+                return Some(v4);
+            }
+        }
+    }
+    None
+}
 
 /// Why `admit` dropped a frame.
 enum Rejected {
@@ -1033,8 +1141,18 @@ struct Mesh {
     topic_id: TopicId,
     /// The configured seeds: joined at start, and when the node has no neighbors left.
     seed_ids: Vec<EndpointId>,
-    /// Every peer address learned from beats; neighbors are sampled from these.
+    /// Every peer address learned from beats or mDNS; neighbors are sampled from these.
     known_peer_addrs: HashMap<EndpointId, EndpointAddr>,
+    /// Peers known to be on the local LAN (discovered via mDNS or same subnet / NAT).
+    lan_peers: HashSet<EndpointId>,
+    /// Previously heard WAN peers retained across internet drops so the LAN island self-heals.
+    known_wan_peers: HashMap<EndpointId, EndpointAddr>,
+    /// Last detected local physical IPv4, used to spot interface/subnet changes.
+    local_ipv4: Option<Ipv4Addr>,
+    /// Whether WAN peers went silent while this node stayed alive on LAN.
+    wan_outage: bool,
+    /// Last monotonic timestamp when WAN self-healing ran.
+    last_wan_heal_at: u64,
     counter: u64,
     beat_interval_secs: u64,
     replay_guard: ReplayGuard,
@@ -1059,6 +1177,10 @@ struct Mesh {
     control_rx: mpsc::UnboundedReceiver<MeshControlCommand>,
     /// QUIC's Rtt to each gossip neighbor, by NodeId (from Paths).
     rtt_rx: watch::Receiver<BTreeMap<String, f64>>,
+    /// Whether each open gossip neighbor is using a direct IP path vs relay (from Paths).
+    direct_rx: watch::Receiver<HashMap<EndpointId, bool>>,
+    /// Peers discovered on the local LAN via mDNS (zero internet needed).
+    mdns_rx: mpsc::UnboundedReceiver<EndpointAddr>,
     summary_rx: watch::Receiver<Option<StatsSummary>>,
     inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
     deploy_tx: mpsc::UnboundedSender<Deploy>,
@@ -1088,15 +1210,29 @@ fn shuffle<T>(items: &mut [T]) {
 }
 
 impl Mesh {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         ctx: Ctx,
         start: MeshStart,
         rtt_rx: watch::Receiver<BTreeMap<String, f64>>,
+        direct_rx: watch::Receiver<HashMap<EndpointId, bool>>,
+        mdns_rx: mpsc::UnboundedReceiver<EndpointAddr>,
         summary_rx: watch::Receiver<Option<StatsSummary>>,
         inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
         deploy_tx: mpsc::UnboundedSender<Deploy>,
         update_tx: mpsc::UnboundedSender<UpdateHint>,
     ) -> Self {
+        let local_ipv4 = detect_non_tailnet_ipv4();
+        let local_pub = own_public_ipv4(&ctx.endpoint);
+        let mut lan_peers = HashSet::new();
+        let mut known_wan_peers = HashMap::new();
+        for (pid, addr) in &start.known_peer_addrs {
+            if is_same_lan_addr(addr, local_ipv4, local_pub) {
+                lan_peers.insert(*pid);
+            } else if known_wan_peers.len() < MAX_CACHED_WAN_PEERS {
+                known_wan_peers.insert(*pid, addr.clone());
+            }
+        }
         Mesh {
             ctx,
             node: start.node,
@@ -1113,6 +1249,11 @@ impl Mesh {
             topic_id: start.topic_id,
             seed_ids: start.seed_ids,
             known_peer_addrs: start.known_peer_addrs,
+            lan_peers,
+            known_wan_peers,
+            local_ipv4,
+            wan_outage: false,
+            last_wan_heal_at: 0,
             counter: 1,
             beat_interval_secs: BEAT_INTERVAL_SECS,
             replay_guard: ReplayGuard::default(),
@@ -1127,6 +1268,8 @@ impl Mesh {
             new_node_seen: false,
             control_rx: start.control_rx,
             rtt_rx,
+            direct_rx,
+            mdns_rx,
             summary_rx,
             inventory_rx,
             deploy_tx,
@@ -1151,6 +1294,7 @@ impl Mesh {
                     }
                 }
                 Some(cmd) = self.control_rx.recv() => self.on_control(cmd).await,
+                Some(addr) = self.mdns_rx.recv() => self.on_mdns_discovered(addr).await,
                 Some(InventoryChanged) = self.inventory_rx.recv() => {
                     self.refresh_own_inventory(true).await;
                     self.announce_deploys().await;
@@ -1274,8 +1418,9 @@ impl Mesh {
         }
     }
 
-    /// The seeds plus up to `JOIN_SAMPLE` other known peers, chosen at random, leaving out
-    /// the current neighbors of `topic` and graylisted peers.
+    /// The seeds plus up to `JOIN_SAMPLE` other known peers, prioritizing local LAN peers
+    /// first so same-building nodes form direct low-latency paths, then WAN diversity; leaves
+    /// out current neighbors of `topic` and graylisted peers.
     fn join_candidates(&self, neighbors: Option<&GossipReceiver>) -> Vec<EndpointId> {
         let own = self.ctx.endpoint.id();
         let mut current: HashSet<EndpointId> = neighbors
@@ -1285,22 +1430,37 @@ impl Mesh {
             current.extend(self.known_peer_addrs.keys().filter(|id| s.graylisted(id)));
             current.extend(self.seed_ids.iter().filter(|id| s.graylisted(id)));
         });
-        let mut known: Vec<EndpointId> = self
-            .known_peer_addrs
-            .keys()
-            .filter(|id| **id != own && !current.contains(*id) && !self.seed_ids.contains(id))
-            .copied()
-            .collect();
-        shuffle(&mut known);
-        known.truncate(JOIN_SAMPLE);
-        let mut out: Vec<EndpointId> = self
-            .seed_ids
+
+        let mut lan: Vec<EndpointId> = self
+            .lan_peers
             .iter()
             .filter(|id| **id != own && !current.contains(*id))
             .copied()
             .collect();
-        shuffle(&mut out);
-        out.truncate(JOIN_SAMPLE);
+        shuffle(&mut lan);
+
+        let mut seeds: Vec<EndpointId> = self
+            .seed_ids
+            .iter()
+            .filter(|id| **id != own && !current.contains(*id) && !lan.contains(id))
+            .copied()
+            .collect();
+        shuffle(&mut seeds);
+        seeds.truncate(JOIN_SAMPLE);
+
+        let mut known: Vec<EndpointId> = self
+            .known_peer_addrs
+            .keys()
+            .filter(|id| {
+                **id != own && !current.contains(*id) && !lan.contains(id) && !seeds.contains(id)
+            })
+            .copied()
+            .collect();
+        shuffle(&mut known);
+        known.truncate(JOIN_SAMPLE);
+
+        let mut out = lan;
+        out.extend(seeds);
         out.extend(known);
         out
     }
@@ -1460,12 +1620,215 @@ impl Mesh {
         }
     }
 
+    /// Handle a peer advertised on the local LAN via mDNS (works with zero internet).
+    async fn on_mdns_discovered(&mut self, addr: EndpointAddr) {
+        let pid = addr.id;
+        if pid == self.ctx.endpoint.id() {
+            return;
+        }
+        if !self.ctx.allowlist.admits_str(&pid.to_string()) {
+            return;
+        }
+        let newly_lan = self.lan_peers.insert(pid);
+        self.learn_peer(&addr);
+        if newly_lan {
+            println!("[mdns] discovered local LAN peer {}", pid.fmt_short());
+        }
+        if !self.subscribed || self.keys.is_none() {
+            return;
+        }
+        let is_neighbor = self.receiver.neighbors().any(|n| n == pid);
+        let is_relayed = self
+            .direct_rx
+            .borrow()
+            .get(&pid)
+            .is_some_and(|direct| !direct);
+        if !is_neighbor || is_relayed {
+            if let Some(lan_addr) = lan_only_endpoint_addr(&addr) {
+                self.ctx.memory_lookup.add_endpoint_info(lan_addr);
+            }
+            let dialed = self.dial_for_gossip(&[pid]);
+            if !dialed.is_empty() {
+                let _ = tokio::time::timeout(
+                    Duration::from_millis(600),
+                    self.sender.join_peers(dialed),
+                )
+                .await;
+            }
+        }
+    }
+
+    /// Ensure every known same-LAN peer is directly neighbored so nodes in the same building
+    /// talk over low-latency LAN UDP and stay connected if the internet drops.
+    async fn ensure_lan_neighbors(&mut self) {
+        if !self.subscribed || self.keys.is_none() || self.lan_peers.is_empty() {
+            return;
+        }
+        let own = self.ctx.endpoint.id();
+        let current: HashSet<EndpointId> = self.receiver.neighbors().collect();
+        let missing: Vec<EndpointId> = self
+            .lan_peers
+            .iter()
+            .filter(|id| {
+                **id != own
+                    && !current.contains(*id)
+                    && self.ctx.allowlist.admits_str(&id.to_string())
+                    && !self.ctx.scores(|s| s.graylisted(id)).unwrap_or(false)
+            })
+            .copied()
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        for pid in &missing {
+            if let Some(addr) = self.known_peer_addrs.get(pid) {
+                if let Some(lan_addr) = lan_only_endpoint_addr(addr) {
+                    self.ctx.memory_lookup.add_endpoint_info(lan_addr);
+                }
+            }
+        }
+        let dialed = self.dial_for_gossip(&missing);
+        if !dialed.is_empty() {
+            let _ =
+                tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(dialed))
+                    .await;
+        }
+    }
+
+    /// If a same-LAN neighbor is currently stuck on a relay path, re-seed its direct LAN IP
+    /// and proactively dial a direct connection so QUIC upgrades relay -> direct LAN.
+    async fn upgrade_relayed_lan_peers(&mut self) {
+        if !self.subscribed || self.keys.is_none() || self.lan_peers.is_empty() {
+            return;
+        }
+        let direct_snapshot = self.direct_rx.borrow().clone();
+        let relayed: Vec<EndpointId> = self
+            .lan_peers
+            .iter()
+            .filter(|id| direct_snapshot.get(*id) == Some(&false))
+            .copied()
+            .collect();
+        if relayed.is_empty() {
+            return;
+        }
+        for pid in &relayed {
+            if let Some(addr) = self.known_peer_addrs.get(pid) {
+                if let Some(lan_addr) = lan_only_endpoint_addr(addr) {
+                    self.ctx.memory_lookup.add_endpoint_info(lan_addr);
+                }
+            }
+        }
+        let dialed = self.dial_for_gossip(&relayed);
+        if !dialed.is_empty() {
+            println!(
+                "[mesh] upgrading {} relayed LAN peer(s) to direct LAN",
+                dialed.len()
+            );
+        }
+    }
+
+    /// Keep LAN peers healthy when the internet drops, detect local interface/IP changes,
+    /// and automatically refresh iroh + redial cached WAN peers when internet connectivity returns.
+    async fn heal_wan_and_network_changes(&mut self) {
+        if !self.subscribed || self.keys.is_none() {
+            return;
+        }
+        let current_ip = detect_non_tailnet_ipv4();
+        if current_ip != self.local_ipv4 {
+            println!(
+                "[net] local IPv4 changed ({:?} -> {:?}); refreshing endpoint network state",
+                self.local_ipv4, current_ip
+            );
+            self.local_ipv4 = current_ip;
+            self.ctx.endpoint.network_change().await;
+            self.refresh_own_inventory(true).await;
+        }
+
+        let own = self.ctx.endpoint.id();
+        let unix = now_unix();
+        let fresh_wan_peers = self
+            .ctx
+            .with_state(|st| {
+                st.nodes
+                    .iter()
+                    .filter(|n| {
+                        n.node_id != self.ctx.node_id
+                            && unix.saturating_sub(n.updated_at_unix) <= beat_fresh_secs(n)
+                    })
+                    .filter_map(|n| n.node_id.parse::<EndpointId>().ok())
+                    .filter(|id| !self.lan_peers.contains(id))
+                    .count()
+            })
+            .unwrap_or(0);
+
+        if fresh_wan_peers > 0 {
+            if self.wan_outage {
+                println!(
+                    "[mesh] WAN connectivity restored ({fresh_wan_peers} remote peer(s) fresh); merged with global channel"
+                );
+                self.wan_outage = false;
+            }
+            return;
+        }
+
+        // No fresh WAN peers: if we know any WAN peers or seeds, periodically notify iroh
+        // of network recovery and redial cached WAN endpoints while LAN peers stay connected.
+        let mut wan_targets: Vec<EndpointId> = self
+            .known_wan_peers
+            .keys()
+            .chain(self.seed_ids.iter())
+            .filter(|id| **id != own && !self.lan_peers.contains(*id))
+            .copied()
+            .collect();
+        wan_targets.sort();
+        wan_targets.dedup();
+        if wan_targets.is_empty() {
+            return;
+        }
+
+        let now_ms = monotonic_now_ms();
+        if now_ms.saturating_sub(self.last_wan_heal_at) < WAN_HEAL_EVERY.as_millis() as u64 {
+            return;
+        }
+        self.last_wan_heal_at = now_ms;
+        if !self.wan_outage {
+            println!(
+                "[mesh] WAN peers silent (LAN stays active); probing relay and {} cached WAN peer(s) for recovery",
+                wan_targets.len()
+            );
+            self.wan_outage = true;
+        }
+        self.ctx.endpoint.network_change().await;
+        for pid in &wan_targets {
+            if let Some(addr) = self.known_wan_peers.get(pid) {
+                self.ctx.memory_lookup.add_endpoint_info(addr.clone());
+            }
+        }
+        shuffle(&mut wan_targets);
+        wan_targets.truncate(JOIN_SAMPLE);
+        let dialed = self.dial_for_gossip(&wan_targets);
+        if !dialed.is_empty() {
+            let _ =
+                tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(dialed))
+                    .await;
+        }
+    }
+
     /// Remember a peer's address for fetches and joins.
     fn learn_peer(&mut self, addr: &EndpointAddr) {
         let clean = advertised_endpoint_addr(addr, &self.ctx.transport);
-        if clean.id == self.ctx.endpoint.id()
-            || self.known_peer_addrs.get(&clean.id) == Some(&clean)
+        if clean.id == self.ctx.endpoint.id() {
+            return;
+        }
+        let local_pub = own_public_ipv4(&self.ctx.endpoint);
+        if is_same_lan_addr(&clean, self.local_ipv4, local_pub) {
+            self.lan_peers.insert(clean.id);
+        } else if self.known_wan_peers.len() < MAX_CACHED_WAN_PEERS
+            || self.known_wan_peers.contains_key(&clean.id)
         {
+            self.known_wan_peers.insert(clean.id, clean.clone());
+        }
+        if self.known_peer_addrs.get(&clean.id) == Some(&clean) {
             return;
         }
         self.known_peer_addrs.insert(clean.id, clean.clone());
@@ -1751,9 +2114,12 @@ impl Mesh {
             }
         }
         self.ctx.scores(PeerScores::decay);
+        self.ensure_lan_neighbors().await;
+        self.upgrade_relayed_lan_peers().await;
         self.keep_neighbors().await;
         self.join_unheard_seeds().await;
         self.rejoin_silent_neighbors().await;
+        self.heal_wan_and_network_changes().await;
 
         let counter = self.counter;
         if counter.is_multiple_of(SEED_REFRESH_EVERY) {
