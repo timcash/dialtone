@@ -42,7 +42,8 @@ use dialtone::mesh::{
 };
 use dialtone::node::{
     advertised_endpoint_addr, build_diagnostics, detect_non_tailnet_ipv4, is_private_lan_ipv4,
-    lan_only_endpoint_addr, same_lan_subnet, GossipConnections, IrohTransportConfig,
+    lan_only_endpoint_addr, same_lan_subnet, GossipConnections, IrohRelayPolicy,
+    IrohTransportConfig,
 };
 use dialtone::probe::{ProbeRequest, PULL_SAMPLE};
 use dialtone::service::ProcessSpec;
@@ -1057,7 +1058,7 @@ const MIN_NEIGHBORS: usize = 2;
 /// How many known peers, chosen at random, Mesh joins when it is short of neighbors.
 const JOIN_SAMPLE: usize = 3;
 /// A peer Mesh dials itself for gossip (`dial_for_gossip`) is dialed at most this often.
-const GOSSIP_DIAL_EVERY: Duration = Duration::from_secs(30);
+const GOSSIP_DIAL_EVERY: Duration = Duration::from_secs(15);
 /// Every this many beats, Mesh rebuilds its inventory to catch details that drift slowly
 /// (the public-IP lookup, addresses); it is broadcast only when it changed.
 const INVENTORY_REFRESH_EVERY: u64 = 6;
@@ -1160,6 +1161,8 @@ struct Mesh {
     own_inventory_version: u64,
     /// When `dial_for_gossip` last dialed each peer (monotonic ms).
     gossip_dialed_at: HashMap<EndpointId, u64>,
+    /// When `ensure_lan_neighbors` last joined each LAN peer (monotonic ms).
+    lan_joined_at: HashMap<EndpointId, u64>,
     /// What this node last announced for each program it deploys, by name, with when it was
     /// removed (monotonic ms) for programs it no longer deploys.
     announced: HashMap<String, (Deploy, Option<u64>)>,
@@ -1251,6 +1254,7 @@ impl Mesh {
             inventories: HashMap::new(),
             own_inventory_version: 0,
             gossip_dialed_at: HashMap::new(),
+            lan_joined_at: HashMap::new(),
             announced: HashMap::new(),
             announced_all_at: 0,
             new_node_seen: false,
@@ -1544,10 +1548,19 @@ impl Mesh {
             .filter(|id| **id != own && !heard.contains(&id.to_string()))
             .copied()
             .collect();
-        let dialed = self.dial_for_gossip(&unheard);
-        if !dialed.is_empty() {
+        if !unheard.is_empty() {
+            // In iroh-gossip 0.103+, `join_peers` skips any peer still in active_view. If a
+            // restarted seed is still listed as a neighbor on a stale connection, closing that
+            // connection lets iroh-gossip evict it and immediately complete a fresh Join.
+            let neighbors: HashSet<EndpointId> = self.receiver.neighbors().collect();
+            for id in &unheard {
+                if neighbors.contains(id) {
+                    self.ctx.gossip_conns.close_peer(id);
+                }
+            }
+            self.dial_for_gossip(&unheard);
             let _ =
-                tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(dialed))
+                tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(unheard))
                     .await;
         }
     }
@@ -1617,11 +1630,12 @@ impl Mesh {
             return;
         }
         let newly_lan = self.lan_peers.insert(pid);
+        let addr_changed = self.known_peer_addrs.get(&pid) != Some(&addr);
         self.learn_peer(&addr);
         if newly_lan {
             println!("[mdns] discovered local LAN peer {}", pid.fmt_short());
         }
-        if !self.subscribed || self.keys.is_none() {
+        if !self.subscribed || self.keys.is_none() || (!newly_lan && !addr_changed) {
             return;
         }
         let is_neighbor = self.receiver.neighbors().any(|n| n == pid);
@@ -1634,25 +1648,34 @@ impl Mesh {
             if let Some(lan_addr) = lan_only_endpoint_addr(&addr) {
                 self.ctx.memory_lookup.add_endpoint_info(lan_addr);
             }
-            let dialed = self.dial_for_gossip(&[pid]);
-            if !dialed.is_empty() {
-                let _ = tokio::time::timeout(
-                    Duration::from_millis(600),
-                    self.sender.join_peers(dialed),
-                )
-                .await;
+            if is_relayed {
+                self.dial_for_gossip(&[pid]);
             }
+            let _ = tokio::time::timeout(
+                Duration::from_millis(600),
+                self.sender.join_peers(vec![pid]),
+            )
+            .await;
         }
     }
 
-    /// Ensure every known same-LAN peer is directly neighbored so nodes in the same building
-    /// talk over low-latency LAN UDP and stay connected if the internet drops.
+    /// Ensure same-LAN peers join directly over LAN UDP on initial discovery or if short of
+    /// LAN neighbors, without opening redundant steady-state connections once already formed.
     async fn ensure_lan_neighbors(&mut self) {
         if !self.subscribed || self.keys.is_none() || self.lan_peers.is_empty() {
             return;
         }
         let own = self.ctx.endpoint.id();
         let current: HashSet<EndpointId> = self.receiver.neighbors().collect();
+        let current_lan_neighbors = current
+            .iter()
+            .filter(|id| self.lan_peers.contains(*id))
+            .count();
+        if current_lan_neighbors >= MIN_NEIGHBORS {
+            return;
+        }
+        let now = monotonic_now_ms();
+        let every = GOSSIP_DIAL_EVERY.as_millis() as u64;
         let missing: Vec<EndpointId> = self
             .lan_peers
             .iter()
@@ -1661,6 +1684,10 @@ impl Mesh {
                     && !current.contains(*id)
                     && self.ctx.allowlist.admits_str(&id.to_string())
                     && !self.ctx.scores(|s| s.graylisted(id)).unwrap_or(false)
+                    && self
+                        .lan_joined_at
+                        .get(*id)
+                        .is_none_or(|at| now.saturating_sub(*at) >= every)
             })
             .copied()
             .collect();
@@ -1668,18 +1695,15 @@ impl Mesh {
             return;
         }
         for pid in &missing {
+            self.lan_joined_at.insert(*pid, now);
             if let Some(addr) = self.known_peer_addrs.get(pid) {
                 if let Some(lan_addr) = lan_only_endpoint_addr(addr) {
                     self.ctx.memory_lookup.add_endpoint_info(lan_addr);
                 }
             }
         }
-        let dialed = self.dial_for_gossip(&missing);
-        if !dialed.is_empty() {
-            let _ =
-                tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(dialed))
-                    .await;
-        }
+        let _ =
+            tokio::time::timeout(Duration::from_millis(600), self.sender.join_peers(missing)).await;
     }
 
     /// If a same-LAN neighbor is currently stuck on a relay path, re-seed its direct LAN IP
@@ -1717,7 +1741,10 @@ impl Mesh {
     /// Keep LAN peers healthy when the internet drops, detect local interface/IP changes,
     /// and automatically refresh iroh + redial cached WAN peers when internet connectivity returns.
     async fn heal_wan_and_network_changes(&mut self) {
-        if !self.subscribed || self.keys.is_none() {
+        if !self.subscribed
+            || self.keys.is_none()
+            || self.ctx.transport.relay_mode == IrohRelayPolicy::Disabled
+        {
             return;
         }
         let current_ip = detect_non_tailnet_ipv4();

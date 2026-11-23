@@ -154,7 +154,7 @@ impl IrohTransportConfig {
         Self {
             profile: "private_mesh".to_string(),
             dns_lookup: false,
-            local_discovery: true,
+            local_discovery: false,
             dht_lookup: false,
             relay_mode: IrohRelayPolicy::Disabled,
             relay_urls: Vec::new(),
@@ -365,6 +365,20 @@ impl GossipConnections {
                 handles.retain(|h| h.upgrade().is_some());
                 !handles.is_empty()
             });
+        }
+    }
+
+    /// Close all open gossip connections to a silent peer so iroh-gossip drops the stale
+    /// neighbor entry and sends a fresh `Join` if the peer restarted on the same NodeId.
+    pub fn close_peer(&self, peer: &iroh::EndpointId) {
+        if let Ok(mut map) = self.0.lock() {
+            if let Some(handles) = map.remove(peer) {
+                for handle in handles {
+                    if let Some(conn) = handle.upgrade() {
+                        conn.close(0u32.into(), b"peer silent");
+                    }
+                }
+            }
         }
     }
 }
@@ -670,7 +684,7 @@ mod tests {
         assert!(def
             .active_lookup_modes()
             .contains(&"mdns-local".to_string()));
-        assert!(IrohTransportConfig::private_mesh(None).local_discovery);
+        assert!(!IrohTransportConfig::private_mesh(None).local_discovery);
         assert!(!IrohTransportConfig::local_offline().local_discovery);
 
         assert!(is_private_lan_ipv4("192.168.1.40".parse().unwrap()));

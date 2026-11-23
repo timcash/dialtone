@@ -71,6 +71,7 @@ pub fn test(args: &[String]) -> R<()> {
                 .args(&o.cargo))
         }
         (None, true) => {
+            let started = std::time::Instant::now();
             crate::check_static()?;
             suite_here(&o.cargo)?;
             say("Release build");
@@ -78,7 +79,10 @@ pub fn test(args: &[String]) -> R<()> {
             if let Some(n) = o.scale.filter(|&n| n > 0) {
                 crate::scale::local(n, o.secs)?;
             }
-            say("ALL TESTS PASSED on this machine");
+            say(&format!(
+                "ALL TESTS PASSED on this machine in {:.1}s",
+                started.elapsed().as_secs_f64()
+            ));
             Ok(())
         }
         (Some("suite"), true) => suite_here(&o.cargo),

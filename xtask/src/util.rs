@@ -11,7 +11,14 @@ use std::time::Duration;
 pub type R<T> = Result<T, String>;
 
 pub fn say(s: &str) {
-    println!("==> {s}");
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let hh = (secs / 3600) % 24;
+    let mm = (secs / 60) % 60;
+    let ss = secs % 60;
+    println!("[{hh:02}:{mm:02}:{ss:02}Z] ==> {s}");
 }
 
 /// The repository root (xtask/ is one level down).
