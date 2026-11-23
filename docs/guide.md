@@ -1,6 +1,6 @@
 # Dialtone User Guide
 
-`dialtone` is a single-binary Rust + **Iroh 1.3** peer-to-peer mesh control plane, 3D tactical HUD & terminal `top` monitor, content-addressed blob store (`iroh-blobs`), and process supervisor. It runs without SSH, Git, or Tailscale/VPN runtime dependencies.
+`dialtone` is a single-binary Rust + **Iroh 1.3** peer-to-peer mesh control plane, zero-dependency local status HUD, content-addressed blob store (`iroh-blobs`), and process supervisor. It runs without SSH, Git, or Tailscale/VPN runtime dependencies (the 3D H3 globe and multi-panel workspace live in `timcash/dialtone-earth`).
 
 This guide uses the project's [domain language](../goal.md#domain-language): one word per concept (Node, NodeId, Peer, Mesh, Channel, Secret, Allowlist, Invite, Seed, Message, Beat, Inventory, Stats, Blob, Digest, Store, Ticket, Program, Process, Probe, HUD, API).
 
@@ -248,7 +248,7 @@ Or open **`http://127.0.0.1:8788`** in your browser to view the live 3D topology
 - **Deploys are announced, and only targeted nodes pull.** `POST /api/processes/blob` with `"deploy_to_mesh": true` (and optionally `"deploy_targets": ["node-name", "<NodeId prefix>", ...]`) makes the origin gossip a signed **Deploy** naming the program, its blob ticket and its targets (every node when none are named). A targeted node pulls the program, from up to three peers whose inventories say they already run it (gossip neighbors first) and then from the origin, after a random delay of up to one beat interval so a large mesh does not pull at once; it checks the SHA-256, stages and starts it. Nothing auto-deploys from inventories, and no node's probe program is ever deployed.
 - **Deploys follow their origin.** A copy is never announced further. It is removed when the origin announces the program removed (removing it on the origin), no longer targets this node, or stops announcing it for 30 minutes while still in the mesh. The origin announces every change at once, and all its deploys again every 10 minutes and soon after a node joins (removed ones for an hour), so a node that was away catches up through gossip alone.
 - **Deploys only from the allowlist.** A Deploy is admitted only from an allowlisted signer, and blob pulls use the node's own endpoint, so each provider's allowlist decides.
-- **HUD.** The page carries no API token; a per-response Content-Security-Policy nonce lets only its own scripts run. three.js and h3-js are compiled into the binary and served from `/hud/vendor/`, so the HUD loads nothing from the Internet.
+- **HUD.** The page carries no API token; a per-response Content-Security-Policy nonce lets only its own `app.js` run with zero external or vendored 3D libraries (the 3D H3 globe lives in `dialtone.earth`).
 
 ### Unlock & Join the `"dialtone"` Channel (`join` & `secret`)
 
@@ -534,7 +534,7 @@ Requests are parsed with `httparse`. The API refuses what it never needs: `Trans
 | Method & Path | Description |
 | :--- | :--- |
 | `GET /` | The HUD (served with a per-response Content-Security-Policy nonce) |
-| `GET /hud/...` | The HUD's static files (`app.js`, `style.css`, vendored three.js and h3-js) |
+| `GET /hud/...` | The local HUD's zero-dependency static files (`app.js`, `style.css`) |
 | `GET /health` | `{"status": "ok", "node": ..., "peers": ..., "boot_stages": ...}` |
 | `GET /api/config` (`/api/boot-status`) | Boot stages, mesh config (`derived_keys` redacted), store path |
 | `POST /api/mesh/join` | Join or switch the channel of the running node |

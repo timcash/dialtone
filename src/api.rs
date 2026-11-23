@@ -743,7 +743,7 @@ pub fn validate_gateway_token(raw: &str) -> Result<String, String> {
 }
 
 /// Read-only route allowlist exposed on the optional `--gateway-listen` origin listener
-/// (consumed by Cloudflare Workers / dialtone.earth over a Cloudflare Tunnel).
+/// (consumed by dialtone.earth at the Cloudflare edge over a Cloudflare Tunnel).
 pub fn is_allowed_gateway_route(path: &str) -> bool {
     matches!(
         path,
@@ -2374,9 +2374,9 @@ fn write_json<W: Write, T: Serialize>(
     write_response(stream, status, "application/json", &body, false)
 }
 
-/// Headers for the HUD page. The CSP lets only the page's own nonce-tagged scripts and the
-/// HUD's own files (served by this node, three.js / h3-js vendored) run, so markup a peer manages to get into the
-/// page can never execute; the page may only talk back to this API.
+/// Headers for the local HUD page. The CSP lets only the page's own nonce-tagged `app.js` run
+/// (zero vendored 3D/CDN libraries; the 3D globe lives in `dialtone.earth`), so markup a peer
+/// manages to get into the page can never execute; the page may only talk back to this API.
 fn hud_security_headers(nonce: &str) -> String {
     format!(
         "Content-Security-Policy: default-src 'none'; script-src 'nonce-{nonce}' 'self'; \
@@ -2481,8 +2481,8 @@ mod tests {
         assert!(nonce.len() >= 16);
         assert!(csp.contains("default-src 'none'") && !csp.contains("unsafe-eval"));
         assert!(!csp.contains("jsdelivr"), "the HUD loads no CDN code");
-        // importmap, h3-js and app.js carry the nonce; the rest are inert JSON data blocks.
-        assert_eq!(body.matches(&format!("nonce=\"{nonce}\"")).count(), 3);
+        // Only the single app.js script carries the nonce; initial-data is an inert JSON block.
+        assert_eq!(body.matches(&format!("nonce=\"{nonce}\"")).count(), 1);
         for tag in body.split("<script").skip(1) {
             let open = tag.split('>').next().unwrap();
             assert!(
@@ -2586,7 +2586,10 @@ mod tests {
         assert!(app.starts_with("HTTP/1.1 200"));
         assert!(app.contains("Content-Type: text/javascript") && app.contains("no-cache"));
         let three = get("/hud/vendor/three@0.179.1/three.module.min.js");
-        assert!(three.contains("immutable") && three.contains("nosniff"));
+        assert!(
+            three.starts_with("HTTP/1.1 404"),
+            "three.js must not be bundled in dialtone"
+        );
         let css = get("/hud/style.css");
         assert!(css.contains("Content-Type: text/css"));
         assert!(get("/hud/../Cargo.toml").starts_with("HTTP/1.1 404"));

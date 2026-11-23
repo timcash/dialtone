@@ -21,7 +21,7 @@ Verifies SHA-256 and places only the binary in `~/.local/bin` (`$HOME\.local\bin
 ```text
 usage: dialtone [action] [flags]
 
-Single-binary Iroh 1.3 + Rust mesh control plane, 3D tactical HUD, blob store & daemon.
+Single-binary Iroh 1.3 + Rust mesh control plane, local status HUD, blob store & daemon.
 Running `dialtone` with no arguments boots in dependency order and prints the local Web HUD URL.
 
 actions:

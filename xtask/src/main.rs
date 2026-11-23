@@ -163,7 +163,7 @@ fn lint() -> R<()> {
         {
             let p = e.path();
             let ok = p.extension().is_some_and(|x| exts.iter().any(|w| x == *w));
-            if ok && !p.ends_with("h3_land.rs") {
+            if ok {
                 files.push(p.to_string_lossy().replace('\\', "/"));
             }
         }

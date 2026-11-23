@@ -38,7 +38,7 @@ mod actors;
 fn print_usage() {
     println!(
         "usage: dialtone [action] [flags]\n\n\
-         Single-binary Iroh 1.3 + Rust mesh control plane, 3D tactical HUD, blob store & daemon.\n\
+         Single-binary Iroh 1.3 + Rust mesh control plane, local status HUD, blob store & daemon.\n\
          Running `dialtone` with no arguments boots in dependency order and prints the local Web HUD URL.\n\n\
          actions:\n\
          \x20 up                       Start the node: HUD -> store -> Iroh QUIC -> mesh\n\
@@ -1123,7 +1123,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         println!(
             "================================================================================"
         );
-        println!("  DIALTONE // 3D SCI-FI TACTICAL HUD & CONFIGURATION WEBAPP ONLINE");
+        println!("  DIALTONE // LOCAL NODE STATUS HUD ONLINE (3D globe runs at dialtone.earth)");
         println!("  -> Open Local Web UI : {local_web_url}");
         println!("  -> Join Channel CLI  : dialtone join <SECRET>");
         println!("  -> Survive Restarts  : dialtone daemon install");

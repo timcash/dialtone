@@ -1,4 +1,5 @@
-//! The HUD: the node's local web UI, served by the API at `/`.
+//! The HUD: the node's minimal zero-dependency local web UI, served by the API at `/`.
+//! The 3D H3 globe and multi-panel workspace live in `dialtone.earth`.
 
 use std::borrow::Cow;
 use std::path::Path;
@@ -6,11 +7,10 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::api::*;
-use crate::h3_land::LAND_H3_BITSET_B64;
 use crate::mesh::{BEAT_INTERVAL_SECS, SUMMARY_INTERVAL_SECS};
 
-/// Render the HUD page. `csp_nonce` must match the `Content-Security-Policy` header sent
-/// with it; only the two `<script>` tags carrying it may run.
+/// Render the local HUD page. `csp_nonce` must match the `Content-Security-Policy` header sent
+/// with it; only the single `<script>` tag carrying it may run.
 pub(crate) fn render_hud(
     state: &NodeState,
     selected_peer: Option<&str>,
@@ -50,11 +50,7 @@ pub(crate) fn render_hud(
         .replace("__SELF_NODE__", &html_escape(&state.node))
         .replace("__CSP_NONCE__", csp_nonce)
         .replace("__INITIAL_JSON__", &script_safe_json(&initial_json))
-        .replace("__LAND_H3_BITSET_B64__", LAND_H3_BITSET_B64)
 }
-
-/// Cache policy for vendored libraries: their paths carry the version, so they never change.
-const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 
 /// Set to the `src/hud` directory to serve the HUD from disk while developing it: an edit
 /// to a HUD file then needs only a browser reload, no rebuild or restart.
@@ -89,31 +85,18 @@ fn hud_asset_in(
     })
 }
 
-/// The HUD's static files compiled into the binary. three.js and h3-js are vendored (pinned
-/// versions, npm integrity-checked) so the HUD needs no CDN and works with no Internet.
+/// The local HUD's zero-dependency static files compiled into the binary.
 fn embedded_hud_asset(path: &str) -> Option<(&'static str, &'static [u8], &'static str)> {
-    const JS: &str = "text/javascript; charset=utf-8";
     Some(match path {
         "/hud/style.css" => (
             "text/css; charset=utf-8",
             include_bytes!("hud/style.css"),
             "no-cache",
         ),
-        "/hud/app.js" => (JS, include_bytes!("hud/app.js"), "no-cache"),
-        "/hud/vendor/three@0.179.1/three.module.min.js" => (
-            JS,
-            include_bytes!("hud/vendor/three@0.179.1/three.module.min.js"),
-            IMMUTABLE,
-        ),
-        "/hud/vendor/three@0.179.1/three.core.min.js" => (
-            JS,
-            include_bytes!("hud/vendor/three@0.179.1/three.core.min.js"),
-            IMMUTABLE,
-        ),
-        "/hud/vendor/h3-js@4.4.0/h3-js.umd.js" => (
-            JS,
-            include_bytes!("hud/vendor/h3-js@4.4.0/h3-js.umd.js"),
-            IMMUTABLE,
+        "/hud/app.js" => (
+            "text/javascript; charset=utf-8",
+            include_bytes!("hud/app.js"),
+            "no-cache",
         ),
         _ => return None,
     })
@@ -158,6 +141,7 @@ mod tests {
         );
         assert!(hud_asset_in("/hud/secret.txt", Some(&dir)).is_none());
         assert!(hud_asset_in("/hud/../Cargo.toml", Some(&dir)).is_none());
+        assert!(hud_asset_in("/hud/vendor/three@0.179.1/three.module.min.js", None).is_none());
         let (_, embedded, _) = hud_asset_in("/hud/app.js", None).unwrap();
         assert_eq!(&*embedded, &include_bytes!("hud/app.js")[..]);
         let _ = std::fs::remove_dir_all(&dir);

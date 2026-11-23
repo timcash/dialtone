@@ -4,7 +4,6 @@ pub mod deploy;
 pub mod devices;
 pub mod exec;
 pub mod fetch;
-pub mod h3_land;
 pub mod hud;
 pub mod join;
 pub mod link;
