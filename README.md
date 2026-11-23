@@ -59,6 +59,8 @@ flags:
   --node <name>            Node name (default: saved config or hostname)
   --listen <addr>          HUD and API listen address (default: 127.0.0.1:8788)
   --api-token <token>      Explicit API bearer token for POST routes (default: ~/.dialtone/api-token)
+  --gateway-listen <addr>  Optional read-only Bearer-authenticated origin listener (e.g. 127.0.0.1:8790)
+  --gateway-token <token>  Bearer token (>= 16 chars) for --gateway-listen (or DIALTONE_GATEWAY_TOKEN / MESH_ORIGIN_TOKEN)
   --channel <name>         Channel name (default: dialtone)
   --secret <secret>        Channel secret (or set DIALTONE_SECRET)
   --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 7d; default: 24h)

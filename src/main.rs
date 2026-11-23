@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dialtone::api::{
-    default_boot_stages, load_or_create_api_token, serve_http_blocking,
-    validate_listen_addr_security, NodeState,
+    default_boot_stages, load_or_create_api_token, serve_gateway_http_blocking,
+    serve_http_blocking, validate_gateway_token, validate_listen_addr_security, NodeState,
 };
 use dialtone::blob::{Blobs, Store};
 use dialtone::collect_node_diagnostics;
@@ -74,6 +74,8 @@ fn print_usage() {
          \x20 --node <name>            Node name (default: saved config or hostname)\n\
          \x20 --listen <addr>          HUD and API listen address (default: 127.0.0.1:8788)\n\
          \x20 --api-token <token>      Explicit API bearer token for POST routes (default: ~/.dialtone/api-token)\n\
+         \x20 --gateway-listen <addr>  Optional read-only Bearer-authenticated origin listener (e.g. 127.0.0.1:8790)\n\
+         \x20 --gateway-token <token>  Bearer token (>= 16 chars) for --gateway-listen (or DIALTONE_GATEWAY_TOKEN / MESH_ORIGIN_TOKEN)\n\
          \x20 --channel <name>         Channel name (default: dialtone)\n\
          \x20 --secret <secret>        Channel secret (or set DIALTONE_SECRET)\n\
          \x20 --ttl <duration>         TTL for 'dialtone invite' (e.g. 15m, 1h, 7d; default: 24h)\n\
@@ -108,6 +110,8 @@ struct CliOptions {
     listen: String,
     listen_explicit: bool,
     api_token: Option<String>,
+    gateway_listen: Option<String>,
+    gateway_token: Option<String>,
     channel: String,
     secret_key: Option<String>,
     daemon_subcmd: String,
@@ -170,6 +174,13 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         listen: default_listen,
         listen_explicit: false,
         api_token: env::var("DIALTONE_API_TOKEN")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        gateway_listen: env::var("DIALTONE_GATEWAY_LISTEN")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        gateway_token: env::var("DIALTONE_GATEWAY_TOKEN")
+            .or_else(|_| env::var("MESH_ORIGIN_TOKEN"))
             .ok()
             .filter(|s| !s.trim().is_empty()),
         channel: default_channel,
@@ -425,6 +436,22 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "--api-token" => {
                 idx += 1;
                 opts.api_token = Some(args.get(idx).ok_or("missing --api-token value")?.clone());
+            }
+            "--gateway-listen" => {
+                idx += 1;
+                opts.gateway_listen = Some(
+                    args.get(idx)
+                        .ok_or("missing --gateway-listen value")?
+                        .clone(),
+                );
+            }
+            "--gateway-token" => {
+                idx += 1;
+                opts.gateway_token = Some(
+                    args.get(idx)
+                        .ok_or("missing --gateway-token value")?
+                        .clone(),
+                );
             }
             "--channel" => {
                 idx += 1;
@@ -1076,6 +1103,19 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         std::thread::spawn(move || {
             let _ = serve_http_blocking(listener, state_for_http, None);
         });
+
+        if let Some(ref gw_addr) = opts.gateway_listen {
+            let gw_token = validate_gateway_token(opts.gateway_token.as_deref().unwrap_or(""))?;
+            let gw_listener = TcpListener::bind(gw_addr)
+                .map_err(|e| format!("failed to bind gateway listener on {gw_addr}: {e}"))?;
+            let state_for_gw = Arc::clone(&state);
+            std::thread::spawn(move || {
+                let _ = serve_gateway_http_blocking(gw_listener, state_for_gw, gw_token, None);
+            });
+            println!(
+                "[BOOT 2/5] Read-Only Gateway Listener ................. [READY] http://{gw_addr}"
+            );
+        }
 
         println!(
             "[BOOT 2/5] Local Web HUD & Config Server ................. [READY] {local_web_url}"

@@ -728,6 +728,194 @@ pub(crate) fn masked_mesh_config(cfg: &MeshConfig) -> MeshConfig {
     c
 }
 
+/// Minimum length for a gateway listener Bearer token (`--gateway-token` / `DIALTONE_GATEWAY_TOKEN`).
+pub const MIN_GATEWAY_TOKEN_LEN: usize = 16;
+
+/// Validate that a read-only gateway token is configured and meets minimum length.
+pub fn validate_gateway_token(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.len() < MIN_GATEWAY_TOKEN_LEN {
+        return Err(format!(
+            "gateway listener requires --gateway-token (or DIALTONE_GATEWAY_TOKEN / MESH_ORIGIN_TOKEN) with at least {MIN_GATEWAY_TOKEN_LEN} characters"
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Read-only route allowlist exposed on the optional `--gateway-listen` origin listener
+/// (consumed by Cloudflare Workers / dialtone.earth over a Cloudflare Tunnel).
+pub fn is_allowed_gateway_route(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/mesh"
+            | "/api/state"
+            | "/api/details"
+            | "/api/plugins"
+            | "/api/shell/sessions"
+            | "/api/blob"
+            | "/api/processes"
+            | "/api/probe"
+            | "/api/net"
+            | "/api/links"
+    )
+}
+
+/// Sanitized `/api/state` projection for the read-only gateway listener:
+/// strips `mesh_config` completely and trims recent logs/events/alerts/fetches.
+pub fn sanitize_gateway_state(st: &NodeState) -> Value {
+    let tail_events = &st.events[st.events.len().saturating_sub(25)..];
+    let tail_alerts = &st.alerts[st.alerts.len().saturating_sub(25)..];
+    let tail_fetches = &st.blob_fetches[st.blob_fetches.len().saturating_sub(25)..];
+    json!({
+        "node": st.node,
+        "events": tail_events,
+        "alerts": tail_alerts,
+        "blob_fetches": tail_fetches,
+        "probe": st.probe,
+        "processes": st.processes,
+        "stats": st.stats,
+    })
+}
+
+const GATEWAY_HEADERS: &str =
+    "Cache-Control: private, no-store\r\nX-Content-Type-Options: nosniff\r\n";
+
+fn write_gateway_json<W: Write, T: Serialize>(
+    stream: &mut W,
+    status: u16,
+    value: &T,
+    head_only: bool,
+) -> Result<(), String> {
+    let body = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    write_response_with_headers(
+        stream,
+        status,
+        "application/json; charset=utf-8",
+        GATEWAY_HEADERS,
+        &body,
+        head_only,
+    )
+}
+
+/// Serve the read-only Bearer-authenticated origin gateway listener (`--gateway-listen`).
+/// Replaces external sidecar proxies (like Node `mesh-origin-bridge.mjs`) by natively
+/// enforcing `GET`/`HEAD`-only, constant-time Bearer auth, route allowlisting, and
+/// secret-stripped `/api/state`.
+pub fn serve_gateway_http_blocking(
+    listener: TcpListener,
+    state: Arc<Mutex<NodeState>>,
+    gateway_token: String,
+    max_requests: Option<usize>,
+) -> Result<(), String> {
+    let token = Arc::new(validate_gateway_token(&gateway_token)?);
+    let active_processes = Arc::new(AtomicUsize::new(0));
+    let mut handled = 0usize;
+    let mut join_handles = Vec::new();
+
+    for stream in listener.incoming() {
+        let mut stream = stream.map_err(|e| format!("accept gateway connection: {e}"))?;
+        if active_processes.load(Ordering::SeqCst) >= MAX_CONCURRENT_HTTP_CONNECTIONS {
+            let _ = write_gateway_json(
+                &mut stream,
+                503,
+                &json!({ "error": "too many concurrent HTTP connections" }),
+                false,
+            );
+            continue;
+        }
+        active_processes.fetch_add(1, Ordering::SeqCst);
+        let state_clone = state.clone();
+        let token_clone = token.clone();
+        let active_clone = active_processes.clone();
+        let process = thread::spawn(move || {
+            let _ = handle_gateway_connection(stream, &state_clone, &token_clone);
+            active_clone.fetch_sub(1, Ordering::SeqCst);
+        });
+        if max_requests.is_some() {
+            join_handles.push(process);
+        }
+        handled += 1;
+        if let Some(limit) = max_requests {
+            if handled >= limit {
+                break;
+            }
+        }
+    }
+
+    for h in join_handles {
+        let _ = h.join();
+    }
+    Ok(())
+}
+
+fn handle_gateway_connection(
+    mut stream: TcpStream,
+    state: &Arc<Mutex<NodeState>>,
+    gateway_token: &str,
+) -> Result<(), String> {
+    let _ = stream.set_read_timeout(Some(HTTP_IO_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(HTTP_IO_TIMEOUT));
+
+    let req = match read_request(&mut stream) {
+        Ok(Some(req)) => req,
+        Ok(None) => return Ok(()),
+        Err((status, msg)) => {
+            return write_gateway_json(&mut stream, status, &json!({ "error": msg }), false)
+        }
+    };
+
+    let head_only = req.method.eq_ignore_ascii_case("HEAD");
+    if !req.method.eq_ignore_ascii_case("GET") && !head_only {
+        return write_gateway_json(
+            &mut stream,
+            405,
+            &json!({ "error": "Method not allowed; gateway listener is read-only" }),
+            false,
+        );
+    }
+
+    if let Err(err) = validate_bearer_token(&req.headers, gateway_token) {
+        return write_gateway_json(&mut stream, 401, &json!({ "error": err }), head_only);
+    }
+
+    let path = req.path.as_str();
+    if !is_allowed_gateway_route(path) {
+        return write_gateway_json(
+            &mut stream,
+            404,
+            &json!({ "error": "Route not allowlisted on gateway listener" }),
+            head_only,
+        );
+    }
+
+    if path == "/api/state" {
+        let mut st = state.lock().map_err(|_| "state poisoned".to_string())?;
+        st.reconcile_processes();
+        let sanitized = sanitize_gateway_state(&st);
+        drop(st);
+        return write_gateway_json(&mut stream, 200, &sanitized, head_only);
+    }
+
+    let mut out = Vec::new();
+    let routed = route_request(&mut out, "GET", path, &req.query, &req.headers, "", state);
+    if let Some(split) = out.windows(4).position(|w| w == b"\r\n\r\n") {
+        let head = &out[..split];
+        let body = &out[split + 4..];
+        let mut patched = Vec::with_capacity(head.len() + GATEWAY_HEADERS.len() + 4 + body.len());
+        patched.extend_from_slice(head);
+        patched.extend_from_slice(b"\r\n");
+        patched.extend_from_slice(GATEWAY_HEADERS.as_bytes());
+        patched.extend_from_slice(b"\r\n");
+        if !head_only {
+            patched.extend_from_slice(body);
+        }
+        stream.write_all(&patched).map_err(|e| e.to_string())?;
+    } else {
+        stream.write_all(&out).map_err(|e| e.to_string())?;
+    }
+    routed
+}
+
 pub fn serve_http_blocking(
     listener: TcpListener,
     state: Arc<Mutex<NodeState>>,
@@ -2225,6 +2413,7 @@ fn write_response_with_headers<W: Write>(
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        405 => "Method Not Allowed",
         413 => "Payload Too Large",
         503 => "Service Unavailable",
         _ => "Response",
@@ -2555,6 +2744,97 @@ mod tests {
         );
 
         drop(_stalled_stream);
+        handle.join().unwrap();
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn gateway_listener_enforces_bearer_auth_blocks_mutations_and_sanitizes_state() {
+        assert!(validate_gateway_token("short").is_err());
+        assert!(validate_gateway_token("super-secret-gateway-token-12345").is_ok());
+
+        let tmp_dir = env::temp_dir().join(format!("dialtone-gw-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let cfg = IrohTransportConfig::local_offline();
+        let ep_addr = EndpointAddr::new(SecretKey::generate().public());
+        let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-test-gw");
+
+        let mut seeded = NodeState::new_live(
+            "metal-gw-01",
+            "hub",
+            &addr.to_string(),
+            Blobs::open_blocking(&tmp_dir).unwrap(),
+            diag,
+        );
+        seeded.mesh_config.secret_key = Some("dt-must-never-leak-secret".to_string());
+        let state = Arc::new(Mutex::new(seeded));
+
+        let token = "super-secret-gateway-token-12345".to_string();
+        let state_bg = state.clone();
+        let token_bg = token.clone();
+        let handle = thread::spawn(move || {
+            serve_gateway_http_blocking(listener, state_bg, token_bg, Some(7)).unwrap();
+        });
+
+        // 1. Missing Bearer token -> 401
+        let r1 = raw_http_request(
+            addr,
+            "GET /api/mesh HTTP/1.1\r\nHost: metal.dialtone.earth\r\n\r\n",
+        );
+        assert!(r1.starts_with("HTTP/1.1 401"), "got: {r1}");
+
+        // 2. Wrong Bearer token -> 401
+        let r2 = raw_http_request(
+            addr,
+            "GET /api/mesh HTTP/1.1\r\nHost: metal.dialtone.earth\r\nAuthorization: Bearer wrong-token\r\n\r\n",
+        );
+        assert!(r2.starts_with("HTTP/1.1 401"), "got: {r2}");
+
+        // 3. POST mutation -> 405 Method Not Allowed (even with valid token)
+        let r3 = raw_http_request(
+            addr,
+            &format!("POST /api/exec HTTP/1.1\r\nHost: metal.dialtone.earth\r\nAuthorization: Bearer {token}\r\nContent-Length: 2\r\n\r\n{{}}"),
+        );
+        assert!(r3.starts_with("HTTP/1.1 405"), "got: {r3}");
+
+        // 4. Non-allowlisted GET route (HUD / config) -> 404 Not Found
+        let r4 = raw_http_request(
+            addr,
+            &format!("GET /api/config HTTP/1.1\r\nHost: metal.dialtone.earth\r\nAuthorization: Bearer {token}\r\n\r\n"),
+        );
+        assert!(r4.starts_with("HTTP/1.1 404"), "got: {r4}");
+
+        // 5. Authorized GET /api/mesh with external Host header (Cloudflare Tunnel) -> 200 OK
+        let r5 = raw_http_request(
+            addr,
+            &format!("GET /api/mesh HTTP/1.1\r\nHost: metal.dialtone.earth\r\nAuthorization: Bearer {token}\r\n\r\n"),
+        );
+        assert!(r5.starts_with("HTTP/1.1 200"), "got: {r5}");
+        assert!(r5.contains("Cache-Control: private, no-store"));
+        assert!(r5.contains("\"nodes\""));
+
+        // 6. Authorized GET /api/state -> 200 OK sanitized (no mesh_config, no secret)
+        let r6 = raw_http_request(
+            addr,
+            &format!("GET /api/state HTTP/1.1\r\nHost: metal.dialtone.earth\r\nAuthorization: Bearer {token}\r\n\r\n"),
+        );
+        assert!(r6.starts_with("HTTP/1.1 200"), "got: {r6}");
+        assert!(!r6.contains("mesh_config"), "mesh_config leaked: {r6}");
+        assert!(!r6.contains("dt-must-never-leak-secret"), "secret leaked");
+        assert!(r6.contains("\"node\":\"metal-gw-01\""));
+
+        // 7. Authorized HEAD /api/mesh -> 200 OK with empty body
+        let r7 = raw_http_request(
+            addr,
+            &format!("HEAD /api/mesh HTTP/1.1\r\nHost: metal.dialtone.earth\r\nAuthorization: Bearer {token}\r\n\r\n"),
+        );
+        assert!(r7.starts_with("HTTP/1.1 200"), "got: {r7}");
+        let body_part = r7.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+        assert!(body_part.is_empty(), "HEAD body not empty: {body_part}");
+
         handle.join().unwrap();
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
