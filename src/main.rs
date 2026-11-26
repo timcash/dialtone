@@ -69,6 +69,7 @@ fn print_usage() {
          \x20 shell kill <name> [--node <peer>] Stop a running terminal session\n\
          \x20 devices [--json]         List the devices connected to this machine (cameras, mics, keyboards, ...)\n\
          \x20 status                   Print this node's NodeId and transport report\n\
+         \x20 <plugin> [args...]       Run an installed plugin binary from ~/.dialtone/plugins/<plugin>/\n\
          \x20 help                     Show this help\n\n\
          flags:\n\
          \x20 --node <name>            Node name (default: saved config or hostname)\n\
@@ -130,6 +131,7 @@ struct CliOptions {
     exec_command: Vec<String>,
     plugin_subcmd: String,
     plugin_name: Option<String>,
+    plugin_args: Vec<String>,
     plugin_ticket: Option<String>,
     plugin_file: Option<String>,
     plugin_repo: Option<String>,
@@ -201,6 +203,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         exec_command: Vec::new(),
         plugin_subcmd: "list".to_string(),
         plugin_name: None,
+        plugin_args: Vec::new(),
         plugin_ticket: None,
         plugin_file: None,
         plugin_repo: None,
@@ -538,6 +541,12 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                     && !other.starts_with('-') =>
             {
                 opts.plugin_name = Some(other.to_string());
+            }
+            other if !action_set && !other.starts_with('-') => {
+                opts.action = "plugin-dispatch".to_string();
+                opts.plugin_name = Some(other.to_string());
+                opts.plugin_args = args[idx + 1..].to_vec();
+                break;
             }
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -2591,6 +2600,36 @@ async fn main() {
             );
         }),
         "up" => run_node(opts).await,
+        "plugin-dispatch" => {
+            let name = opts.plugin_name.as_deref().unwrap_or("");
+            let state_dir = dialtone::mesh::default_state_dir();
+            let plugins_dir = dialtone::plugin::default_plugins_dir();
+            let cfg = load_mesh_config(&default_config_path());
+            let listen = match (&cfg.listen_addr, opts.listen_explicit) {
+                (Some(saved), false) => saved.clone(),
+                _ => opts.listen.clone(),
+            };
+            let api_url = if listen.starts_with("http://") || listen.starts_with("https://") {
+                listen
+            } else {
+                format!("http://{listen}")
+            };
+            let ctx = dialtone::plugin::PluginDispatchContext {
+                state_dir,
+                plugins_dir,
+                api_url,
+                node_name: opts.node.clone(),
+            };
+            match dialtone::plugin::dispatch_plugin(&ctx, name, &opts.plugin_args) {
+                Ok(0) => Ok(()),
+                Ok(code) => std::process::exit(code),
+                Err(dialtone::plugin::PluginDispatchError::NotFound(msg)) => {
+                    eprintln!("dialtone: {msg}");
+                    std::process::exit(2);
+                }
+                Err(dialtone::plugin::PluginDispatchError::Refused(msg)) => Err(msg),
+            }
+        }
         other => Err(format!("unsupported action {other:?}")),
     };
 

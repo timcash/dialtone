@@ -6,9 +6,12 @@
 //! `<state_dir>/plugins/<name>/manifest.json`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::blob::{digest_of, normalize_digest, Blobs, Store};
 use crate::mesh::default_state_dir;
@@ -17,6 +20,31 @@ use crate::now_unix;
 pub const PLUGIN_MANIFEST_SCHEMA: &str = "dialtone.plugin.v1";
 pub const SHELL_PLUGIN_NAME: &str = "shell";
 pub const MAX_PLUGIN_BYTES: usize = 32 * 1024 * 1024;
+
+/// Built-in Dialtone CLI subcommands that always take precedence over installed plugins.
+pub const BUILTIN_COMMANDS: &[&str] = &[
+    "up",
+    "join",
+    "secret",
+    "allowlist",
+    "blob",
+    "link",
+    "invite",
+    "daemon",
+    "probe",
+    "exec",
+    "install",
+    "plugin",
+    "shell",
+    "devices",
+    "status",
+    "help",
+];
+
+pub fn is_builtin_command(cmd: &str) -> bool {
+    let lower = cmd.trim().to_ascii_lowercase();
+    BUILTIN_COMMANDS.contains(&lower.as_str())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifest {
@@ -30,6 +58,8 @@ pub struct PluginManifest {
     pub blob_digest: String,
     pub blake3_hash: String,
     pub bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ticket_uri: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -188,6 +218,7 @@ pub fn install_plugin_from_bytes(
         blob_digest: digest,
         blake3_hash: hash.to_string(),
         bytes: bytes.len() as u64,
+        entrypoint: None,
         ticket_uri,
         source_repo: None,
         installed_at_unix: now_unix(),
@@ -442,6 +473,7 @@ pub fn install_plugin_from_ticket(
         blob_digest: report.digest,
         blake3_hash: report.blake3_hash,
         bytes: report.bytes,
+        entrypoint: None,
         ticket_uri: Some(ticket_uri.to_string()),
         source_repo: None,
         installed_at_unix: now_unix(),
@@ -627,6 +659,285 @@ pub fn remove_installed_plugin(plugins_dir: &Path, name: &str) -> Result<(), Str
         .map_err(|e| format!("remove plugin '{canonical}' at {}: {e}", dir.display()))
 }
 
+/// Runtime context passed into a dispatched plugin process via environment variables.
+/// Secrets are never placed in argv or forwarded via env.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginDispatchContext {
+    pub state_dir: PathBuf,
+    pub plugins_dir: PathBuf,
+    pub api_url: String,
+    pub node_name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedPlugin {
+    pub manifest: PluginManifest,
+    pub binary_path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PluginDispatchError {
+    NotFound(String),
+    Refused(String),
+}
+
+impl std::fmt::Display for PluginDispatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PluginDispatchError::NotFound(msg) | PluginDispatchError::Refused(msg) => {
+                f.write_str(msg)
+            }
+        }
+    }
+}
+
+/// List canonical names of plugins with valid manifests under `plugins_dir` without touching
+/// the blob store (safe to call while the `dialtone up` daemon holds `store.lock`).
+pub fn list_plugin_names(plugins_dir: &Path) -> Vec<String> {
+    let Ok(dir) = fs::read_dir(plugins_dir) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for entry in dir.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if load_plugin_manifest(plugins_dir, &name).is_ok() {
+            names.push(name);
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn unknown_command_message(plugins_dir: &Path, cmd: &str) -> String {
+    let installed = list_plugin_names(plugins_dir);
+    if installed.is_empty() {
+        format!(
+            "unknown command '{cmd}' (no plugins installed; install one with 'dialtone install <plugin>')"
+        )
+    } else {
+        format!(
+            "unknown command '{cmd}' (installed plugins: {})",
+            installed.join(", ")
+        )
+    }
+}
+
+fn safe_relative_entrypoint(raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("empty plugin entrypoint".to_string());
+    }
+    let rel = PathBuf::from(trimmed);
+    if rel.is_absolute() {
+        return Err(format!("plugin entrypoint {raw:?} must be relative"));
+    }
+    for comp in rel.components() {
+        match comp {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "plugin entrypoint {raw:?} cannot escape the plugin directory"
+                ));
+            }
+        }
+    }
+    Ok(rel)
+}
+
+fn sha256_file_with_len(path: &Path) -> Result<(String, u64), String> {
+    let mut file = fs::File::open(path)
+        .map_err(|e| format!("open plugin binary {}: {e}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("read plugin binary {}: {e}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        total = total.saturating_add(n as u64);
+    }
+    Ok((format!("sha256:{}", hex::encode(hasher.finalize())), total))
+}
+
+fn locate_plugin_binary(
+    plugins_dir: &Path,
+    manifest: &PluginManifest,
+) -> Result<PathBuf, PluginDispatchError> {
+    let plugin_dir = plugins_dir.join(&manifest.name);
+    let ext = std::env::consts::EXE_SUFFIX;
+
+    if let Some(ref ep) = manifest.entrypoint {
+        let rel = safe_relative_entrypoint(ep).map_err(PluginDispatchError::Refused)?;
+        let candidate = plugin_dir.join(&rel);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        if !ext.is_empty() && !ep.ends_with(ext) {
+            let with_ext = plugin_dir.join(format!("{ep}{ext}"));
+            if with_ext.is_file() {
+                return Ok(with_ext);
+            }
+        }
+        return Err(PluginDispatchError::Refused(format!(
+            "plugin '{}' entrypoint {} not found under {}",
+            manifest.name,
+            rel.display(),
+            plugin_dir.display()
+        )));
+    }
+
+    let short_hex = manifest
+        .blob_digest
+        .strip_prefix("sha256:")
+        .unwrap_or(&manifest.blob_digest);
+    let short = &short_hex[..short_hex.len().min(12)];
+
+    let candidates = [
+        plugin_dir.join(format!("dialtone-{}{ext}", manifest.name)),
+        plugin_dir.join(format!("{}{ext}", manifest.name)),
+        plugin_dir
+            .join("bin")
+            .join(format!("dialtone-{}-{short}{ext}", manifest.name)),
+    ];
+    for candidate in &candidates {
+        if candidate.is_file() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    Err(PluginDispatchError::Refused(format!(
+        "plugin '{}' is installed in manifest.json but no executable binary was found in {} (expected dialtone-{}{ext})",
+        manifest.name,
+        plugin_dir.display(),
+        manifest.name
+    )))
+}
+
+/// Resolve an installed plugin binary from `<plugins_dir>/<name>/` and verify its SHA-256
+/// digest and byte size against `manifest.json` before execution.
+pub fn resolve_plugin_binary(
+    plugins_dir: &Path,
+    raw_name: &str,
+) -> Result<ResolvedPlugin, PluginDispatchError> {
+    if is_builtin_command(raw_name) {
+        return Err(PluginDispatchError::Refused(format!(
+            "'{raw_name}' is a built-in dialtone command and cannot be shadowed by a plugin"
+        )));
+    }
+    let Ok(canonical) = validate_plugin_name(raw_name) else {
+        return Err(PluginDispatchError::NotFound(unknown_command_message(
+            plugins_dir,
+            raw_name,
+        )));
+    };
+    let manifest_file = manifest_path(plugins_dir, &canonical);
+    if !manifest_file.is_file() {
+        return Err(PluginDispatchError::NotFound(unknown_command_message(
+            plugins_dir,
+            raw_name,
+        )));
+    }
+    let manifest = load_plugin_manifest(plugins_dir, &canonical)
+        .map_err(PluginDispatchError::Refused)?;
+    if manifest.kind == "builtin-protocol" {
+        return Err(PluginDispatchError::Refused(format!(
+            "plugin '{canonical}' is a built-in protocol plugin, not a standalone executable"
+        )));
+    }
+
+    let binary_path = locate_plugin_binary(plugins_dir, &manifest)?;
+    let expected =
+        normalize_digest(&manifest.blob_digest).map_err(PluginDispatchError::Refused)?;
+    let (observed, observed_bytes) =
+        sha256_file_with_len(&binary_path).map_err(PluginDispatchError::Refused)?;
+    if observed != expected {
+        return Err(PluginDispatchError::Refused(format!(
+            "refusing to execute plugin '{canonical}': digest mismatch for {} (expected {expected}, observed {observed})",
+            binary_path.display()
+        )));
+    }
+    if manifest.bytes > 0 && observed_bytes != manifest.bytes {
+        return Err(PluginDispatchError::Refused(format!(
+            "refusing to execute plugin '{canonical}': size mismatch for {} (expected {} bytes, observed {observed_bytes} bytes)",
+            binary_path.display(),
+            manifest.bytes
+        )));
+    }
+
+    Ok(ResolvedPlugin {
+        manifest,
+        binary_path,
+    })
+}
+
+/// Construct the `Command` to execute a verified plugin with passthrough args, inherited stdio,
+/// safe Dialtone context env vars, and node secrets stripped.
+pub fn build_plugin_command(
+    ctx: &PluginDispatchContext,
+    resolved: &ResolvedPlugin,
+    args: &[String],
+) -> Command {
+    let mut cmd = Command::new(&resolved.binary_path);
+    cmd.args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    for secret_var in [
+        "DIALTONE_SECRET",
+        "DIALTONE_SECRET_KEY",
+        "DIALTONE_GATEWAY_TOKEN",
+        "MESH_ORIGIN_TOKEN",
+    ] {
+        cmd.env_remove(secret_var);
+    }
+    cmd.env("DIALTONE_HOME", &ctx.state_dir)
+        .env("DIALTONE_STATE_DIR", &ctx.state_dir)
+        .env("DIALTONE_API", &ctx.api_url)
+        .env("DIALTONE_NODE", &ctx.node_name)
+        .env("DIALTONE_PLUGIN_NAME", &resolved.manifest.name)
+        .env(
+            "DIALTONE_PLUGIN_DIR",
+            ctx.plugins_dir.join(&resolved.manifest.name),
+        );
+    cmd
+}
+
+/// Verify and execute `<plugins_dir>/<name>/...` passing through args, stdio, and exit code.
+pub fn dispatch_plugin(
+    ctx: &PluginDispatchContext,
+    name: &str,
+    args: &[String],
+) -> Result<i32, PluginDispatchError> {
+    let resolved = resolve_plugin_binary(&ctx.plugins_dir, name)?;
+    let mut cmd = build_plugin_command(ctx, &resolved, args);
+    let status = cmd.status().map_err(|e| {
+        PluginDispatchError::Refused(format!(
+            "failed to execute plugin '{}' ({}): {e}",
+            resolved.manifest.name,
+            resolved.binary_path.display()
+        ))
+    })?;
+    if let Some(code) = status.code() {
+        return Ok(code);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            return Ok(128 + sig);
+        }
+    }
+    Ok(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,5 +1108,256 @@ mod tests {
         blobs_b.close_blocking();
         let _ = fs::remove_dir_all(&root_a);
         let _ = fs::remove_dir_all(&root_b);
+    }
+
+    fn write_test_plugin(
+        plugins_dir: &Path,
+        name: &str,
+        script_unix: &str,
+        script_windows: &str,
+        entrypoint_override: Option<&str>,
+    ) -> (PathBuf, PluginManifest) {
+        let dir = plugins_dir.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        let (filename, body, entrypoint) = if cfg!(windows) {
+            let fname = format!("dialtone-{name}.cmd");
+            let ep = entrypoint_override
+                .map(str::to_string)
+                .or_else(|| Some(fname.clone()));
+            (fname, script_windows.as_bytes().to_vec(), ep)
+        } else {
+            let fname = format!("dialtone-{name}");
+            (
+                fname,
+                script_unix.as_bytes().to_vec(),
+                entrypoint_override.map(str::to_string),
+            )
+        };
+        let bin_path = dir.join(&filename);
+        fs::write(&bin_path, &body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let manifest = PluginManifest {
+            schema: PLUGIN_MANIFEST_SCHEMA.to_string(),
+            name: name.to_string(),
+            version: "0.1.0".to_string(),
+            kind: "blob-binary".to_string(),
+            description: format!("test plugin {name}"),
+            protocols: Vec::new(),
+            blob_digest: digest_of(&body),
+            blake3_hash: "00".repeat(32),
+            bytes: body.len() as u64,
+            entrypoint,
+            ticket_uri: None,
+            source_repo: None,
+            installed_at_unix: now_unix(),
+        };
+        write_manifest(plugins_dir, &manifest).unwrap();
+        (bin_path, manifest)
+    }
+
+    #[test]
+    fn dispatch_found_verifies_digest_and_passes_args_and_env() {
+        let (root, plugins_dir, blobs) = temp_plugin_env("dispatch-found");
+        blobs.close_blocking();
+
+        write_test_plugin(
+            &plugins_dir,
+            "task",
+            "#!/bin/sh\nprintf 'NODE=%s\\nAPI=%s\\nHOME=%s\\nNAME=%s\\nSECRET=%s\\nARGS=%s\\n' \"$DIALTONE_NODE\" \"$DIALTONE_API\" \"$DIALTONE_HOME\" \"$DIALTONE_PLUGIN_NAME\" \"$DIALTONE_SECRET\" \"$*\"\n",
+            "@echo off\r\necho NODE=%DIALTONE_NODE%\r\necho API=%DIALTONE_API%\r\necho HOME=%DIALTONE_HOME%\r\necho NAME=%DIALTONE_PLUGIN_NAME%\r\necho SECRET=%DIALTONE_SECRET%\r\necho ARGS=%*\r\n",
+            None,
+        );
+
+        let ctx = PluginDispatchContext {
+            state_dir: root.clone(),
+            plugins_dir: plugins_dir.clone(),
+            api_url: "http://127.0.0.1:8788".to_string(),
+            node_name: "rosie".to_string(),
+        };
+        let resolved = resolve_plugin_binary(&plugins_dir, "task").unwrap();
+        let args = vec![
+            "list".to_string(),
+            "--json".to_string(),
+            "--help".to_string(),
+            "hello world".to_string(),
+        ];
+        let mut cmd = build_plugin_command(&ctx, &resolved, &args);
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let out = cmd.output().expect("run dispatched plugin");
+        assert!(out.status.success(), "stderr={}", String::from_utf8_lossy(&out.stderr));
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("NODE=rosie"), "{stdout}");
+        assert!(stdout.contains("API=http://127.0.0.1:8788"), "{stdout}");
+        assert!(
+            stdout.contains(&format!("HOME={}", root.display())),
+            "{stdout}"
+        );
+        assert!(stdout.contains("NAME=task"), "{stdout}");
+        assert!(stdout.contains("SECRET=\n") || stdout.contains("SECRET=\r\n"), "{stdout}");
+        assert!(
+            stdout.contains("ARGS=list --json --help hello world"),
+            "{stdout}"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dispatch_not_found_lists_installed_plugins() {
+        let (root, plugins_dir, blobs) = temp_plugin_env("dispatch-not-found");
+        blobs.close_blocking();
+
+        let empty_err = resolve_plugin_binary(&plugins_dir, "missing").unwrap_err();
+        match empty_err {
+            PluginDispatchError::NotFound(msg) => {
+                assert!(msg.contains("unknown command 'missing'"), "{msg}");
+                assert!(msg.contains("no plugins installed"), "{msg}");
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+
+        write_test_plugin(&plugins_dir, "task", "#!/bin/sh\nexit 0\n", "@echo off\r\nexit /b 0\r\n", None);
+        write_test_plugin(&plugins_dir, "alpha", "#!/bin/sh\nexit 0\n", "@echo off\r\nexit /b 0\r\n", None);
+
+        let err = resolve_plugin_binary(&plugins_dir, "missing").unwrap_err();
+        match err {
+            PluginDispatchError::NotFound(msg) => {
+                assert!(msg.contains("unknown command 'missing'"), "{msg}");
+                assert!(msg.contains("alpha, task"), "{msg}");
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dispatch_refuses_digest_mismatch_and_size_mismatch() {
+        let (root, plugins_dir, blobs) = temp_plugin_env("dispatch-tamper");
+        blobs.close_blocking();
+
+        let (bin_path, mut manifest) = write_test_plugin(
+            &plugins_dir,
+            "task",
+            "#!/bin/sh\necho ok\n",
+            "@echo off\r\necho ok\r\n",
+            None,
+        );
+
+        // Tamper the binary on disk after manifest write.
+        fs::write(&bin_path, b"#!/bin/sh\necho tampered\n").unwrap();
+        let err = resolve_plugin_binary(&plugins_dir, "task").unwrap_err();
+        match err {
+            PluginDispatchError::Refused(msg) => {
+                assert!(msg.contains("digest mismatch"), "{msg}");
+            }
+            other => panic!("expected Refused on digest mismatch, got {other:?}"),
+        }
+
+        // Restore bytes matching digest, but tamper expected byte size in manifest.
+        let bytes = b"#!/bin/sh\necho ok\n";
+        fs::write(&bin_path, bytes).unwrap();
+        manifest.blob_digest = digest_of(bytes);
+        manifest.bytes = (bytes.len() as u64) + 10;
+        write_manifest(&plugins_dir, &manifest).unwrap();
+        let size_err = resolve_plugin_binary(&plugins_dir, "task").unwrap_err();
+        match size_err {
+            PluginDispatchError::Refused(msg) => {
+                assert!(msg.contains("size mismatch"), "{msg}");
+            }
+            other => panic!("expected Refused on size mismatch, got {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dispatch_builtin_commands_always_win_over_plugin_names() {
+        let (root, plugins_dir, blobs) = temp_plugin_env("dispatch-builtin");
+        blobs.close_blocking();
+
+        for builtin in ["status", "exec", "plugin", "install", "shell", "up", "help"] {
+            assert!(is_builtin_command(builtin), "missing builtin {builtin}");
+            assert!(
+                is_builtin_command(&builtin.to_ascii_uppercase()),
+                "case-insensitive check failed for {builtin}"
+            );
+        }
+        assert!(!is_builtin_command("task"));
+
+        // Even if a valid plugin directory named "status" exists, dispatch refuses it.
+        write_test_plugin(
+            &plugins_dir,
+            "status",
+            "#!/bin/sh\necho hijacked\n",
+            "@echo off\r\necho hijacked\r\n",
+            None,
+        );
+        let err = resolve_plugin_binary(&plugins_dir, "status").unwrap_err();
+        match err {
+            PluginDispatchError::Refused(msg) => {
+                assert!(msg.contains("built-in"), "{msg}");
+            }
+            other => panic!("expected Refused for builtin name, got {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dispatch_passes_through_exit_code() {
+        let (root, plugins_dir, blobs) = temp_plugin_env("dispatch-exit");
+        blobs.close_blocking();
+
+        write_test_plugin(
+            &plugins_dir,
+            "exiter",
+            "#!/bin/sh\nexit \"$1\"\n",
+            "@echo off\r\nexit /b %1\r\n",
+            None,
+        );
+        let ctx = PluginDispatchContext {
+            state_dir: root.clone(),
+            plugins_dir: plugins_dir.clone(),
+            api_url: "http://127.0.0.1:8788".to_string(),
+            node_name: "rosie".to_string(),
+        };
+        assert_eq!(
+            dispatch_plugin(&ctx, "exiter", &["0".to_string()]).unwrap(),
+            0
+        );
+        assert_eq!(
+            dispatch_plugin(&ctx, "exiter", &["42".to_string()]).unwrap(),
+            42
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dispatch_rejects_entrypoint_path_traversal() {
+        let (root, plugins_dir, blobs) = temp_plugin_env("dispatch-traversal");
+        blobs.close_blocking();
+
+        write_test_plugin(
+            &plugins_dir,
+            "evil",
+            "#!/bin/sh\nexit 0\n",
+            "@echo off\r\nexit /b 0\r\n",
+            Some("../outside"),
+        );
+        let err = resolve_plugin_binary(&plugins_dir, "evil").unwrap_err();
+        match err {
+            PluginDispatchError::Refused(msg) => {
+                assert!(msg.contains("cannot escape"), "{msg}");
+            }
+            other => panic!("expected Refused on traversal, got {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(&root);
     }
 }
