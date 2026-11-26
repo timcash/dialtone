@@ -1,6 +1,6 @@
 [package]
 name = "dialtone"
-version = "0.5.5"
+version = "0.5.6"
 edition = "2021"
 description = "Dialtone — Single-binary Iroh 1.5 mesh control plane, content-addressed deployment, process supervision, and operational evidence runtime"
 license = "MIT OR Apache-2.0"
