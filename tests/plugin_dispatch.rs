@@ -87,7 +87,7 @@ fn cli_dispatches_verified_plugin_with_args_env_and_exit_code() {
         dir.path(),
         &[
             "--node",
-            "rosie",
+            "alpha",
             "--listen",
             "127.0.0.1:9876",
             "demo",
@@ -105,15 +105,12 @@ fn cli_dispatches_verified_plugin_with_args_env_and_exit_code() {
         "{stdout}"
     );
     assert!(stdout.contains("API=http://127.0.0.1:9876"), "{stdout}");
-    assert!(stdout.contains("NODE=rosie"), "{stdout}");
+    assert!(stdout.contains("NODE=alpha"), "{stdout}");
     assert!(
         !stdout.contains("ShouldNotLeakToPlugin"),
         "secret leaked to plugin env: {stdout}"
     );
-    assert!(
-        stdout.contains("ARGS=subcmd --help --flag val"),
-        "{stdout}"
-    );
+    assert!(stdout.contains("ARGS=subcmd --help --flag val"), "{stdout}");
 }
 
 #[test]

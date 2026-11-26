@@ -749,8 +749,8 @@ fn safe_relative_entrypoint(raw: &str) -> Result<PathBuf, String> {
 }
 
 fn sha256_file_with_len(path: &Path) -> Result<(String, u64), String> {
-    let mut file = fs::File::open(path)
-        .map_err(|e| format!("open plugin binary {}: {e}", path.display()))?;
+    let mut file =
+        fs::File::open(path).map_err(|e| format!("open plugin binary {}: {e}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     let mut total: u64 = 0;
@@ -845,8 +845,8 @@ pub fn resolve_plugin_binary(
             raw_name,
         )));
     }
-    let manifest = load_plugin_manifest(plugins_dir, &canonical)
-        .map_err(PluginDispatchError::Refused)?;
+    let manifest =
+        load_plugin_manifest(plugins_dir, &canonical).map_err(PluginDispatchError::Refused)?;
     if manifest.kind == "builtin-protocol" {
         return Err(PluginDispatchError::Refused(format!(
             "plugin '{canonical}' is a built-in protocol plugin, not a standalone executable"
@@ -854,8 +854,7 @@ pub fn resolve_plugin_binary(
     }
 
     let binary_path = locate_plugin_binary(plugins_dir, &manifest)?;
-    let expected =
-        normalize_digest(&manifest.blob_digest).map_err(PluginDispatchError::Refused)?;
+    let expected = normalize_digest(&manifest.blob_digest).map_err(PluginDispatchError::Refused)?;
     let (observed, observed_bytes) =
         sha256_file_with_len(&binary_path).map_err(PluginDispatchError::Refused)?;
     if observed != expected {
@@ -1176,7 +1175,7 @@ mod tests {
             state_dir: root.clone(),
             plugins_dir: plugins_dir.clone(),
             api_url: "http://127.0.0.1:8788".to_string(),
-            node_name: "rosie".to_string(),
+            node_name: "alpha".to_string(),
         };
         let resolved = resolve_plugin_binary(&plugins_dir, "task").unwrap();
         let args = vec![
@@ -1188,16 +1187,23 @@ mod tests {
         let mut cmd = build_plugin_command(&ctx, &resolved, &args);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let out = cmd.output().expect("run dispatched plugin");
-        assert!(out.status.success(), "stderr={}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains("NODE=rosie"), "{stdout}");
+        assert!(stdout.contains("NODE=alpha"), "{stdout}");
         assert!(stdout.contains("API=http://127.0.0.1:8788"), "{stdout}");
         assert!(
             stdout.contains(&format!("HOME={}", root.display())),
             "{stdout}"
         );
         assert!(stdout.contains("NAME=task"), "{stdout}");
-        assert!(stdout.contains("SECRET=\n") || stdout.contains("SECRET=\r\n"), "{stdout}");
+        assert!(
+            stdout.contains("SECRET=\n") || stdout.contains("SECRET=\r\n"),
+            "{stdout}"
+        );
         assert!(
             stdout.contains("ARGS=list --json --help hello world"),
             "{stdout}"
@@ -1220,8 +1226,20 @@ mod tests {
             other => panic!("expected NotFound, got {other:?}"),
         }
 
-        write_test_plugin(&plugins_dir, "task", "#!/bin/sh\nexit 0\n", "@echo off\r\nexit /b 0\r\n", None);
-        write_test_plugin(&plugins_dir, "alpha", "#!/bin/sh\nexit 0\n", "@echo off\r\nexit /b 0\r\n", None);
+        write_test_plugin(
+            &plugins_dir,
+            "task",
+            "#!/bin/sh\nexit 0\n",
+            "@echo off\r\nexit /b 0\r\n",
+            None,
+        );
+        write_test_plugin(
+            &plugins_dir,
+            "alpha",
+            "#!/bin/sh\nexit 0\n",
+            "@echo off\r\nexit /b 0\r\n",
+            None,
+        );
 
         let err = resolve_plugin_binary(&plugins_dir, "missing").unwrap_err();
         match err {
@@ -1324,7 +1342,7 @@ mod tests {
             state_dir: root.clone(),
             plugins_dir: plugins_dir.clone(),
             api_url: "http://127.0.0.1:8788".to_string(),
-            node_name: "rosie".to_string(),
+            node_name: "alpha".to_string(),
         };
         assert_eq!(
             dispatch_plugin(&ctx, "exiter", &["0".to_string()]).unwrap(),

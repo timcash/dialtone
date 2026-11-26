@@ -163,7 +163,7 @@ Today, long-running plugin daemons such as `dialtone-task serve` use per-OS unit
 
 ### Audit of Login Services, Update Loops, and Watchdogs
 
-We audited every supervisor, service definition, updater, and watchdog in the codebase and on `rosie` to confirm whether any of them notice the binary change on disk and trigger a daemon restart:
+We audited every supervisor, service definition, updater, and watchdog in the codebase and on a live macOS host to confirm whether any of them notice the binary change on disk and trigger a daemon restart:
 
 | Component | Behavior when `~/.dialtone/bin/dialtone` is replaced on disk | Triggers restart? |
 | --- | --- | --- |
