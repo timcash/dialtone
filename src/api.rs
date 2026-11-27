@@ -210,6 +210,15 @@ pub struct NodeState {
     /// Long-running cross-OS terminal session manager for the `shell` plugin (`dialtone/shell/1`).
     #[serde(skip)]
     pub shell_manager: Arc<crate::shell::ShellManager>,
+    /// Built-in durable CRDT channel log store for the active channel (`dialtone log`).
+    #[serde(skip)]
+    pub channel_log: Option<Arc<Mutex<crate::channel_log::ChannelLogStore>>>,
+    /// Outbound channel log broadcast queue drained by the Mesh actor.
+    #[serde(skip)]
+    pub channel_log_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::channel_log::ChannelLogEntry>>,
+    /// Node's Ed25519 signing key (used to sign channel log entries posted via local API).
+    #[serde(skip)]
+    pub node_key: Option<iroh::SecretKey>,
 }
 
 impl NodeState {
@@ -685,6 +694,9 @@ impl NodeState {
             links: None,
             joins: None,
             shell_manager: Arc::new(crate::shell::ShellManager::new(node.to_string())),
+            channel_log: None,
+            channel_log_tx: None,
+            node_key: None,
         };
         st.record_event(
             "mesh.boot",
@@ -1861,49 +1873,240 @@ fn route_request(
         }
         ("POST", "/api/blob") | ("POST", "/api/blob/share") => {
             let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
-            let b64 = parsed
-                .get("bytes_base64")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
             let expected_sha = parsed
                 .get("digest")
                 .and_then(Value::as_str)
                 .map(String::from);
-            match crate::base64_decode(b64) {
-                Ok(raw_bytes) => {
-                    let maybe_bridge = st.store.clone();
-                    let blobs = st.blobs.clone();
-                    let node_name = st.node.clone();
-                    drop(st);
-                    if let Some(bridge) = maybe_bridge {
-                        match bridge.share_blob(&raw_bytes, expected_sha.as_deref()) {
-                            Ok(rep) => write_json(
-                                &mut stream,
-                                200,
-                                &json!({
-                                    "status": rep.status,
-                                    "node": node_name,
-                                    "digest": rep.digest,
-                                    "blake3_hash": rep.blake3_hash,
-                                    "bytes": rep.bytes,
-                                    "provider_node_id": rep.provider_node_id,
-                                    "ticket_uri": rep.ticket_uri
-                                }),
-                            ),
-                            Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-                        }
-                    } else {
-                        match blobs.put_blocking(&raw_bytes, expected_sha.as_deref()) {
-                            Ok(sha) => write_json(
-                                &mut stream,
-                                200,
-                                &json!({ "digest": sha, "bytes": raw_bytes.len() }),
-                            ),
-                            Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
-                        }
+            let file_path = parsed
+                .get("file_path")
+                .or_else(|| parsed.get("path"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from);
+            let maybe_bridge = st.store.clone();
+            let blobs = st.blobs.clone();
+            let node_name = st.node.clone();
+            drop(st);
+
+            if let Some(ref fpath) = file_path {
+                if let Some(bridge) = maybe_bridge {
+                    match bridge.share_blob_file(fpath, expected_sha.as_deref()) {
+                        Ok(rep) => write_json(
+                            &mut stream,
+                            200,
+                            &json!({
+                                "status": rep.status,
+                                "node": node_name,
+                                "digest": rep.digest,
+                                "blake3_hash": rep.blake3_hash,
+                                "bytes": rep.bytes,
+                                "provider_node_id": rep.provider_node_id,
+                                "ticket_uri": rep.ticket_uri
+                            }),
+                        ),
+                        Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
+                    }
+                } else {
+                    match blobs.put_file_blocking(fpath, expected_sha.as_deref()) {
+                        Ok((sha, size)) => write_json(
+                            &mut stream,
+                            200,
+                            &json!({ "digest": sha, "bytes": size }),
+                        ),
+                        Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
                     }
                 }
-                Err(err) => write_json(&mut stream, 400, &json!({ "error": err.to_string() })),
+            } else {
+                let b64 = parsed
+                    .get("bytes_base64")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                match crate::base64_decode(b64) {
+                    Ok(raw_bytes) => {
+                        if let Some(bridge) = maybe_bridge {
+                            match bridge.share_blob(&raw_bytes, expected_sha.as_deref()) {
+                                Ok(rep) => write_json(
+                                    &mut stream,
+                                    200,
+                                    &json!({
+                                        "status": rep.status,
+                                        "node": node_name,
+                                        "digest": rep.digest,
+                                        "blake3_hash": rep.blake3_hash,
+                                        "bytes": rep.bytes,
+                                        "provider_node_id": rep.provider_node_id,
+                                        "ticket_uri": rep.ticket_uri
+                                    }),
+                                ),
+                                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
+                            }
+                        } else {
+                            match blobs.put_blocking(&raw_bytes, expected_sha.as_deref()) {
+                                Ok(sha) => write_json(
+                                    &mut stream,
+                                    200,
+                                    &json!({ "digest": sha, "bytes": raw_bytes.len() }),
+                                ),
+                                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
+                            }
+                        }
+                    }
+                    Err(err) => write_json(&mut stream, 400, &json!({ "error": err.to_string() })),
+                }
+            }
+        }
+        ("GET", "/api/channel/log") => {
+            let requested_channel = query
+                .get("channel")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let filter = crate::channel_log::ChannelLogQuery {
+                source: query.get("source").cloned(),
+                task_id: query.get("task_id").cloned(),
+                since_ms: query.get("since_ms").and_then(|v| v.parse::<u64>().ok()),
+                limit: query.get("limit").and_then(|v| v.parse::<usize>().ok()),
+            };
+            let active_cid = st
+                .mesh_config
+                .active_channel_keys()
+                .map(|k| k.fingerprint())
+                .unwrap_or_else(|| st.mesh_config.channel_fingerprint.clone());
+            if let Some(ref req_cid) = requested_channel {
+                if !req_cid.eq_ignore_ascii_case(&active_cid)
+                    && !req_cid.eq_ignore_ascii_case(&st.mesh_config.channel)
+                {
+                    return write_json(
+                        &mut stream,
+                        404,
+                        &json!({
+                            "error": format!("channel '{req_cid}' is not active on this node (active: '{active_cid}')")
+                        }),
+                    );
+                }
+            }
+            let Some(log_arc) = st.channel_log.clone() else {
+                return write_json(
+                    &mut stream,
+                    200,
+                    &json!({ "channel_id": active_cid, "entries": [] }),
+                );
+            };
+            drop(st);
+            let entries = log_arc
+                .lock()
+                .map(|store| store.query(&filter))
+                .unwrap_or_default();
+            write_json(
+                &mut stream,
+                200,
+                &json!({
+                    "channel_id": active_cid,
+                    "entries": entries
+                }),
+            )
+        }
+        ("POST", "/api/channel/log") => {
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let message = parsed
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if message.is_empty() {
+                return write_json(
+                    &mut stream,
+                    400,
+                    &json!({ "error": "message is required" }),
+                );
+            }
+            let source = parsed
+                .get("source")
+                .and_then(Value::as_str)
+                .unwrap_or("plugin")
+                .trim()
+                .to_string();
+            let kind = parsed
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("event")
+                .trim()
+                .to_string();
+            let level = parsed
+                .get("level")
+                .and_then(Value::as_str)
+                .unwrap_or("info")
+                .trim()
+                .to_string();
+            let task_id = parsed
+                .get("task_id")
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let requested_channel = parsed
+                .get("channel")
+                .or_else(|| parsed.get("channel_id"))
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let active_cid = st
+                .mesh_config
+                .active_channel_keys()
+                .map(|k| k.fingerprint())
+                .unwrap_or_else(|| st.mesh_config.channel_fingerprint.clone());
+            if let Some(ref req_cid) = requested_channel {
+                if !req_cid.eq_ignore_ascii_case(&active_cid)
+                    && !req_cid.eq_ignore_ascii_case(&st.mesh_config.channel)
+                {
+                    return write_json(
+                        &mut stream,
+                        403,
+                        &json!({
+                            "error": format!("cannot write to channel '{req_cid}'; active channel is '{active_cid}'")
+                        }),
+                    );
+                }
+            }
+            let Some(log_arc) = st.channel_log.clone() else {
+                return write_json(
+                    &mut stream,
+                    503,
+                    &json!({ "error": "channel log is not initialized (join a channel first)" }),
+                );
+            };
+            let Some(node_key) = st.node_key.clone() else {
+                return write_json(
+                    &mut stream,
+                    503,
+                    &json!({ "error": "node signing key is not initialized" }),
+                );
+            };
+            let author_node = st.node.clone();
+            let log_tx = st.channel_log_tx.clone();
+            drop(st);
+            let appended = log_arc
+                .lock()
+                .map_err(|_| "channel log lock poisoned".to_string())
+                .and_then(|mut store| {
+                    store.append_local(
+                        &node_key,
+                        &author_node,
+                        &source,
+                        &kind,
+                        task_id,
+                        &level,
+                        &message,
+                    )
+                });
+            match appended {
+                Ok(entry) => {
+                    if let Some(tx) = log_tx {
+                        let _ = tx.send(entry.clone());
+                    }
+                    write_json(&mut stream, 200, &json!({ "status": "logged", "entry": entry }))
+                }
+                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
         ("POST", "/api/blob/pull") => {
@@ -2848,5 +3051,128 @@ mod tests {
         let mut out = Vec::new();
         stream.read_to_end(&mut out).unwrap();
         String::from_utf8_lossy(&out).to_string()
+    }
+
+    #[test]
+    fn post_blob_share_with_file_path_imports_8mb_file_without_http_body_limit() {
+        let tmp_dir = env::temp_dir().join(format!("dialtone-api-bigblob-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        let big_file = tmp_dir.join("payload-8mb.bin");
+        let total = 8 * 1024 * 1024 + 12345;
+        std::fs::write(&big_file, vec![0x5au8; total]).unwrap();
+        let (expected_digest, _) = crate::blob::digest_of_file(&big_file).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cfg = IrohTransportConfig::local_offline();
+        let ep_addr = EndpointAddr::new(SecretKey::generate().public());
+        let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-bigblob");
+
+        let mut seeded = NodeState::new_live(
+            "node-big",
+            "hub",
+            &addr.to_string(),
+            Blobs::open_blocking(&tmp_dir.join("blobs")).unwrap(),
+            diag,
+        );
+        seeded.api_token = "dtk-bigblob-token-0123456789abcdef".to_string();
+        let state = Arc::new(Mutex::new(seeded));
+        let state_bg = state.clone();
+        let handle = thread::spawn(move || {
+            serve_http_blocking(listener, state_bg, Some(1)).unwrap();
+        });
+
+        let body = serde_json::to_string(&json!({
+            "file_path": big_file.to_string_lossy()
+        }))
+        .unwrap();
+        let req = format!(
+            "POST /api/blob/share HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer dtk-bigblob-token-0123456789abcdef\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let resp = raw_http_request(addr, &req);
+        handle.join().unwrap();
+
+        assert!(resp.starts_with("HTTP/1.1 200 OK"), "got: {resp}");
+        assert!(resp.contains(&expected_digest), "got: {resp}");
+        assert!(resp.contains(&format!("\"bytes\":{total}")), "got: {resp}");
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn channel_log_api_appends_redacts_and_queries_scoped_by_channel() {
+        let tmp_dir = env::temp_dir().join(format!("dialtone-api-chlog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cfg = IrohTransportConfig::local_offline();
+        let sk = SecretKey::generate();
+        let ep_addr = EndpointAddr::new(sk.public());
+        let diag = build_diagnostics(&cfg, &ep_addr, None, "ep-chlog");
+
+        let mut seeded = NodeState::new_live(
+            "node-log",
+            "hub",
+            &addr.to_string(),
+            Blobs::open_blocking(&tmp_dir.join("blobs")).unwrap(),
+            diag,
+        );
+        let keys = seeded
+            .mesh_config
+            .apply_secret("alpha", "dt-ApiLog_Test_Secret_2026_Key!");
+        let cid = keys.fingerprint();
+        let log_store = crate::channel_log::ChannelLogStore::open(
+            &crate::channel_log::channel_log_path(&tmp_dir, &cid),
+            cid.clone(),
+        )
+        .unwrap();
+        seeded.channel_log = Some(Arc::new(Mutex::new(log_store)));
+        seeded.node_key = Some(sk);
+        seeded.api_token = "dtk-chlog-token-0123456789abcdef".to_string();
+
+        let state = Arc::new(Mutex::new(seeded));
+        let state_bg = state.clone();
+        let handle = thread::spawn(move || {
+            serve_http_blocking(listener, state_bg, Some(3)).unwrap();
+        });
+
+        // 1. POST /api/channel/log appends and redacts secrets.
+        let body = serde_json::to_string(&json!({
+            "source": "task",
+            "kind": "task.event",
+            "task_id": "t-99",
+            "message": "task started with dt-MustNeverLeakSecret123456789"
+        }))
+        .unwrap();
+        let req_post = format!(
+            "POST /api/channel/log HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer dtk-chlog-token-0123456789abcdef\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let resp_post = raw_http_request(addr, &req_post);
+        assert!(resp_post.starts_with("HTTP/1.1 200 OK"), "got: {resp_post}");
+        assert!(!resp_post.contains("MustNeverLeakSecret"), "got: {resp_post}");
+
+        // 2. GET /api/channel/log?channel=<cid>&source=task returns the entry.
+        let req_get = format!(
+            "GET /api/channel/log?channel={cid}&source=task HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        );
+        let resp_get = raw_http_request(addr, &req_get);
+        assert!(resp_get.starts_with("HTTP/1.1 200 OK"), "got: {resp_get}");
+        assert!(resp_get.contains("t-99"), "got: {resp_get}");
+        assert!(!resp_get.contains("MustNeverLeakSecret"), "got: {resp_get}");
+
+        // 3. GET /api/channel/log?channel=ch-other0000000 is rejected with 404.
+        let req_other =
+            "GET /api/channel/log?channel=ch-other0000000 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let resp_other = raw_http_request(addr, req_other);
+        assert!(resp_other.starts_with("HTTP/1.1 404"), "got: {resp_other}");
+
+        handle.join().unwrap();
+        let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }

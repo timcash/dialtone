@@ -29,6 +29,7 @@ pub const BUILTIN_COMMANDS: &[&str] = &[
     "allowlist",
     "blob",
     "link",
+    "log",
     "invite",
     "daemon",
     "probe",

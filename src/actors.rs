@@ -136,8 +136,10 @@ pub(crate) fn spawn_all(ctx: Ctx, mut start: MeshStart) -> Vec<JoinHandle<()>> {
     let (inventory_tx, inventory_rx) = mpsc::unbounded_channel();
     let (deploy_tx, deploy_rx) = mpsc::unbounded_channel();
     let (probe_tx, probe_rx) = mpsc::unbounded_channel();
+    let (channel_log_tx, channel_log_rx) = mpsc::unbounded_channel();
     ctx.with_state(|st| {
         st.probe_tx = Some(probe_tx);
+        st.channel_log_tx = Some(channel_log_tx);
         st.runtime = Some(tokio::runtime::Handle::current());
     });
     let mesh = Mesh::new(
@@ -150,6 +152,7 @@ pub(crate) fn spawn_all(ctx: Ctx, mut start: MeshStart) -> Vec<JoinHandle<()>> {
         inventory_rx,
         deploy_tx,
         update_tx,
+        channel_log_rx,
     );
     let mut actors = vec![
         tokio::spawn(mesh.run()),
@@ -1136,6 +1139,9 @@ struct Mesh {
     /// The events topic (`events_topic_id`): inventories, when they change.
     events_sender: Option<GossipSender>,
     events_receiver: Option<GossipReceiver>,
+    /// The channel log topic (`channel_log_topic_id`): encrypted, signed append-only log entries.
+    log_sender: Option<GossipSender>,
+    log_receiver: Option<GossipReceiver>,
     subscribed: bool,
     resubscribe_backoff: Duration,
     keys: Option<ChannelKeys>,
@@ -1184,6 +1190,8 @@ struct Mesh {
     deploy_tx: mpsc::UnboundedSender<Deploy>,
     /// Peers whose beats show a newer release than this node runs (`update_actor`).
     update_tx: mpsc::UnboundedSender<UpdateHint>,
+    /// Outbound channel log entries written via local API to be sealed and gossiped.
+    channel_log_rx: mpsc::UnboundedReceiver<dialtone::channel_log::ChannelLogEntry>,
 }
 
 /// The next event on a topic, or never when not subscribed.
@@ -1217,6 +1225,7 @@ impl Mesh {
         inventory_rx: mpsc::UnboundedReceiver<InventoryChanged>,
         deploy_tx: mpsc::UnboundedSender<Deploy>,
         update_tx: mpsc::UnboundedSender<UpdateHint>,
+        channel_log_rx: mpsc::UnboundedReceiver<dialtone::channel_log::ChannelLogEntry>,
     ) -> Self {
         let local_ipv4 = detect_non_tailnet_ipv4();
         let local_pub = own_public_ipv4(&ctx.endpoint);
@@ -1238,6 +1247,8 @@ impl Mesh {
             receiver: start.receiver,
             events_sender: None,
             events_receiver: None,
+            log_sender: None,
+            log_receiver: None,
             subscribed: true,
             resubscribe_backoff: Duration::from_secs(1),
             keys: start.keys,
@@ -1268,11 +1279,13 @@ impl Mesh {
             inventory_rx,
             deploy_tx,
             update_tx,
+            channel_log_rx,
         }
     }
 
     async fn run(mut self) {
         self.subscribe_events().await;
+        self.subscribe_channel_log().await;
         update::READY.store(true, std::sync::atomic::Ordering::Relaxed);
         self.refresh_own_inventory(false).await;
         let mut beat_tick = every(Duration::from_secs(self.beat_interval_secs));
@@ -1292,6 +1305,18 @@ impl Mesh {
                 Some(InventoryChanged) = self.inventory_rx.recv() => {
                     self.refresh_own_inventory(true).await;
                     self.announce_deploys().await;
+                }
+                Some(entry) = self.channel_log_rx.recv() => {
+                    if let (Some(ref keys), Some(ref tx)) = (&self.keys, &self.log_sender) {
+                        if let Ok(frame) = dialtone::channel_log::seal_log_entry(&entry, keys) {
+                            self.ctx.net.count_out(frame.len());
+                            let _ = tokio::time::timeout(
+                                Duration::from_millis(600),
+                                tx.broadcast(frame.into()),
+                            )
+                            .await;
+                        }
+                    }
                 }
                 _ = beat_tick.tick() => {
                     self.on_beat_tick().await;
@@ -1352,6 +1377,17 @@ impl Mesh {
                         self.events_receiver = None;
                     }
                 },
+                event = next_event(&mut self.log_receiver) => match event {
+                    Some(Ok(GossipEvent::Received(msg))) => {
+                        self.ctx.net.count_in(msg.content.len());
+                        self.on_channel_log_received(&msg.content);
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) | None => {
+                        self.log_sender = None;
+                        self.log_receiver = None;
+                    }
+                },
             }
         }
     }
@@ -1409,6 +1445,47 @@ impl Mesh {
             }
             Err(err) => eprintln!("[gossip-err] could not subscribe to the events topic: {err}"),
         }
+    }
+
+    /// Subscribe to the channel log topic (`channel_log_topic_id`).
+    async fn subscribe_channel_log(&mut self) {
+        if self.keys.is_none() {
+            return;
+        }
+        let first_peers = self.join_candidates(None);
+        let log_topic = dialtone::channel_log::channel_log_topic_id(self.topic_id);
+        match self.subscribe(log_topic, first_peers).await {
+            Ok(topic) => {
+                let (sender, receiver) = topic.split();
+                self.log_sender = Some(sender);
+                self.log_receiver = Some(receiver);
+            }
+            Err(err) => {
+                eprintln!("[gossip-err] could not subscribe to the channel log topic: {err}")
+            }
+        }
+    }
+
+    fn on_channel_log_received(&mut self, content: &[u8]) {
+        let Some(ref keys) = self.keys else {
+            return;
+        };
+        let Ok(entry) = dialtone::channel_log::open_log_entry(content, keys) else {
+            return;
+        };
+        if !self.ctx.allowlist.admits_str(&entry.author_node_id) {
+            return;
+        }
+        if let Ok(id) = entry.author_node_id.parse() {
+            self.ctx.members.insert(id);
+        }
+        self.ctx.with_state(|st| {
+            if let Some(ref log_arc) = st.channel_log {
+                if let Ok(mut store) = log_arc.lock() {
+                    let _ = store.merge_verified(entry);
+                }
+            }
+        });
     }
 
     /// The seeds plus up to `JOIN_SAMPLE` other known peers, prioritizing local LAN peers
@@ -1870,6 +1947,20 @@ impl Mesh {
                 // channel immediately lose blob, fetch, link, exec, and shell access.
                 self.ctx.members.clear();
                 self.ctx.blobs_proto.disconnect_unauthorized();
+                let state_dir = self
+                    .ctx
+                    .config_path
+                    .parent()
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_else(dialtone::mesh::default_state_dir);
+                let log_path = dialtone::channel_log::channel_log_path(&state_dir, &fingerprint);
+                if let Ok(new_log) =
+                    dialtone::channel_log::ChannelLogStore::open(&log_path, fingerprint.clone())
+                {
+                    self.ctx.with_state(|st| {
+                        st.channel_log = Some(Arc::new(Mutex::new(new_log)));
+                    });
+                }
 
                 let mut boot_ids = Vec::new();
                 let mut addrs: Vec<EndpointAddr> = default_seeds();
@@ -1890,6 +1981,7 @@ impl Mesh {
                     self.subscribed = true;
                     self.seed_ids = boot_ids.clone();
                     self.subscribe_events().await;
+                    self.subscribe_channel_log().await;
                     println!(
                         "[GOSSIP-JOIN] Unlocked '{}' gossip channel ({}) with {} peers",
                         self.channel,

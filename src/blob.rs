@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,6 +15,7 @@ use iroh_blobs::store::GcConfig;
 use iroh_blobs::{ticket::BlobTicket, Hash};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncReadExt;
 
 use crate::node::IrohTransportConfig;
 
@@ -35,6 +37,27 @@ pub struct BlobTransportReport {
 pub fn digest_of(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     format!("sha256:{}", crate::hex_encode(&digest))
+}
+
+/// Stream-hash a file on disk with SHA-256 in 64 KiB chunks (zero whole-file RAM buffer).
+pub fn digest_of_file(path: &Path) -> Result<(String, u64), String> {
+    let mut file =
+        fs::File::open(path).map_err(|e| format!("open file {}: {e}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("read file {}: {e}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        total = total.saturating_add(n as u64);
+    }
+    let digest = hasher.finalize();
+    Ok((format!("sha256:{}", crate::hex_encode(&digest)), total))
 }
 
 pub fn normalize_digest(raw: &str) -> Result<String, String> {
@@ -258,6 +281,133 @@ impl Blobs {
         self.note_added(&digest, added.hash, bytes.len() as u64)
             .await?;
         Ok((digest, added.hash))
+    }
+
+    /// Stream-import a file from disk into the blob store using `iroh-blobs` `add_path`
+    /// without buffering the entire file in RAM. Returns `(sha256_digest, blake3_hash, bytes)`.
+    pub async fn put_file(
+        &self,
+        path: &Path,
+        expected_digest: Option<&str>,
+    ) -> Result<(String, Hash, u64), String> {
+        let meta = fs::metadata(path)
+            .map_err(|e| format!("stat file {}: {e}", path.display()))?;
+        if !meta.is_file() {
+            return Err(format!("path {} is not a regular file", path.display()));
+        }
+        let abs_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let (digest, size) = digest_of_file(&abs_path)?;
+        if let Some(expected) = expected_digest {
+            let expected = normalize_digest(expected)?;
+            if digest != expected {
+                return Err(format!(
+                    "blob digest mismatch: expected {expected}, observed {digest}"
+                ));
+            }
+        }
+        if let Some(hash) = self.hash_of(&digest).await {
+            return Ok((digest, hash, size));
+        }
+        let added = self
+            .store
+            .blobs()
+            .add_path(&abs_path)
+            .with_named_tag(sha256_tag(&digest))
+            .await
+            .map_err(|e| format!("import blob file {}: {e}", abs_path.display()))?;
+        self.note_added(&digest, added.hash, size).await?;
+        Ok((digest, added.hash, size))
+    }
+
+    /// Stream-verify a downloaded blob's SHA-256 in 64 KiB chunks via `BlobReader` and tag it,
+    /// without buffering the entire blob in RAM. Returns the verified byte length.
+    pub async fn adopt_streaming(&self, hash: Hash, expected_digest: &str) -> Result<u64, String> {
+        let expected = normalize_digest(expected_digest)?;
+        let mut reader = self.store.blobs().reader(hash);
+        let mut hasher = Sha256::new();
+        let mut buf = [0u8; 64 * 1024];
+        let mut total: u64 = 0;
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .await
+                .map_err(|e| format!("stream downloaded blob: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            total = total.saturating_add(n as u64);
+        }
+        let observed = format!("sha256:{}", crate::hex_encode(&hasher.finalize()));
+        if observed != expected {
+            // Left untagged, so GC removes it.
+            return Err(format!(
+                "blob digest mismatch: expected {expected}, observed {observed}"
+            ));
+        }
+        if self.hash_of(&expected).await.is_none() {
+            self.store
+                .tags()
+                .set(sha256_tag(&expected), hash)
+                .await
+                .map_err(|e| format!("tag blob: {e}"))?;
+            self.note_added(&expected, hash, total).await?;
+        }
+        Ok(total)
+    }
+
+    /// Byte length of a complete blob named by `digest`, if present in the store.
+    pub async fn size_of(&self, digest: &str) -> Option<u64> {
+        let hash = self.hash_of(digest).await?;
+        match self.store.blobs().status(hash).await.ok()? {
+            BlobStatus::Complete { size } => Some(size),
+            _ => None,
+        }
+    }
+
+    /// Stream-export a stored blob named by `digest` to `dest` on disk without loading it into RAM.
+    pub async fn export_file(&self, digest: &str, dest: &Path) -> Result<u64, String> {
+        let digest = normalize_digest(digest)?;
+        let hash = self
+            .hash_of(&digest)
+            .await
+            .ok_or_else(|| format!("blob {digest} is not in the store"))?;
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("create export dir {}: {e}", parent.display()))?;
+        }
+        let abs_dest = if dest.is_absolute() {
+            dest.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(dest))
+                .unwrap_or_else(|_| dest.to_path_buf())
+        };
+        self.store
+            .blobs()
+            .export(hash, &abs_dest)
+            .await
+            .map_err(|e| format!("export blob {digest} to {}: {e}", abs_dest.display()))?;
+        let (observed, size) = digest_of_file(&abs_dest)?;
+        if observed != digest {
+            let _ = fs::remove_file(&abs_dest);
+            return Err(format!(
+                "exported blob digest mismatch: expected {digest}, observed {observed}"
+            ));
+        }
+        Ok(size)
+    }
+
+    pub fn put_file_blocking(
+        &self,
+        path: &Path,
+        expected_digest: Option<&str>,
+    ) -> Result<(String, u64), String> {
+        block_on(self.put_file(path, expected_digest)).map(|(digest, _, size)| (digest, size))
+    }
+
+    pub fn export_file_blocking(&self, digest: &str, dest: &Path) -> Result<u64, String> {
+        block_on(self.export_file(digest, dest))
     }
 
     /// Name a blob the node's downloader just fetched: verify its SHA-256 and tag it.
@@ -617,6 +767,26 @@ impl Store {
         })
     }
 
+    /// Stream-import a local file into the store (zero whole-file RAM buffer) and return a ticket.
+    pub fn share_blob_file(
+        &self,
+        path: &Path,
+        expected_digest: Option<&str>,
+    ) -> Result<SharedBlobTicketReport, String> {
+        let (digest, hash, size) = block_on(self.blobs.put_file(path, expected_digest))?;
+        let addr =
+            crate::node::advertised_endpoint_addr(&self.endpoint.addr(), &self.transport_config);
+        let ticket = BlobTicket::new(addr, hash, iroh_blobs::BlobFormat::Raw);
+        Ok(SharedBlobTicketReport {
+            status: "shared".to_string(),
+            ticket_uri: format_blob_ticket_uri(&ticket, &digest),
+            digest,
+            blake3_hash: hash.to_string(),
+            bytes: size,
+            provider_node_id: self.endpoint.id().to_string(),
+        })
+    }
+
     /// Fetch the blob a ticket names with the node's downloader (unless it is already
     /// stored), verify its SHA-256 and keep it.
     pub fn pull_blob(
@@ -654,11 +824,11 @@ impl Store {
         // A node never dials itself: a ticket it issued is read from its own store.
         let self_ticket = provider_id == self.endpoint.id();
         if self_ticket || !force_network {
-            if let Ok(bytes) = block_on(self.blobs.get(&expected_digest)) {
+            if let Some(size) = block_on(self.blobs.size_of(&expected_digest)) {
                 return Ok(if self_ticket {
-                    report(bytes.len() as u64, 0, "local-self", "self")
+                    report(size, 0, "local-self", "self")
                 } else {
-                    report(bytes.len() as u64, 0, "local-cache", "cache-hit")
+                    report(size, 0, "local-cache", "cache-hit")
                 });
             }
             if self_ticket {
@@ -680,9 +850,9 @@ impl Store {
             .filter(|p| *p != provider_id && *p != own)
             .collect();
         providers.push(provider_id);
-        // Each provider that does not answer costs up to the connect timeout.
+        // Allow generous transfer time for multi-megabyte blobs plus per-provider connect timeout.
         let timeout =
-            Duration::from_secs(15) + DOWNLOAD_CONNECT_TIMEOUT * (providers.len() as u32 - 1);
+            Duration::from_secs(120) + DOWNLOAD_CONNECT_TIMEOUT * (providers.len() as u32 - 1);
         let (len, active, known, status) = self.run(async move {
             // Fetched over this node's own endpoint, so the provider sees our NodeId and its
             // allowlist decides.
@@ -693,8 +863,8 @@ impl Store {
                     format!("iroh-blobs download from peer {provider_id} failed (is this node on its allowlist?): {e}")
                 })?;
             let (active, known, status) = observe_remote_info(&endpoint, provider_id).await;
-            let bytes = blobs.adopt(hash, &digest).await?;
-            Ok((bytes.len() as u64, active, known, status))
+            let total_bytes = blobs.adopt_streaming(hash, &digest).await?;
+            Ok((total_bytes, active, known, status))
         })?;
         let mut rep = report(len, len, "iroh-blobs-ticket", &status);
         rep.active_address_modes = active;
@@ -1138,6 +1308,124 @@ mod tests {
         blobs_a2.close_blocking();
         blobs_b1.close_blocking();
         blobs_a1_chan_b.close_blocking();
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Regression test for the >= 3 MB blob share bug: an 8.5 MiB blob streams from disk on
+    /// Channel A, pulls and stream-verifies on another Channel A member, exports intact, and
+    /// remains completely invisible/unfetchable to a node on Channel B.
+    #[test]
+    fn large_blob_8mb_shares_and_pulls_on_same_channel_and_stays_invisible_to_other_channel() {
+        use crate::mesh::{channel_blobs_dir, derive_channel_keys_v2, LiveAllowlist};
+
+        let root = env::temp_dir().join(format!(
+            "dialtone-blob-large-8mb-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        // Create an 8.5 MiB deterministic payload on disk (> 8 MB, well past the old 2-3 MB cap).
+        let total_size: usize = 8 * 1024 * 1024 + 512 * 1024;
+        let src_file = root.join("large-artifact.bin");
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&src_file).unwrap();
+            let mut block = [0u8; 64 * 1024];
+            let mut remaining = total_size;
+            let mut seq: u32 = 0;
+            while remaining > 0 {
+                for (i, b) in block.iter_mut().enumerate() {
+                    *b = ((seq.wrapping_mul(31).wrapping_add(i as u32)) & 0xff) as u8;
+                }
+                let to_write = remaining.min(block.len());
+                f.write_all(&block[..to_write]).unwrap();
+                remaining -= to_write;
+                seq = seq.wrapping_add(1);
+            }
+            f.flush().unwrap();
+        }
+        let (expected_digest, expected_size) = digest_of_file(&src_file).unwrap();
+        assert_eq!(expected_size, total_size as u64);
+
+        let keys_a = derive_channel_keys_v2("alpha-big", "dt-LargeBlob_Alpha_Secret_2026!");
+        let keys_b = derive_channel_keys_v2("beta-big", "dt-LargeBlob_Beta_Secret_2026!");
+        let cid_a = keys_a.fingerprint();
+        let cid_b = keys_b.fingerprint();
+
+        let blobs_a1 = Blobs::open_blocking(&channel_blobs_dir(&root.join("a1"), &cid_a)).unwrap();
+        let blobs_a2 = Blobs::open_blocking(&channel_blobs_dir(&root.join("a2"), &cid_a)).unwrap();
+        let blobs_b1 = Blobs::open_blocking(&channel_blobs_dir(&root.join("b1"), &cid_b)).unwrap();
+
+        let members_a = LiveAllowlist::default();
+        let empty_allowlist = LiveAllowlist::default();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (store_a1, store_a2, store_b1, router_a1) = rt.block_on(async {
+            let bind = || async {
+                build_endpoint_builder(&IrohTransportConfig::local_offline())
+                    .unwrap()
+                    .bind()
+                    .await
+                    .unwrap()
+            };
+            let (ep_a1, ep_a2, ep_b1) = (bind().await, bind().await, bind().await);
+            members_a.insert(ep_a2.id());
+
+            let proto_a1 = ChannelBlobsProtocol::new(
+                cid_a.clone(),
+                BlobsProtocol::new(blobs_a1.api(), None),
+                empty_allowlist.clone(),
+                members_a.clone(),
+            );
+            let router_a1 = Router::builder(ep_a1.clone())
+                .accept(iroh_blobs::ALPN, proto_a1)
+                .spawn();
+
+            let cfg = IrohTransportConfig::local_offline();
+            let store_a1 = Store::new(ep_a1, blobs_a1.clone(), MemoryLookup::new(), cfg.clone());
+            let lookup_a2 = MemoryLookup::new();
+            ep_a2.address_lookup().unwrap().add(lookup_a2.clone());
+            let store_a2 = Store::new(ep_a2, blobs_a2.clone(), lookup_a2, cfg.clone());
+
+            let lookup_b1 = MemoryLookup::new();
+            ep_b1.address_lookup().unwrap().add(lookup_b1.clone());
+            let store_b1 = Store::new(ep_b1, blobs_b1.clone(), lookup_b1, cfg);
+            (store_a1, store_a2, store_b1, router_a1)
+        });
+
+        let shared = store_a1.share_blob_file(&src_file, None).unwrap();
+        assert_eq!(shared.digest, expected_digest);
+        assert_eq!(shared.bytes, total_size as u64);
+
+        let pulled = store_a2.pull_blob(&shared.ticket_uri, true).unwrap();
+        assert_eq!(pulled.digest, expected_digest);
+        assert_eq!(pulled.bytes, total_size as u64);
+        assert_eq!(pulled.transferred_bytes, total_size as u64);
+
+        // Stream-export on A2 and confirm SHA-256 and byte length match bit-for-bit.
+        let exported = root.join("a2-exported.bin");
+        let exported_bytes = blobs_a2.export_file_blocking(&expected_digest, &exported).unwrap();
+        assert_eq!(exported_bytes, total_size as u64);
+        let (exported_digest, _) = digest_of_file(&exported).unwrap();
+        assert_eq!(exported_digest, expected_digest);
+
+        // Channel B node CANNOT list or fetch the 8.5 MiB blob even with the full ticket/hash.
+        assert!(blobs_b1.list_digests_blocking().unwrap().is_empty());
+        let err_b1 = store_b1.pull_blob(&shared.ticket_uri, true).unwrap_err();
+        assert!(
+            err_b1.contains("failed") || err_b1.contains("timed out"),
+            "expected denial on channel B, got: {err_b1}"
+        );
+        assert!(!blobs_b1.has_blocking(&expected_digest));
+
+        rt.block_on(async {
+            let _ = router_a1.shutdown().await;
+        });
+        drop((store_a1, store_a2, store_b1));
+        blobs_a1.close_blocking();
+        blobs_a2.close_blocking();
+        blobs_b1.close_blocking();
         let _ = fs::remove_dir_all(&root);
     }
 }
