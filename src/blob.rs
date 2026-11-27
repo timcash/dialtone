@@ -362,6 +362,36 @@ impl Blobs {
         block_on(self.has(digest))
     }
 
+    /// List all complete SHA-256 digests (`sha256:<hex>`) stored in this blob store.
+    pub async fn list_digests(&self) -> Result<Vec<String>, String> {
+        let mut out = Vec::new();
+        let mut tags = self
+            .store
+            .tags()
+            .list_prefix(SHA256_TAG_PREFIX)
+            .await
+            .map_err(|e| format!("list store tags: {e}"))?;
+        while let Some(tag) = tags.next().await {
+            let Ok(tag) = tag else { continue };
+            if matches!(
+                self.store.blobs().status(tag.hash).await,
+                Ok(BlobStatus::Complete { .. })
+            ) {
+                let hex = String::from_utf8_lossy(tag.name.as_ref())
+                    .trim_start_matches(SHA256_TAG_PREFIX)
+                    .to_string();
+                out.push(format!("sha256:{hex}"));
+            }
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
+    pub fn list_digests_blocking(&self) -> Result<Vec<String>, String> {
+        block_on(self.list_digests())
+    }
+
     async fn note_added(&self, digest: &str, hash: Hash, size: u64) -> Result<(), String> {
         self.store
             .tags()
@@ -673,6 +703,87 @@ impl Store {
     }
 }
 
+/// Channel-scoped wrapper around `iroh_blobs::BlobsProtocol` that enforces channel membership
+/// on every incoming QUIC connection before delegating to the underlying blob store, and tracks
+/// active weak handles so revoked peers are disconnected immediately on channel switch.
+#[derive(Clone, Debug)]
+pub struct ChannelBlobsProtocol {
+    channel_id: String,
+    inner: iroh_blobs::BlobsProtocol,
+    allowlist: crate::mesh::LiveAllowlist,
+    members: crate::mesh::LiveAllowlist,
+    active_conns: Arc<Mutex<Vec<(iroh::EndpointId, iroh::endpoint::WeakConnectionHandle)>>>,
+}
+
+impl ChannelBlobsProtocol {
+    pub fn new(
+        channel_id: impl Into<String>,
+        inner: iroh_blobs::BlobsProtocol,
+        allowlist: crate::mesh::LiveAllowlist,
+        members: crate::mesh::LiveAllowlist,
+    ) -> Self {
+        Self {
+            channel_id: channel_id.into(),
+            inner,
+            allowlist,
+            members,
+            active_conns: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn channel_id(&self) -> &str {
+        &self.channel_id
+    }
+
+    pub fn admits(&self, peer: &iroh::EndpointId) -> bool {
+        if self.allowlist.is_empty() {
+            self.members.contains(peer)
+        } else {
+            self.allowlist.contains(peer)
+        }
+    }
+
+    /// Close all active pooled blob connections whose peers are no longer admitted to this channel.
+    pub fn disconnect_unauthorized(&self) {
+        if let Ok(mut conns) = self.active_conns.lock() {
+            conns.retain(|(peer, weak)| {
+                let Some(conn) = weak.upgrade() else {
+                    return false;
+                };
+                if !self.admits(peer) {
+                    conn.close(
+                        crate::node::NOT_ALLOWLISTED_CLOSE_CODE.into(),
+                        b"channel blob access revoked",
+                    );
+                    return false;
+                }
+                true
+            });
+        }
+    }
+}
+
+impl iroh::protocol::ProtocolHandler for ChannelBlobsProtocol {
+    async fn accept(
+        &self,
+        connection: iroh::endpoint::Connection,
+    ) -> Result<(), iroh::protocol::AcceptError> {
+        let remote = connection.remote_id();
+        if !self.admits(&remote) {
+            connection.close(
+                crate::node::NOT_ALLOWLISTED_CLOSE_CODE.into(),
+                b"channel blob access denied",
+            );
+            return Ok(());
+        }
+        if let Ok(mut conns) = self.active_conns.lock() {
+            conns.retain(|(_, w)| w.upgrade().is_some());
+            conns.push((remote, connection.weak_handle()));
+        }
+        self.inner.accept(connection).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -920,5 +1031,113 @@ mod tests {
             assert!(fetch(stranger, provider_addr, tag.hash).await.is_err());
             let _ = router.shutdown().await;
         });
+    }
+
+    /// A blob stored on Channel A is visible and fetchable by Channel A members,
+    /// and neither listable nor fetchable from a node on Channel B even with the ticket/hash.
+    #[test]
+    fn channel_scoped_blob_is_not_listable_or_fetchable_from_other_channel() {
+        use crate::mesh::{channel_blobs_dir, derive_channel_keys_v2, LiveAllowlist};
+
+        let root = env::temp_dir().join(format!(
+            "dialtone-blob-channel-scope-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+
+        let keys_a = derive_channel_keys_v2("alpha", "dt-Blob_Scope_Alpha_Secret_2026!");
+        let keys_b = derive_channel_keys_v2("beta", "dt-Blob_Scope_Beta_Secret_2026!");
+        let cid_a = keys_a.fingerprint();
+        let cid_b = keys_b.fingerprint();
+
+        let blobs_a1 = Blobs::open_blocking(&channel_blobs_dir(&root.join("a1"), &cid_a)).unwrap();
+        let blobs_a2 = Blobs::open_blocking(&channel_blobs_dir(&root.join("a2"), &cid_a)).unwrap();
+        let blobs_b1 = Blobs::open_blocking(&channel_blobs_dir(&root.join("b1"), &cid_b)).unwrap();
+        // Same-host channel B store under a1's state_dir must also be isolated from channel A.
+        let blobs_a1_chan_b =
+            Blobs::open_blocking(&channel_blobs_dir(&root.join("a1"), &cid_b)).unwrap();
+
+        let members_a = LiveAllowlist::default();
+        let empty_allowlist = LiveAllowlist::default();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (store_a1, store_a2, store_b1, proto_a1, router_a1) = rt.block_on(async {
+            let bind = || async {
+                build_endpoint_builder(&IrohTransportConfig::local_offline())
+                    .unwrap()
+                    .bind()
+                    .await
+                    .unwrap()
+            };
+            let (ep_a1, ep_a2, ep_b1) = (bind().await, bind().await, bind().await);
+            // Only ep_a2 is a verified member of Channel A; ep_b1 is on Channel B.
+            members_a.insert(ep_a2.id());
+
+            let proto_a1 = ChannelBlobsProtocol::new(
+                cid_a.clone(),
+                BlobsProtocol::new(blobs_a1.api(), None),
+                empty_allowlist.clone(),
+                members_a.clone(),
+            );
+            let router_a1 = Router::builder(ep_a1.clone())
+                .accept(iroh_blobs::ALPN, proto_a1.clone())
+                .spawn();
+
+            let cfg = IrohTransportConfig::local_offline();
+            let store_a1 = Store::new(ep_a1, blobs_a1.clone(), MemoryLookup::new(), cfg.clone());
+            let lookup_a2 = MemoryLookup::new();
+            ep_a2.address_lookup().unwrap().add(lookup_a2.clone());
+            let store_a2 = Store::new(ep_a2, blobs_a2.clone(), lookup_a2, cfg.clone());
+
+            let lookup_b1 = MemoryLookup::new();
+            ep_b1.address_lookup().unwrap().add(lookup_b1.clone());
+            let store_b1 = Store::new(ep_b1, blobs_b1.clone(), lookup_b1, cfg);
+            (store_a1, store_a2, store_b1, proto_a1, router_a1)
+        });
+
+        let payload = b"channel-a-confidential-artifact";
+        let shared = store_a1.share_blob(payload, None).unwrap();
+
+        // Channel A store lists the blob; Channel B stores do NOT list it.
+        assert!(blobs_a1.list_digests_blocking().unwrap().contains(&shared.digest));
+        assert!(blobs_a1_chan_b.list_digests_blocking().unwrap().is_empty());
+        assert!(blobs_b1.list_digests_blocking().unwrap().is_empty());
+
+        // Channel A member (A2) CAN fetch the blob.
+        let pulled_a2 = store_a2.pull_blob(&shared.ticket_uri, true).unwrap();
+        assert_eq!(pulled_a2.digest, shared.digest);
+        assert_eq!(blobs_a2.get_blocking(&shared.digest).unwrap(), payload);
+
+        // Channel B node (B1) CANNOT fetch Channel A's blob even with the full ticket/hash.
+        let err_b1 = store_b1.pull_blob(&shared.ticket_uri, true).unwrap_err();
+        assert!(
+            err_b1.contains("failed") || err_b1.contains("timed out"),
+            "unexpected error: {err_b1}"
+        );
+        assert!(!blobs_b1.has_blocking(&shared.digest));
+        assert!(blobs_b1.list_digests_blocking().unwrap().is_empty());
+
+        // Clearing channel members and disconnecting unauthorized pooled connections
+        // immediately prevents A2 from fetching any new blob on Channel A.
+        let payload2 = b"channel-a-post-revocation-artifact";
+        let shared2 = store_a1.share_blob(payload2, None).unwrap();
+        members_a.clear();
+        proto_a1.disconnect_unauthorized();
+        let err_a2_revoked = store_a2.pull_blob(&shared2.ticket_uri, true).unwrap_err();
+        assert!(
+            err_a2_revoked.contains("failed") || err_a2_revoked.contains("timed out"),
+            "revoked peer should be denied: {err_a2_revoked}"
+        );
+        assert!(!blobs_a2.has_blocking(&shared2.digest));
+
+        rt.block_on(async {
+            let _ = router_a1.shutdown().await;
+        });
+        drop((store_a1, store_a2, store_b1));
+        blobs_a1.close_blocking();
+        blobs_a2.close_blocking();
+        blobs_b1.close_blocking();
+        blobs_a1_chan_b.close_blocking();
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -1213,7 +1213,15 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
     if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
         st.gossip_metrics = Some(gossip.metrics().clone());
     }
-    let blobs_proto = iroh_blobs::BlobsProtocol::new(blobs.api(), None);
+    let blobs_proto = dialtone::blob::ChannelBlobsProtocol::new(
+        active_keys
+            .as_ref()
+            .map(|k| k.fingerprint())
+            .unwrap_or_else(|| format!("{active_channel}:locked-standby")),
+        iroh_blobs::BlobsProtocol::new(blobs.api(), None),
+        live_allowlist.clone(),
+        members.clone(),
+    );
     let links = dialtone::link::Links::new(endpoint.clone());
     if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
         st.links = Some(links.clone());
@@ -1234,7 +1242,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
     let plugins_dir = dialtone::plugin::plugins_dir_for_store(blobs.dir());
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
-        .accept(iroh_blobs::ALPN, blobs_proto)
+        .accept(iroh_blobs::ALPN, blobs_proto.clone())
         .accept(
             dialtone::fetch::ALPN,
             dialtone::fetch::FetchHandler::new(shared_state.clone()),
@@ -1515,6 +1523,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         blobs: blobs.clone(),
         allowlist: live_allowlist.clone(),
         members,
+        blobs_proto,
         state: shared_state.clone(),
         net: shared_state
             .as_ref()
@@ -2619,6 +2628,7 @@ async fn main() {
                 plugins_dir,
                 api_url,
                 node_name: opts.node.clone(),
+                channel_keys: cfg.active_channel_keys(),
             };
             match dialtone::plugin::dispatch_plugin(&ctx, name, &opts.plugin_args) {
                 Ok(0) => Ok(()),

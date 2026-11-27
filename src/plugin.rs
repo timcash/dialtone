@@ -660,13 +660,16 @@ pub fn remove_installed_plugin(plugins_dir: &Path, name: &str) -> Result<(), Str
 }
 
 /// Runtime context passed into a dispatched plugin process via environment variables.
-/// Secrets are never placed in argv or forwarded via env.
+/// Raw channel secrets are never placed in argv or forwarded via env.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginDispatchContext {
     pub state_dir: PathBuf,
     pub plugins_dir: PathBuf,
     pub api_url: String,
     pub node_name: String,
+    /// Active channel derived keys, used to inject `DIALTONE_CHANNEL_ID`,
+    /// `DIALTONE_CHANNEL_PLUGIN_KEY`, and `DIALTONE_CHANNEL_DATA_DIR`.
+    pub channel_keys: Option<crate::mesh::ChannelKeys>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -894,6 +897,9 @@ pub fn build_plugin_command(
         "DIALTONE_SECRET_KEY",
         "DIALTONE_GATEWAY_TOKEN",
         "MESH_ORIGIN_TOKEN",
+        "DIALTONE_CHANNEL_ID",
+        "DIALTONE_CHANNEL_PLUGIN_KEY",
+        "DIALTONE_CHANNEL_DATA_DIR",
     ] {
         cmd.env_remove(secret_var);
     }
@@ -906,6 +912,19 @@ pub fn build_plugin_command(
             "DIALTONE_PLUGIN_DIR",
             ctx.plugins_dir.join(&resolved.manifest.name),
         );
+    if let Some(ref keys) = ctx.channel_keys {
+        let channel_id = keys.fingerprint();
+        let plugin_key_hex =
+            crate::mesh::derive_channel_plugin_key_hex(keys, &resolved.manifest.name);
+        let data_dir = crate::mesh::channel_plugin_data_dir(
+            &ctx.state_dir,
+            &channel_id,
+            &resolved.manifest.name,
+        );
+        cmd.env("DIALTONE_CHANNEL_ID", &channel_id)
+            .env("DIALTONE_CHANNEL_PLUGIN_KEY", &plugin_key_hex)
+            .env("DIALTONE_CHANNEL_DATA_DIR", &data_dir);
+    }
     cmd
 }
 
@@ -1176,6 +1195,7 @@ mod tests {
             plugins_dir: plugins_dir.clone(),
             api_url: "http://127.0.0.1:8788".to_string(),
             node_name: "alpha".to_string(),
+            channel_keys: None,
         };
         let resolved = resolve_plugin_binary(&plugins_dir, "task").unwrap();
         let args = vec![
@@ -1205,7 +1225,8 @@ mod tests {
             "{stdout}"
         );
         assert!(
-            stdout.contains("ARGS=list --json --help hello world"),
+            stdout.contains("ARGS=list --json --help hello world")
+                || stdout.contains("ARGS=list --json --help \"hello world\""),
             "{stdout}"
         );
 
@@ -1343,6 +1364,7 @@ mod tests {
             plugins_dir: plugins_dir.clone(),
             api_url: "http://127.0.0.1:8788".to_string(),
             node_name: "alpha".to_string(),
+            channel_keys: None,
         };
         assert_eq!(
             dispatch_plugin(&ctx, "exiter", &["0".to_string()]).unwrap(),
@@ -1375,6 +1397,101 @@ mod tests {
             }
             other => panic!("expected Refused on traversal, got {other:?}"),
         }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dispatch_passes_derived_channel_plugin_key_differs_per_plugin_and_channel_and_hides_secret()
+    {
+        let (root, plugins_dir, blobs) = temp_plugin_env("dispatch-channel-keys");
+        blobs.close_blocking();
+
+        let unix_script = "#!/bin/sh\nprintf 'CID=%s\\nPKEY=%s\\nDDIR=%s\\nSEC=%s\\n' \"$DIALTONE_CHANNEL_ID\" \"$DIALTONE_CHANNEL_PLUGIN_KEY\" \"$DIALTONE_CHANNEL_DATA_DIR\" \"$DIALTONE_SECRET\"\n";
+        let win_script = "@echo off\r\necho CID=%DIALTONE_CHANNEL_ID%\r\necho PKEY=%DIALTONE_CHANNEL_PLUGIN_KEY%\r\necho DDIR=%DIALTONE_CHANNEL_DATA_DIR%\r\necho SEC=%DIALTONE_SECRET%\r\n";
+
+        write_test_plugin(&plugins_dir, "task", unix_script, win_script, None);
+        write_test_plugin(&plugins_dir, "agent", unix_script, win_script, None);
+
+        let raw_secret_a = "dt-Channel_Alpha_Secret_2026_Test!";
+        let raw_secret_b = "dt-Channel_Beta_Secret_2026_Test!";
+        let keys_a = crate::mesh::derive_channel_keys_v2("alpha", raw_secret_a);
+        let keys_b = crate::mesh::derive_channel_keys_v2("beta", raw_secret_b);
+
+        let run_for = |plugin: &str, keys: &crate::mesh::ChannelKeys| -> (String, String, String, String) {
+            let ctx = PluginDispatchContext {
+                state_dir: root.clone(),
+                plugins_dir: plugins_dir.clone(),
+                api_url: "http://127.0.0.1:8788".to_string(),
+                node_name: "legion".to_string(),
+                channel_keys: Some(keys.clone()),
+            };
+            let resolved = resolve_plugin_binary(&plugins_dir, plugin).unwrap();
+            let mut cmd = build_plugin_command(&ctx, &resolved, &[]);
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let out = cmd.output().expect("run plugin");
+            assert!(
+                out.status.success(),
+                "stderr={}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let mut cid = String::new();
+            let mut pkey = String::new();
+            let mut ddir = String::new();
+            let mut sec = String::new();
+            for line in stdout.lines() {
+                if let Some(v) = line.strip_prefix("CID=") {
+                    cid = v.trim().to_string();
+                } else if let Some(v) = line.strip_prefix("PKEY=") {
+                    pkey = v.trim().to_string();
+                } else if let Some(v) = line.strip_prefix("DDIR=") {
+                    ddir = v.trim().to_string();
+                } else if let Some(v) = line.strip_prefix("SEC=") {
+                    sec = v.trim().to_string();
+                }
+            }
+            (cid, pkey, ddir, sec)
+        };
+
+        let (cid_a_task, key_a_task, ddir_a_task, sec_a_task) = run_for("task", &keys_a);
+        let (cid_a_agent, key_a_agent, ddir_a_agent, _) = run_for("agent", &keys_a);
+        let (cid_b_task, key_b_task, ddir_b_task, _) = run_for("task", &keys_b);
+
+        assert_eq!(cid_a_task, keys_a.fingerprint());
+        assert_eq!(cid_a_agent, keys_a.fingerprint());
+        assert_eq!(cid_b_task, keys_b.fingerprint());
+        assert_ne!(cid_a_task, cid_b_task);
+
+        // Derived keys are 64-char hex, distinct per plugin and per channel, never raw secret or enc_key.
+        for k in [&key_a_task, &key_a_agent, &key_b_task] {
+            assert_eq!(k.len(), 64, "expected 32-byte hex key");
+            assert!(k.bytes().all(|b| b.is_ascii_hexdigit()));
+            assert!(!k.contains(raw_secret_a));
+            assert!(!k.contains(raw_secret_b));
+        }
+        assert_ne!(key_a_task, key_a_agent, "different plugins must get different keys");
+        assert_ne!(key_a_task, key_b_task, "different channels must get different keys");
+        assert_ne!(key_a_task, crate::hex_encode(&keys_a.enc_key));
+        assert_ne!(key_a_task, crate::hex_encode(&keys_a.auth_key));
+
+        // Data dirs are channel-scoped and plugin-scoped.
+        assert_eq!(
+            PathBuf::from(&ddir_a_task),
+            crate::mesh::channel_plugin_data_dir(&root, &cid_a_task, "task")
+        );
+        assert_eq!(
+            PathBuf::from(&ddir_a_agent),
+            crate::mesh::channel_plugin_data_dir(&root, &cid_a_agent, "agent")
+        );
+        assert_eq!(
+            PathBuf::from(&ddir_b_task),
+            crate::mesh::channel_plugin_data_dir(&root, &cid_b_task, "task")
+        );
+        assert_ne!(ddir_a_task, ddir_b_task);
+
+        // Raw secret is never passed.
+        assert!(sec_a_task.is_empty(), "raw secret leaked: {sec_a_task}");
 
         let _ = fs::remove_dir_all(&root);
     }

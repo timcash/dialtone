@@ -78,6 +78,8 @@ pub(crate) struct Ctx {
     /// NodeIds this node has had a valid message from: on an open channel (empty allowlist)
     /// the handshake hook admits only them to fetch, blobs and link.
     pub members: LiveAllowlist,
+    /// Channel-scoped blobs protocol handle, used to sever pooled connections on channel switch.
+    pub blobs_proto: dialtone::blob::ChannelBlobsProtocol,
     pub state: Option<Arc<Mutex<NodeState>>>,
     pub net: Arc<dialtone::mesh::NetCounters>,
     /// The open gossip connections, read by the Paths actor.
@@ -1864,6 +1866,10 @@ impl Mesh {
                 self.topic_id = keys.topic_id;
                 let fingerprint = keys.fingerprint();
                 self.keys = Some(keys);
+                // Revoke previously admitted open-channel members so peers from the old
+                // channel immediately lose blob, fetch, link, exec, and shell access.
+                self.ctx.members.clear();
+                self.ctx.blobs_proto.disconnect_unauthorized();
 
                 let mut boot_ids = Vec::new();
                 let mut addrs: Vec<EndpointAddr> = default_seeds();
