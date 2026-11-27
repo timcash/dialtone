@@ -25,6 +25,7 @@ pub const MAX_PLUGIN_BYTES: usize = 32 * 1024 * 1024;
 pub const BUILTIN_COMMANDS: &[&str] = &[
     "up",
     "join",
+    "channel",
     "secret",
     "allowlist",
     "blob",
@@ -936,6 +937,25 @@ pub fn dispatch_plugin(
     args: &[String],
 ) -> Result<i32, PluginDispatchError> {
     let resolved = resolve_plugin_binary(&ctx.plugins_dir, name)?;
+    if let Some(ref keys) = ctx.channel_keys {
+        let cid = keys.fingerprint();
+        let decision = crate::channel_manifest::check_plugin_allowed(
+            &ctx.state_dir,
+            Some(&cid),
+            &resolved.manifest.name,
+            Some(&resolved.manifest.version),
+            Some(&resolved.manifest.blob_digest),
+        )
+        .map_err(PluginDispatchError::Refused)?;
+        crate::channel_manifest::record_legacy_manifest_warning(
+            &ctx.state_dir,
+            &ctx.node_name,
+            None,
+            None,
+            None,
+            &decision,
+        );
+    }
     let mut cmd = build_plugin_command(ctx, &resolved, args);
     let status = cmd.status().map_err(|e| {
         PluginDispatchError::Refused(format!(
@@ -955,6 +975,255 @@ pub fn dispatch_plugin(
         }
     }
     Ok(1)
+}
+
+/// Runtime status of a daemon-managed plugin process.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedPluginStatus {
+    pub name: String,
+    pub channel_id: String,
+    pub data_dir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpc_addr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    pub running: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+struct ManagedPluginChild {
+    channel_id: String,
+    digest: String,
+    data_dir: PathBuf,
+    child: std::process::Child,
+}
+
+/// Manages daemon-started plugins (e.g. `task`, `agent`) per joined channel.
+/// Gated behind `MeshConfig.managed_plugins` (default empty / off) and enforced fail-closed
+/// against the channel's signed manifest (`dialtone.channel.manifest.v1`).
+#[derive(Default)]
+pub struct ManagedPluginManager {
+    children: std::collections::BTreeMap<String, ManagedPluginChild>,
+    last_errors: std::collections::BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for ManagedPluginManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ManagedPluginManager")
+            .field("running", &self.children.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl ManagedPluginManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn stop_all(&mut self) {
+        for (_, mut entry) in std::mem::take(&mut self.children) {
+            let _ = entry.child.kill();
+            let _ = entry.child.wait();
+        }
+    }
+
+    /// Reconcile configured `managed_plugins` for the active channel.
+    /// Starts permitted plugins with `DIALTONE_CHANNEL_ID`, `DIALTONE_CHANNEL_PLUGIN_KEY`, and
+    /// `DIALTONE_CHANNEL_DATA_DIR`, and stops any plugin no longer configured or denied by manifest.
+    pub fn reconcile(
+        &mut self,
+        ctx: &PluginDispatchContext,
+        desired_plugins: &[String],
+        extra_args: &[String],
+        policy_guard: Option<&crate::channel_manifest::ChannelPolicyGuard>,
+    ) -> Vec<ManagedPluginStatus> {
+        let Some(ref keys) = ctx.channel_keys else {
+            self.stop_all();
+            self.last_errors.clear();
+            return Vec::new();
+        };
+        let cid = keys.fingerprint();
+
+        let mut desired_clean: Vec<String> = Vec::new();
+        for raw in desired_plugins {
+            if let Ok(canon) = validate_plugin_name(raw) {
+                if !desired_clean.contains(&canon) {
+                    desired_clean.push(canon);
+                }
+            }
+        }
+
+        // Stop plugins removed from config or running for a different channel.
+        let to_remove: Vec<String> = self
+            .children
+            .iter()
+            .filter(|(name, entry)| entry.channel_id != cid || !desired_clean.contains(name))
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in to_remove {
+            if let Some(mut entry) = self.children.remove(&name) {
+                let _ = entry.child.kill();
+                let _ = entry.child.wait();
+            }
+            self.last_errors.remove(&name);
+        }
+
+        let mut statuses = Vec::new();
+        for name in desired_clean {
+            let resolved = match resolve_plugin_binary(&ctx.plugins_dir, &name) {
+                Ok(r) => r,
+                Err(err) => {
+                    if let Some(mut entry) = self.children.remove(&name) {
+                        let _ = entry.child.kill();
+                        let _ = entry.child.wait();
+                    }
+                    let msg = err.to_string();
+                    self.last_errors.insert(name.clone(), msg.clone());
+                    statuses.push(ManagedPluginStatus {
+                        name: name.clone(),
+                        channel_id: cid.clone(),
+                        data_dir: crate::mesh::channel_plugin_data_dir(&ctx.state_dir, &cid, &name)
+                            .to_string_lossy()
+                            .to_string(),
+                        rpc_addr: None,
+                        pid: None,
+                        running: false,
+                        error: Some(msg),
+                    });
+                    continue;
+                }
+            };
+
+            let policy_res = if let Some(guard) = policy_guard {
+                guard.check_and_log(
+                    &resolved.manifest.name,
+                    Some(&resolved.manifest.version),
+                    Some(&resolved.manifest.blob_digest),
+                )
+            } else {
+                crate::channel_manifest::check_plugin_allowed(
+                    &ctx.state_dir,
+                    Some(&cid),
+                    &resolved.manifest.name,
+                    Some(&resolved.manifest.version),
+                    Some(&resolved.manifest.blob_digest),
+                )
+            };
+            if let Err(reason) = policy_res {
+                if let Some(mut entry) = self.children.remove(&name) {
+                    let _ = entry.child.kill();
+                    let _ = entry.child.wait();
+                }
+                self.last_errors.insert(name.clone(), reason.clone());
+                statuses.push(ManagedPluginStatus {
+                    name: name.clone(),
+                    channel_id: cid.clone(),
+                    data_dir: crate::mesh::channel_plugin_data_dir(&ctx.state_dir, &cid, &name)
+                        .to_string_lossy()
+                        .to_string(),
+                    rpc_addr: None,
+                    pid: None,
+                    running: false,
+                    error: Some(reason),
+                });
+                continue;
+            }
+
+            let data_dir = crate::mesh::channel_plugin_data_dir(&ctx.state_dir, &cid, &name);
+            let needs_spawn = match self.children.get_mut(&name) {
+                Some(entry) => {
+                    entry.digest != resolved.manifest.blob_digest
+                        || !matches!(entry.child.try_wait(), Ok(None))
+                }
+                None => true,
+            };
+            if needs_spawn {
+                if let Some(mut old) = self.children.remove(&name) {
+                    let _ = old.child.kill();
+                    let _ = old.child.wait();
+                }
+                let _ = fs::create_dir_all(&data_dir);
+                let mut args = vec!["serve".to_string()];
+                args.extend(extra_args.iter().cloned());
+                let mut cmd = build_plugin_command(ctx, &resolved, &args);
+                cmd.stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                match cmd.spawn() {
+                    Ok(child) => {
+                        let pid = child.id();
+                        self.children.insert(
+                            name.clone(),
+                            ManagedPluginChild {
+                                channel_id: cid.clone(),
+                                digest: resolved.manifest.blob_digest.clone(),
+                                data_dir: data_dir.clone(),
+                                child,
+                            },
+                        );
+                        self.last_errors.remove(&name);
+                        statuses.push(ManagedPluginStatus {
+                            name: name.clone(),
+                            channel_id: cid.clone(),
+                            data_dir: data_dir.to_string_lossy().to_string(),
+                            rpc_addr: None,
+                            pid: Some(pid),
+                            running: true,
+                            error: None,
+                        });
+                    }
+                    Err(e) => {
+                        let msg = format!("spawn managed plugin '{name}': {e}");
+                        self.last_errors.insert(name.clone(), msg.clone());
+                        statuses.push(ManagedPluginStatus {
+                            name: name.clone(),
+                            channel_id: cid.clone(),
+                            data_dir: data_dir.to_string_lossy().to_string(),
+                            rpc_addr: None,
+                            pid: None,
+                            running: false,
+                            error: Some(msg),
+                        });
+                    }
+                }
+            } else if let Some(entry) = self.children.get(&name) {
+                statuses.push(ManagedPluginStatus {
+                    name: name.clone(),
+                    channel_id: cid.clone(),
+                    data_dir: entry.data_dir.to_string_lossy().to_string(),
+                    rpc_addr: None,
+                    pid: Some(entry.child.id()),
+                    running: true,
+                    error: None,
+                });
+            }
+        }
+        statuses
+    }
+
+    pub fn snapshot(&mut self) -> Vec<ManagedPluginStatus> {
+        let mut out = Vec::new();
+        for (name, entry) in &mut self.children {
+            let alive = matches!(entry.child.try_wait(), Ok(None));
+            out.push(ManagedPluginStatus {
+                name: name.clone(),
+                channel_id: entry.channel_id.clone(),
+                data_dir: entry.data_dir.to_string_lossy().to_string(),
+                rpc_addr: None,
+                pid: alive.then(|| entry.child.id()),
+                running: alive,
+                error: None,
+            });
+        }
+        out
+    }
+}
+
+impl Drop for ManagedPluginManager {
+    fn drop(&mut self) {
+        self.stop_all();
+    }
 }
 
 #[cfg(test)]

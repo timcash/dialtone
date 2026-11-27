@@ -216,12 +216,262 @@ pub struct NodeState {
     /// Outbound channel log broadcast queue drained by the Mesh actor.
     #[serde(skip)]
     pub channel_log_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::channel_log::ChannelLogEntry>>,
+    /// Outbound signed channel manifest broadcast queue drained by the Mesh actor.
+    #[serde(skip)]
+    pub manifest_tx:
+        Option<tokio::sync::mpsc::UnboundedSender<crate::channel_manifest::ChannelManifest>>,
+    /// Shared fail-closed channel manifest policy guard (also shared with `ShellHandler`).
+    #[serde(skip)]
+    pub policy_guard: Option<crate::channel_manifest::ChannelPolicyGuard>,
+    /// Daemon-managed per-channel plugin processes (gated behind `MeshConfig.managed_plugins`).
+    #[serde(skip)]
+    pub managed_plugins: Arc<Mutex<crate::plugin::ManagedPluginManager>>,
     /// Node's Ed25519 signing key (used to sign channel log entries posted via local API).
     #[serde(skip)]
     pub node_key: Option<iroh::SecretKey>,
 }
 
 impl NodeState {
+    pub fn state_dir(&self) -> PathBuf {
+        self.store_dir
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(default_state_dir)
+    }
+
+    pub fn active_channel_id(&self) -> Option<String> {
+        if let Some(keys) = self.mesh_config.active_channel_keys() {
+            return Some(keys.fingerprint());
+        }
+        let fp = self.mesh_config.channel_fingerprint.trim();
+        if self.mesh_config.configured
+            && !fp.is_empty()
+            && fp != "unconfigured"
+            && !fp.ends_with(":locked-standby")
+        {
+            return Some(fp.to_string());
+        }
+        None
+    }
+
+    pub fn check_plugin_policy(
+        &self,
+        plugin_name: &str,
+        version: Option<&str>,
+        digest: Option<&str>,
+    ) -> Result<crate::channel_manifest::PluginPolicyDecision, String> {
+        let state_dir = self.state_dir();
+        let active_cid = self.active_channel_id();
+        let decision = crate::channel_manifest::check_plugin_allowed(
+            &state_dir,
+            active_cid.as_deref(),
+            plugin_name,
+            version,
+            digest,
+        )?;
+        crate::channel_manifest::record_legacy_manifest_warning(
+            &state_dir,
+            &self.node,
+            self.node_key.as_ref(),
+            self.channel_log.as_ref(),
+            self.channel_log_tx.as_ref(),
+            &decision,
+        );
+        Ok(decision)
+    }
+
+    pub fn reconcile_managed_plugins(&mut self) {
+        let state_dir = self.state_dir();
+        let plugins_dir = crate::plugin::plugins_dir_for_store(&self.store_dir);
+        let api_url = if self.listen.starts_with("http://") || self.listen.starts_with("https://") {
+            self.listen.clone()
+        } else {
+            format!("http://{}", self.listen)
+        };
+        let ctx = crate::plugin::PluginDispatchContext {
+            state_dir,
+            plugins_dir,
+            api_url,
+            node_name: self.node.clone(),
+            channel_keys: self.mesh_config.active_channel_keys(),
+        };
+        let desired = self.mesh_config.managed_plugins.clone();
+        let guard = self.policy_guard.clone();
+        if let Ok(mut mgr) = self.managed_plugins.lock() {
+            let _ = mgr.reconcile(&ctx, &desired, &[], guard.as_ref());
+        }
+    }
+
+    /// Build `GET /api/channels` response matching `dialtone.channels.v1` in `API.md`.
+    pub fn channels_json(&self) -> Value {
+        let state_dir = self.state_dir();
+        let plugins_dir = crate::plugin::plugins_dir_for_store(&self.store_dir);
+        let active_cid = self.active_channel_id();
+        let self_node_id = self.iroh_runtime.node_id.clone();
+        let active_peers = self
+            .nodes
+            .iter()
+            .filter(|n| {
+                if self_node_id.is_empty() {
+                    n.node != self.node
+                } else {
+                    n.node_id != self_node_id
+                }
+            })
+            .count();
+        let managed_snapshot = self
+            .managed_plugins
+            .lock()
+            .map(|mut m| m.snapshot())
+            .unwrap_or_default();
+
+        let mut ordered_ids: Vec<String> = Vec::new();
+        if let Some(ref cid) = active_cid {
+            ordered_ids.push(cid.clone());
+        }
+        let channels_root = state_dir.join("channels");
+        if let Ok(entries) = fs::read_dir(&channels_root) {
+            let mut extra: Vec<String> = entries
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| {
+                    let id = e.file_name().to_string_lossy().to_string();
+                    let p = e.path();
+                    if crate::channel_manifest::validate_channel_id(&id).is_ok()
+                        && (p.join("config.json").is_file() || p.join("manifest.json").is_file())
+                    {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            extra.sort();
+            for id in extra {
+                if !ordered_ids.iter().any(|x| x.eq_ignore_ascii_case(&id)) {
+                    ordered_ids.push(id);
+                }
+            }
+        }
+
+        let mut channel_rows = Vec::new();
+        for cid in ordered_ids {
+            let is_active = active_cid
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(&cid));
+            let meta = crate::channel_manifest::load_channel_local_meta(&state_dir, &cid);
+            let manifest_opt =
+                crate::channel_manifest::load_channel_manifest(&state_dir, &cid)
+                    .ok()
+                    .flatten();
+            let name = if is_active {
+                self.mesh_config.channel.clone()
+            } else if let Some(ref m) = meta {
+                m.name.clone()
+            } else if let Some(ref man) = manifest_opt {
+                man.channel_name.clone()
+            } else {
+                cid.clone()
+            };
+            let joined_at_unix = meta
+                .as_ref()
+                .map(|m| m.joined_at_unix)
+                .filter(|t| *t > 0)
+                .or_else(|| {
+                    if is_active && self.mesh_config.updated_at_unix > 0 {
+                        Some(self.mesh_config.updated_at_unix)
+                    } else {
+                        None
+                    }
+                });
+            let is_admin = manifest_opt.as_ref().is_some_and(|m| {
+                crate::channel_manifest::is_local_admin(&state_dir, &cid, &self_node_id, m)
+            });
+            let manifest_summary = manifest_opt.as_ref().map(|m| m.summary());
+
+            let mut installed = crate::plugin::list_plugin_names(
+                &crate::mesh::channel_plugins_dir(&state_dir, &cid),
+            );
+            if is_active {
+                for p in crate::plugin::list_plugin_names(&plugins_dir) {
+                    if !installed.contains(&p) {
+                        installed.push(p);
+                    }
+                }
+            }
+            installed.sort();
+            installed.dedup();
+
+            let mut plugins_map = serde_json::Map::new();
+            for status in &managed_snapshot {
+                if status.channel_id.eq_ignore_ascii_case(&cid) {
+                    let mut info = crate::channel_manifest::discover_plugin_local_info(
+                        &state_dir,
+                        &plugins_dir,
+                        &cid,
+                        &status.name,
+                        is_active,
+                    );
+                    if let Some(obj) = info.as_object_mut() {
+                        obj.insert(
+                            "data_dir".to_string(),
+                            Value::String(status.data_dir.clone()),
+                        );
+                        if let Some(pid) = status.pid {
+                            obj.insert("pid".to_string(), json!(pid));
+                        }
+                        obj.insert("running".to_string(), json!(status.running));
+                    }
+                    plugins_map.insert(status.name.clone(), info);
+                }
+            }
+            for plugin_name in &installed {
+                if plugins_map.contains_key(plugin_name) {
+                    continue;
+                }
+                let data_dir = crate::mesh::channel_plugin_data_dir(&state_dir, &cid, plugin_name);
+                if matches!(plugin_name.as_str(), "task" | "agent") || data_dir.is_dir() {
+                    let info = crate::channel_manifest::discover_plugin_local_info(
+                        &state_dir,
+                        &plugins_dir,
+                        &cid,
+                        plugin_name,
+                        is_active,
+                    );
+                    plugins_map.insert(plugin_name.clone(), info);
+                }
+            }
+
+            let mut row = serde_json::Map::new();
+            row.insert("channel_id".to_string(), Value::String(cid));
+            row.insert("name".to_string(), Value::String(name));
+            row.insert("active".to_string(), Value::Bool(is_active));
+            if let Some(ts) = joined_at_unix {
+                row.insert("joined_at_unix".to_string(), json!(ts));
+            }
+            row.insert(
+                "peers".to_string(),
+                json!(if is_active { active_peers } else { 0 }),
+            );
+            row.insert("is_admin".to_string(), Value::Bool(is_admin));
+            row.insert(
+                "manifest".to_string(),
+                manifest_summary
+                    .map(|s| serde_json::to_value(s).unwrap_or(Value::Null))
+                    .unwrap_or(Value::Null),
+            );
+            row.insert("installed_plugins".to_string(), json!(installed));
+            row.insert("plugins".to_string(), Value::Object(plugins_map));
+            channel_rows.push(Value::Object(row));
+        }
+
+        json!({
+            "schema": "dialtone.channels.v1",
+            "node": self.node,
+            "channels": channel_rows,
+        })
+    }
+
     /// What this node tells a peer's HUD that focuses it (`fetch.rs` `details`), and its own
     /// HUD: everything beats leave out. Its devices, full probe, processes with their status,
     /// services, rolling summary, store, full stats and transport.
@@ -653,6 +903,7 @@ impl NodeState {
             daemon_installed: false,
             daemon_service_path: None,
             processes: Vec::new(),
+            managed_plugins: Vec::new(),
             updated_at_unix: now,
         };
         let api_token = load_or_create_api_token().unwrap_or_else(|_| "dtk-live-token".to_string());
@@ -696,6 +947,9 @@ impl NodeState {
             shell_manager: Arc::new(crate::shell::ShellManager::new(node.to_string())),
             channel_log: None,
             channel_log_tx: None,
+            manifest_tx: None,
+            policy_guard: None,
+            managed_plugins: Arc::new(Mutex::new(crate::plugin::ManagedPluginManager::new())),
             node_key: None,
         };
         st.record_event(
@@ -1265,6 +1519,12 @@ fn route_request(
             st.mesh_config.listen_addr = Some(st.listen.clone());
             st.mesh_config.updated_at_unix = now;
             let _ = save_mesh_config(&default_config_path(), &st.mesh_config);
+            let _ = crate::channel_manifest::ensure_channel_local_meta(
+                &st.state_dir(),
+                &fp,
+                &channel,
+                now,
+            );
 
             if let Some(stage5) = st.boot_stages.iter_mut().find(|s| s.step == 5) {
                 stage5.status = "ready".to_string();
@@ -1602,6 +1862,11 @@ fn route_request(
             let blobs = st.blobs.clone();
             let store = st.store.clone();
             let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
+            let state_dir = st.state_dir();
+            let active_cid = st.active_channel_id();
+            if let Err(err) = st.check_plugin_policy(&name, None, None) {
+                return write_json(&mut stream, 403, &json!({ "error": err }));
+            }
             drop(st);
 
             let res = if let Some(ticket_uri) = ticket {
@@ -1629,7 +1894,19 @@ fn route_request(
                 crate::plugin::install_builtin_plugin(&blobs, &plugins_dir, &name)
             };
             match res {
-                Ok(manifest) => write_json(&mut stream, 200, &manifest),
+                Ok(manifest) => {
+                    if let Err(err) = crate::channel_manifest::check_plugin_allowed(
+                        &state_dir,
+                        active_cid.as_deref(),
+                        &manifest.name,
+                        Some(&manifest.version),
+                        Some(&manifest.blob_digest),
+                    ) {
+                        let _ = crate::plugin::remove_installed_plugin(&plugins_dir, &manifest.name);
+                        return write_json(&mut stream, 403, &json!({ "error": err }));
+                    }
+                    write_json(&mut stream, 200, &manifest)
+                }
                 Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
             }
         }
@@ -1701,6 +1978,11 @@ fn route_request(
 
             let runtime = st.runtime.clone();
             if is_local {
+                if let Err(err) =
+                    st.check_plugin_policy(crate::plugin::SHELL_PLUGIN_NAME, None, None)
+                {
+                    return write_json(&mut stream, 403, &json!({ "error": err }));
+                }
                 let blobs = st.blobs.clone();
                 let plugins_dir = crate::plugin::plugins_dir_for_store(&st.store_dir);
                 let mgr = st.shell_manager.clone();
@@ -1956,15 +2238,113 @@ fn route_request(
                 }
             }
         }
+        ("GET", "/api/channels") => {
+            let body = st.channels_json();
+            write_json(&mut stream, 200, &body)
+        }
+        ("GET", "/api/channel/manifest") => {
+            let requested = query
+                .get("channel")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let active_cid = st.active_channel_id().unwrap_or_else(|| "unconfigured".to_string());
+            let target_cid = requested.unwrap_or_else(|| active_cid.clone());
+            let state_dir = st.state_dir();
+            let self_node_id = st.iroh_runtime.node_id.clone();
+            match crate::channel_manifest::load_channel_manifest(&state_dir, &target_cid) {
+                Ok(Some(manifest)) => {
+                    let sig_valid = manifest.verify_for_channel(&target_cid).is_ok();
+                    let is_admin = crate::channel_manifest::is_local_admin(
+                        &state_dir,
+                        &target_cid,
+                        &self_node_id,
+                        &manifest,
+                    );
+                    write_json(
+                        &mut stream,
+                        200,
+                        &json!({
+                            "channel_id": target_cid,
+                            "is_admin": is_admin,
+                            "signature_valid": sig_valid,
+                            "manifest": manifest
+                        }),
+                    )
+                }
+                Ok(None) => write_json(
+                    &mut stream,
+                    200,
+                    &json!({
+                        "channel_id": target_cid,
+                        "is_admin": false,
+                        "signature_valid": false,
+                        "manifest": Value::Null
+                    }),
+                ),
+                Err(err) => write_json(&mut stream, 400, &json!({ "error": err })),
+            }
+        }
+        ("POST", "/api/channel/manifest") => {
+            let parsed: Value = serde_json::from_str(body_part).unwrap_or_else(|_| json!({}));
+            let manifest_val = parsed.get("manifest").cloned().unwrap_or(parsed);
+            let manifest: crate::channel_manifest::ChannelManifest =
+                match serde_json::from_value(manifest_val) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        return write_json(
+                            &mut stream,
+                            400,
+                            &json!({ "error": format!("invalid channel manifest payload: {err}") }),
+                        );
+                    }
+                };
+            let Some(active_cid) = st.active_channel_id() else {
+                return write_json(
+                    &mut stream,
+                    400,
+                    &json!({ "error": "no active channel configured on this node" }),
+                );
+            };
+            let state_dir = st.state_dir();
+            match crate::channel_manifest::apply_incoming_manifest(&state_dir, &active_cid, &manifest) {
+                Ok(changed) => {
+                    if let Some(ref tx) = st.manifest_tx {
+                        let _ = tx.send(manifest.clone());
+                    }
+                    st.reconcile_managed_plugins();
+                    write_json(
+                        &mut stream,
+                        200,
+                        &json!({
+                            "status": if changed { "updated" } else { "unchanged" },
+                            "channel_id": active_cid,
+                            "manifest": manifest
+                        }),
+                    )
+                }
+                Err(err) => write_json(&mut stream, 403, &json!({ "error": err })),
+            }
+        }
         ("GET", "/api/channel/log") => {
             let requested_channel = query
                 .get("channel")
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
+            let since_ms = query
+                .get("since_ms")
+                .and_then(|v| v.parse::<u64>().ok())
+                .or_else(|| {
+                    query.get("since_hlc").and_then(|v| {
+                        v.trim()
+                            .split([':', '-', '.'])
+                            .next()
+                            .and_then(|ms| ms.parse::<u64>().ok())
+                    })
+                });
             let filter = crate::channel_log::ChannelLogQuery {
                 source: query.get("source").cloned(),
                 task_id: query.get("task_id").cloned(),
-                since_ms: query.get("since_ms").and_then(|v| v.parse::<u64>().ok()),
+                since_ms,
                 limit: query.get("limit").and_then(|v| v.parse::<usize>().ok()),
             };
             let active_cid = st

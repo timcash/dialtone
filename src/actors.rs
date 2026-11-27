@@ -137,9 +137,14 @@ pub(crate) fn spawn_all(ctx: Ctx, mut start: MeshStart) -> Vec<JoinHandle<()>> {
     let (deploy_tx, deploy_rx) = mpsc::unbounded_channel();
     let (probe_tx, probe_rx) = mpsc::unbounded_channel();
     let (channel_log_tx, channel_log_rx) = mpsc::unbounded_channel();
+    let (manifest_tx, manifest_rx) = mpsc::unbounded_channel();
     ctx.with_state(|st| {
         st.probe_tx = Some(probe_tx);
-        st.channel_log_tx = Some(channel_log_tx);
+        st.channel_log_tx = Some(channel_log_tx.clone());
+        st.manifest_tx = Some(manifest_tx);
+        if let Some(ref guard) = st.policy_guard {
+            guard.set_channel_log_tx(Some(channel_log_tx));
+        }
         st.runtime = Some(tokio::runtime::Handle::current());
     });
     let mesh = Mesh::new(
@@ -153,6 +158,7 @@ pub(crate) fn spawn_all(ctx: Ctx, mut start: MeshStart) -> Vec<JoinHandle<()>> {
         deploy_tx,
         update_tx,
         channel_log_rx,
+        manifest_rx,
     );
     let mut actors = vec![
         tokio::spawn(mesh.run()),
@@ -1192,6 +1198,10 @@ struct Mesh {
     update_tx: mpsc::UnboundedSender<UpdateHint>,
     /// Outbound channel log entries written via local API to be sealed and gossiped.
     channel_log_rx: mpsc::UnboundedReceiver<dialtone::channel_log::ChannelLogEntry>,
+    /// Outbound signed channel manifests updated via CLI/API to broadcast on the events topic.
+    manifest_rx: mpsc::UnboundedReceiver<dialtone::channel_manifest::ChannelManifest>,
+    /// Last monotonic timestamp when the active channel's signed manifest was announced on gossip.
+    manifest_announced_at: u64,
 }
 
 /// The next event on a topic, or never when not subscribed.
@@ -1226,6 +1236,7 @@ impl Mesh {
         deploy_tx: mpsc::UnboundedSender<Deploy>,
         update_tx: mpsc::UnboundedSender<UpdateHint>,
         channel_log_rx: mpsc::UnboundedReceiver<dialtone::channel_log::ChannelLogEntry>,
+        manifest_rx: mpsc::UnboundedReceiver<dialtone::channel_manifest::ChannelManifest>,
     ) -> Self {
         let local_ipv4 = detect_non_tailnet_ipv4();
         let local_pub = own_public_ipv4(&ctx.endpoint);
@@ -1280,6 +1291,8 @@ impl Mesh {
             deploy_tx,
             update_tx,
             channel_log_rx,
+            manifest_rx,
+            manifest_announced_at: 0,
         }
     }
 
@@ -1317,6 +1330,9 @@ impl Mesh {
                             .await;
                         }
                     }
+                }
+                Some(manifest) = self.manifest_rx.recv() => {
+                    self.broadcast_manifest(manifest).await;
                 }
                 _ = beat_tick.tick() => {
                     self.on_beat_tick().await;
@@ -1954,13 +1970,27 @@ impl Mesh {
                     .map(std::path::Path::to_path_buf)
                     .unwrap_or_else(dialtone::mesh::default_state_dir);
                 let log_path = dialtone::channel_log::channel_log_path(&state_dir, &fingerprint);
-                if let Ok(new_log) =
-                    dialtone::channel_log::ChannelLogStore::open(&log_path, fingerprint.clone())
-                {
-                    self.ctx.with_state(|st| {
-                        st.channel_log = Some(Arc::new(Mutex::new(new_log)));
-                    });
-                }
+                let _ = dialtone::channel_manifest::ensure_channel_local_meta(
+                    &state_dir,
+                    &fingerprint,
+                    &self.channel,
+                    now_unix(),
+                );
+                let new_log_arc = dialtone::channel_log::ChannelLogStore::open(
+                    &log_path,
+                    fingerprint.clone(),
+                )
+                .ok()
+                .map(|s| Arc::new(Mutex::new(s)));
+                self.ctx.with_state(|st| {
+                    st.channel_log = new_log_arc.clone();
+                    if let Some(ref guard) = st.policy_guard {
+                        guard.set_node_name(self.node.clone());
+                        guard.set_active_channel(Some(fingerprint.clone()), new_log_arc.clone());
+                    }
+                    st.reconcile_managed_plugins();
+                });
+                self.manifest_announced_at = 0;
 
                 let mut boot_ids = Vec::new();
                 let mut addrs: Vec<EndpointAddr> = default_seeds();
@@ -2268,10 +2298,97 @@ impl Mesh {
         self.broadcast(&Message::Beat(beat)).await;
         self.counter += 1;
         self.announce_deploys().await;
+        self.maybe_announce_manifest().await;
+        self.ctx.with_state(|st| st.reconcile_managed_plugins());
         self.ctx
             .net
             .last_tick_ms
             .store(monotonic_now_ms(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn state_dir(&self) -> PathBuf {
+        self.ctx
+            .config_path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(dialtone::mesh::default_state_dir)
+    }
+
+    async fn broadcast_manifest(&mut self, manifest: dialtone::channel_manifest::ChannelManifest) {
+        let Some(ref keys) = self.keys else {
+            return;
+        };
+        if manifest.verify_for_channel(&keys.fingerprint()).is_err() {
+            return;
+        }
+        let env = dialtone::channel_manifest::ManifestEnvelope {
+            node: self.node.clone(),
+            node_id: self.ctx.node_id.clone(),
+            manifest,
+            sent_unix_ms: 0,
+        };
+        if let (Some((wire, _)), Some(tx)) =
+            (self.seal(&Message::Manifest(env)), &self.events_sender)
+        {
+            self.ctx.net.count_out(wire.len());
+            let _ = tokio::time::timeout(Duration::from_millis(600), tx.broadcast(wire.into()))
+                .await;
+            self.manifest_announced_at = monotonic_now_ms();
+        }
+    }
+
+    async fn maybe_announce_manifest(&mut self) {
+        let Some(ref keys) = self.keys else {
+            return;
+        };
+        if self.events_sender.is_none() {
+            return;
+        }
+        let now = monotonic_now_ms();
+        let due = self.manifest_announced_at == 0
+            || self.new_node_seen
+            || now.saturating_sub(self.manifest_announced_at) >= REANNOUNCE_EVERY.as_millis() as u64;
+        if !due {
+            return;
+        }
+        let cid = keys.fingerprint();
+        let state_dir = self.state_dir();
+        if let Ok(Some(manifest)) =
+            dialtone::channel_manifest::load_channel_manifest(&state_dir, &cid)
+        {
+            if manifest.verify_for_channel(&cid).is_ok() {
+                self.broadcast_manifest(manifest).await;
+            }
+        }
+    }
+
+    fn on_manifest(&mut self, env: dialtone::channel_manifest::ManifestEnvelope) {
+        let Some(ref keys) = self.keys else {
+            return;
+        };
+        if !self.ctx.allowlist.admits_str(&env.node_id) {
+            return;
+        }
+        let cid = keys.fingerprint();
+        let state_dir = self.state_dir();
+        match dialtone::channel_manifest::apply_incoming_manifest(&state_dir, &cid, &env.manifest) {
+            Ok(true) => {
+                println!(
+                    "[manifest] accepted signed manifest for '{}' seq={} (admin={}, allowed=[{}])",
+                    cid,
+                    env.manifest.seq,
+                    &env.manifest.admin[..env.manifest.admin.len().min(12)],
+                    env.manifest.allowed_plugins.join(", ")
+                );
+                self.ctx.with_state(|st| {
+                    st.reconcile_managed_plugins();
+                });
+            }
+            Ok(false) => {}
+            Err(reason) => {
+                eprintln!("[manifest-reject] dropped manifest from {}: {reason}", env.node);
+            }
+        }
     }
 
     /// Admit a message only if it opens with the channel key, its signature matches a
@@ -2370,6 +2487,7 @@ impl Mesh {
             Message::Deploy(deploy) => {
                 let _ = self.deploy_tx.send(deploy);
             }
+            Message::Manifest(env) => self.on_manifest(env),
         }
     }
 

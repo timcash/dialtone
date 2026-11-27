@@ -45,6 +45,8 @@ fn print_usage() {
          \x20 join <invite>            Join a channel with an invite from any member (dialtone-invite-v2:...),\n\
          \x20                          install this binary and start the node at login (--once: only join)\n\
          \x20 join <secret>            Unlock (or start) a channel with its secret\n\
+         \x20 channel create <name> [--allow task,shell,agent] Create a channel and sign its seq=1 manifest\n\
+         \x20 channel manifest [init|sign|show|allow <plugin>|deny <plugin>] Manage signed channel policy manifest\n\
          \x20 secret                   Generate a new channel secret (dt-...)\n\
          \x20 allowlist [list|add|remove] [<node_id>] Manage the allowlist in ~/.dialtone/config.json\n\
          \x20 blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket\n\
@@ -144,6 +146,12 @@ struct CliOptions {
     log_source: Option<String>,
     log_task_id: Option<String>,
     log_limit: Option<usize>,
+    channel_subcmd: String,
+    channel_manifest_subcmd: String,
+    channel_target: Option<String>,
+    channel_allow: Vec<String>,
+    manifest_min_version: Option<String>,
+    manifest_digest: Option<String>,
     follow: bool,
     force: bool,
     json: bool,
@@ -221,6 +229,12 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         log_source: None,
         log_task_id: None,
         log_limit: None,
+        channel_subcmd: String::new(),
+        channel_manifest_subcmd: "show".to_string(),
+        channel_target: None,
+        channel_allow: Vec::new(),
+        manifest_min_version: None,
+        manifest_digest: None,
         follow: false,
         force: false,
         json: false,
@@ -242,6 +256,52 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "secret" if !action_set => {
                 opts.action = "secret".to_string();
                 action_set = true;
+            }
+            "channel" if !action_set => {
+                opts.action = "channel".to_string();
+                action_set = true;
+                if let Some(sub) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                    idx += 1;
+                    opts.channel_subcmd = sub.clone();
+                    if opts.channel_subcmd == "create" {
+                        if let Some(name) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                            idx += 1;
+                            opts.channel_target = Some(name.clone());
+                        }
+                    } else if opts.channel_subcmd == "manifest" {
+                        if let Some(msub) = args.get(idx + 1).filter(|s| !s.starts_with('-')) {
+                            idx += 1;
+                            opts.channel_manifest_subcmd = msub.clone();
+                            if matches!(opts.channel_manifest_subcmd.as_str(), "allow" | "deny") {
+                                if let Some(plug) =
+                                    args.get(idx + 1).filter(|s| !s.starts_with('-'))
+                                {
+                                    idx += 1;
+                                    opts.channel_target = Some(plug.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "--allow" if opts.action == "channel" => {
+                idx += 1;
+                let raw = args.get(idx).ok_or("missing --allow value")?;
+                for part in raw.split(',') {
+                    let trimmed = part.trim();
+                    if !trimmed.is_empty() {
+                        opts.channel_allow.push(trimmed.to_string());
+                    }
+                }
+            }
+            "--min-version" if opts.action == "channel" => {
+                idx += 1;
+                opts.manifest_min_version =
+                    Some(args.get(idx).ok_or("missing --min-version value")?.clone());
+            }
+            "--digest" if opts.action == "channel" => {
+                idx += 1;
+                opts.manifest_digest = Some(args.get(idx).ok_or("missing --digest value")?.clone());
             }
             "blob" if !action_set => {
                 opts.action = "blob".to_string();
@@ -835,16 +895,32 @@ async fn join_with_invite(opts: &CliOptions, raw: &str) -> Result<serde_json::Va
     cfg.node_name = Some(opts.node.clone());
     cfg.listen_addr = Some(opts.listen.clone());
     let keys = cfg.apply_keys(&answer.channel, answer.derived_keys)?;
+    let cid = keys.fingerprint();
     let cleared = std::mem::take(&mut cfg.allowlist).len();
     cfg.seeds = answer.seeds;
-    cfg.updated_at_unix = now_unix();
+    let now = now_unix();
+    cfg.updated_at_unix = now;
     save_mesh_config(&path, &cfg)?;
+    let state_dir = dialtone::mesh::default_state_dir();
+    let _ = dialtone::channel_manifest::ensure_channel_local_meta(
+        &state_dir,
+        &cid,
+        &keys.channel,
+        now,
+    );
+    let mut manifest_seq: Option<u64> = None;
+    if let Some(ref m) = answer.manifest {
+        if dialtone::channel_manifest::apply_incoming_manifest(&state_dir, &cid, m).is_ok() {
+            manifest_seq = Some(m.seq);
+        }
+    }
     Ok(json!({
         "status": "joined",
         "node": opts.node,
         "node_id": node_id,
         "channel": keys.channel,
-        "channel_fingerprint": keys.fingerprint(),
+        "channel_fingerprint": cid,
+        "manifest_seq": manifest_seq,
         "seeds": cfg.seeds.len(),
         "allowlist_cleared": cleared,
         "config_path": path
@@ -1277,6 +1353,14 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         .map(|st| st.shell_manager.clone())
         .unwrap_or_else(|| Arc::new(dialtone::shell::ShellManager::new(opts.node.clone())));
     let plugins_dir = dialtone::plugin::plugins_dir_for_store(blobs.dir());
+    let state_dir = dialtone::mesh::default_state_dir();
+    let active_cid = active_keys.as_ref().map(|k| k.fingerprint());
+    let policy_guard = dialtone::channel_manifest::ChannelPolicyGuard::new(
+        state_dir.clone(),
+        active_cid.clone(),
+        opts.node.clone(),
+        Some(node_key.clone()),
+    );
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
         .accept(iroh_blobs::ALPN, blobs_proto.clone())
@@ -1292,21 +1376,31 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         )
         .accept(
             dialtone::shell::ALPN,
-            dialtone::shell::ShellHandler::new(shell_manager, blobs.clone(), plugins_dir),
+            dialtone::shell::ShellHandler::new(shell_manager, blobs.clone(), plugins_dir)
+                .with_policy(policy_guard.clone()),
         )
         .spawn();
 
     if let Some(st_arc) = &shared_state {
         if let Ok(mut st) = st_arc.lock() {
             st.node_key = Some(node_key.clone());
+            st.policy_guard = Some(policy_guard.clone());
             if let Some(ref keys) = active_keys {
                 let cid = keys.fingerprint();
-                let log_path = dialtone::channel_log::channel_log_path(
-                    &dialtone::mesh::default_state_dir(),
+                let _ = dialtone::channel_manifest::ensure_channel_local_meta(
+                    &state_dir,
                     &cid,
+                    &keys.channel,
+                    now_unix(),
                 );
-                if let Ok(store) = dialtone::channel_log::ChannelLogStore::open(&log_path, cid) {
-                    st.channel_log = Some(Arc::new(Mutex::new(store)));
+                let log_path = dialtone::channel_log::channel_log_path(&state_dir, &cid);
+                if let Ok(store) = dialtone::channel_log::ChannelLogStore::open(&log_path, cid.clone()) {
+                    let log_arc = Arc::new(Mutex::new(store));
+                    st.channel_log = Some(log_arc.clone());
+                    policy_guard.set_active_channel(Some(cid), Some(log_arc));
+                }
+                if !opts.once {
+                    st.reconcile_managed_plugins();
                 }
             }
         }
@@ -2082,7 +2176,33 @@ async fn main() {
                 60,
             ) {
                 Ok(v) => v,
+                Err(daemon_err)
+                    if daemon_err.contains("403")
+                        || daemon_err.contains("not allowed by channel")
+                        || daemon_err.contains("manifest")
+                        || daemon_err.contains("min_version")
+                        || daemon_err.contains("pinned") =>
+                {
+                    return Err(daemon_err);
+                }
                 Err(daemon_err) if opts.plugin_ticket.is_none() => {
+                    let state_dir = dialtone::mesh::default_state_dir();
+                    let active_cid = cfg.active_channel_keys().map(|k| k.fingerprint());
+                    let decision = dialtone::channel_manifest::check_plugin_allowed(
+                        &state_dir,
+                        active_cid.as_deref(),
+                        name,
+                        None,
+                        None,
+                    )?;
+                    dialtone::channel_manifest::record_legacy_manifest_warning(
+                        &state_dir,
+                        &opts.node,
+                        None,
+                        None,
+                        None,
+                        &decision,
+                    );
                     let store_dir = default_store_dir();
                     let plugins_dir = dialtone::plugin::plugins_dir_for_store(&store_dir);
                     let blobs = Blobs::open(&store_dir)
@@ -2108,6 +2228,16 @@ async fn main() {
                     };
                     blobs.close().await;
                     let manifest = res?;
+                    if let Err(err) = dialtone::channel_manifest::check_plugin_allowed(
+                        &state_dir,
+                        active_cid.as_deref(),
+                        &manifest.name,
+                        Some(&manifest.version),
+                        Some(&manifest.blob_digest),
+                    ) {
+                        let _ = dialtone::plugin::remove_installed_plugin(&plugins_dir, &manifest.name);
+                        return Err(err);
+                    }
                     serde_json::to_value(&manifest).unwrap_or_default()
                 }
                 Err(err) => return Err(err),
@@ -2683,6 +2813,12 @@ async fn main() {
             }
             cfg.updated_at_unix = now;
             let _ = save_mesh_config(&default_config_path(), &cfg);
+            let _ = dialtone::channel_manifest::ensure_channel_local_meta(
+                &dialtone::mesh::default_state_dir(),
+                &fp,
+                &channel,
+                now,
+            );
 
             let api_token = opts
                 .api_token
@@ -2771,6 +2907,394 @@ async fn main() {
                 .unwrap()
             );
         }),
+        "channel" => (|| -> Result<(), String> {
+            let state_dir = dialtone::mesh::default_state_dir();
+            let config_path = default_config_path();
+            let mut cfg = load_mesh_config(&config_path);
+            let listen = match (&cfg.listen_addr, opts.listen_explicit) {
+                (Some(saved), false) => saved.clone(),
+                _ => opts.listen.clone(),
+            };
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+
+            let broadcast_to_daemon = |manifest: &dialtone::channel_manifest::ChannelManifest| {
+                let _ = local_daemon_http_json(
+                    &listen,
+                    "POST",
+                    "/api/channel/manifest",
+                    Some(&json!({ "manifest": manifest })),
+                    &api_token,
+                    5,
+                );
+            };
+
+            match opts.channel_subcmd.as_str() {
+                "create" => {
+                    let raw_name = opts
+                        .channel_target
+                        .as_deref()
+                        .ok_or("usage: dialtone channel create <name> [--allow task,shell,agent] [--json]")?;
+                    let channel = normalize_channel_name(Some(raw_name));
+                    let secret = new_secret();
+                    let now = now_unix();
+                    cfg.node_name = Some(opts.node.clone());
+                    cfg.listen_addr = Some(listen.clone());
+                    let keys = cfg.apply_secret(&channel, &secret);
+                    let cid = keys.fingerprint();
+                    cfg.updated_at_unix = now;
+                    save_mesh_config(&config_path, &cfg)?;
+                    dialtone::channel_manifest::ensure_channel_local_meta(
+                        &state_dir, &cid, &channel, now,
+                    )?;
+                    let admin_key =
+                        dialtone::channel_manifest::load_channel_admin_key(&state_dir, &cid)?;
+                    let manifest = dialtone::channel_manifest::ChannelManifest::new_signed(
+                        &cid,
+                        &channel,
+                        &opts.channel_allow,
+                        &admin_key,
+                    )?;
+                    let mpath =
+                        dialtone::channel_manifest::save_channel_manifest(&state_dir, &manifest)?;
+                    let _ = try_join_running_local_daemon(
+                        &listen,
+                        &channel,
+                        &secret,
+                        &[],
+                        if opts.node_explicit {
+                            Some(opts.node.as_str())
+                        } else {
+                            None
+                        },
+                        &api_token,
+                    );
+                    broadcast_to_daemon(&manifest);
+                    if opts.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&json!({
+                                "status": "created",
+                                "channel": channel,
+                                "channel_id": cid,
+                                "admin": manifest.admin,
+                                "seq": manifest.seq,
+                                "allowed_plugins": manifest.allowed_plugins,
+                                "manifest_path": mpath,
+                                "manifest": manifest,
+                            }))
+                            .unwrap_or_default()
+                        );
+                    } else {
+                        println!(
+                            "created channel '{}' ({}) with creator admin {} (seq={}, allowed=[{}])",
+                            channel,
+                            cid,
+                            &manifest.admin[..manifest.admin.len().min(12)],
+                            manifest.seq,
+                            manifest.allowed_plugins.join(", ")
+                        );
+                    }
+                    Ok(())
+                }
+                "manifest" => {
+                    let target_cid = opts
+                        .log_channel
+                        .clone()
+                        .or_else(|| cfg.active_channel_keys().map(|k| k.fingerprint()))
+                        .or_else(|| {
+                            let fp = cfg.channel_fingerprint.trim();
+                            if !fp.is_empty()
+                                && fp != "unconfigured"
+                                && !fp.ends_with(":locked-standby")
+                            {
+                                Some(fp.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .ok_or("no active channel configured; join or create a channel first, or pass --channel <channel_id>")?;
+                    let channel_name = dialtone::channel_manifest::load_channel_local_meta(
+                        &state_dir,
+                        &target_cid,
+                    )
+                    .map(|m| m.name)
+                    .unwrap_or_else(|| cfg.channel.clone());
+
+                    match opts.channel_manifest_subcmd.as_str() {
+                        "init" => {
+                            let admin_key = dialtone::channel_manifest::load_channel_admin_key(
+                                &state_dir,
+                                &target_cid,
+                            )?;
+                            let local_pub = admin_key.public().to_string();
+                            if let Some(existing) =
+                                dialtone::channel_manifest::load_channel_manifest(
+                                    &state_dir,
+                                    &target_cid,
+                                )?
+                            {
+                                if !existing.admin.eq_ignore_ascii_case(&local_pub) {
+                                    return Err(format!(
+                                        "refusing manifest init for '{target_cid}': manifest already owned by admin {}",
+                                        existing.admin
+                                    ));
+                                }
+                                return Err(format!(
+                                    "channel '{target_cid}' manifest already initialized at seq {}; use 'dialtone channel manifest allow|deny|sign'",
+                                    existing.seq
+                                ));
+                            }
+                            let manifest =
+                                dialtone::channel_manifest::ChannelManifest::new_signed(
+                                    &target_cid,
+                                    &channel_name,
+                                    &opts.channel_allow,
+                                    &admin_key,
+                                )?;
+                            let mpath = dialtone::channel_manifest::save_channel_manifest(
+                                &state_dir,
+                                &manifest,
+                            )?;
+                            let _ = dialtone::channel_manifest::ensure_channel_local_meta(
+                                &state_dir,
+                                &target_cid,
+                                &channel_name,
+                                now_unix(),
+                            );
+                            broadcast_to_daemon(&manifest);
+                            if opts.json {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&json!({
+                                        "status": "initialized",
+                                        "manifest_path": mpath,
+                                        "manifest": manifest
+                                    }))
+                                    .unwrap_or_default()
+                                );
+                            } else {
+                                println!(
+                                    "initialized manifest for '{}' ({}) seq={} admin={} allowed=[{}]",
+                                    manifest.channel_name,
+                                    manifest.channel_id,
+                                    manifest.seq,
+                                    &manifest.admin[..manifest.admin.len().min(12)],
+                                    manifest.allowed_plugins.join(", ")
+                                );
+                            }
+                            Ok(())
+                        }
+                        "sign" => {
+                            let mut manifest =
+                                dialtone::channel_manifest::load_channel_manifest(
+                                    &state_dir,
+                                    &target_cid,
+                                )?
+                                .ok_or_else(|| {
+                                    format!(
+                                        "channel '{target_cid}' has no manifest yet; run 'dialtone channel manifest init'"
+                                    )
+                                })?;
+                            let admin_key = dialtone::channel_manifest::load_channel_admin_key(
+                                &state_dir,
+                                &target_cid,
+                            )?;
+                            manifest.bump_and_sign(&admin_key)?;
+                            dialtone::channel_manifest::save_channel_manifest(
+                                &state_dir,
+                                &manifest,
+                            )?;
+                            broadcast_to_daemon(&manifest);
+                            if opts.json {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&manifest).unwrap_or_default()
+                                );
+                            } else {
+                                println!(
+                                    "signed manifest for '{}' seq={} allowed=[{}]",
+                                    manifest.channel_id,
+                                    manifest.seq,
+                                    manifest.allowed_plugins.join(", ")
+                                );
+                            }
+                            Ok(())
+                        }
+                        "show" => {
+                            let manifest_opt =
+                                dialtone::channel_manifest::load_channel_manifest(
+                                    &state_dir,
+                                    &target_cid,
+                                )?;
+                            let self_id =
+                                load_or_create_secret_key_at(&default_secret_key_path())
+                                    .ok()
+                                    .map(|k| k.public().to_string())
+                                    .unwrap_or_default();
+                            match manifest_opt {
+                                Some(manifest) => {
+                                    let valid = manifest.verify_for_channel(&target_cid).is_ok();
+                                    let is_admin = dialtone::channel_manifest::is_local_admin(
+                                        &state_dir,
+                                        &target_cid,
+                                        &self_id,
+                                        &manifest,
+                                    );
+                                    if opts.json {
+                                        println!(
+                                            "{}",
+                                            serde_json::to_string_pretty(&json!({
+                                                "channel_id": target_cid,
+                                                "is_admin": is_admin,
+                                                "signature_valid": valid,
+                                                "manifest": manifest
+                                            }))
+                                            .unwrap_or_default()
+                                        );
+                                    } else {
+                                        println!("channel_id:      {}", manifest.channel_id);
+                                        println!("channel_name:    {}", manifest.channel_name);
+                                        println!("schema:          {}", manifest.schema);
+                                        println!("seq:             {}", manifest.seq);
+                                        println!("admin:           {}", manifest.admin);
+                                        println!("is_admin:        {}", is_admin);
+                                        println!("signature_valid: {}", valid);
+                                        println!(
+                                            "allowed_plugins: {}",
+                                            manifest.allowed_plugins.join(", ")
+                                        );
+                                        println!("issued_at_unix:  {}", manifest.issued_at_unix);
+                                    }
+                                    Ok(())
+                                }
+                                None => {
+                                    if opts.json {
+                                        println!(
+                                            "{}",
+                                            serde_json::to_string_pretty(&json!({
+                                                "channel_id": target_cid,
+                                                "is_admin": false,
+                                                "signature_valid": false,
+                                                "manifest": serde_json::Value::Null
+                                            }))
+                                            .unwrap_or_default()
+                                        );
+                                    } else {
+                                        println!(
+                                            "channel '{target_cid}' has no signed manifest (legacy mode)"
+                                        );
+                                    }
+                                    Ok(())
+                                }
+                            }
+                        }
+                        "allow" => {
+                            let plugin = opts
+                                .channel_target
+                                .as_deref()
+                                .ok_or("usage: dialtone channel manifest allow <plugin> [--min-version <v>] [--digest <sha256:...>]")?;
+                            let mut manifest =
+                                dialtone::channel_manifest::load_channel_manifest(
+                                    &state_dir,
+                                    &target_cid,
+                                )?
+                                .ok_or_else(|| {
+                                    format!(
+                                        "channel '{target_cid}' has no manifest yet; run 'dialtone channel manifest init'"
+                                    )
+                                })?;
+                            let admin_key = dialtone::channel_manifest::load_channel_admin_key(
+                                &state_dir,
+                                &target_cid,
+                            )?;
+                            let constraint = if opts.manifest_min_version.is_some()
+                                || opts.manifest_digest.is_some()
+                            {
+                                Some(dialtone::channel_manifest::PluginConstraint {
+                                    min_version: opts.manifest_min_version.clone(),
+                                    blob_digest: opts.manifest_digest.clone(),
+                                    blob_digests: std::collections::BTreeMap::new(),
+                                })
+                            } else {
+                                None
+                            };
+                            manifest.allow_plugin(plugin, constraint, &admin_key)?;
+                            dialtone::channel_manifest::save_channel_manifest(
+                                &state_dir,
+                                &manifest,
+                            )?;
+                            broadcast_to_daemon(&manifest);
+                            if opts.json {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&manifest).unwrap_or_default()
+                                );
+                            } else {
+                                println!(
+                                    "allowed plugin '{}' on '{}' (seq={}, allowed=[{}])",
+                                    plugin,
+                                    manifest.channel_id,
+                                    manifest.seq,
+                                    manifest.allowed_plugins.join(", ")
+                                );
+                            }
+                            Ok(())
+                        }
+                        "deny" => {
+                            let plugin = opts
+                                .channel_target
+                                .as_deref()
+                                .ok_or("usage: dialtone channel manifest deny <plugin>")?;
+                            let mut manifest =
+                                dialtone::channel_manifest::load_channel_manifest(
+                                    &state_dir,
+                                    &target_cid,
+                                )?
+                                .ok_or_else(|| {
+                                    format!(
+                                        "channel '{target_cid}' has no manifest yet; run 'dialtone channel manifest init'"
+                                    )
+                                })?;
+                            let admin_key = dialtone::channel_manifest::load_channel_admin_key(
+                                &state_dir,
+                                &target_cid,
+                            )?;
+                            manifest.deny_plugin(plugin, &admin_key)?;
+                            dialtone::channel_manifest::save_channel_manifest(
+                                &state_dir,
+                                &manifest,
+                            )?;
+                            broadcast_to_daemon(&manifest);
+                            if opts.json {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&manifest).unwrap_or_default()
+                                );
+                            } else {
+                                println!(
+                                    "denied plugin '{}' on '{}' (seq={}, allowed=[{}])",
+                                    plugin,
+                                    manifest.channel_id,
+                                    manifest.seq,
+                                    manifest.allowed_plugins.join(", ")
+                                );
+                            }
+                            Ok(())
+                        }
+                        other => Err(format!(
+                            "unknown channel manifest subcommand '{other}' (expected init, sign, show, allow, or deny)"
+                        )),
+                    }
+                }
+                other => Err(format!(
+                    "unknown channel subcommand '{other}' (expected create or manifest)"
+                )),
+            }
+        })(),
         "up" => run_node(opts).await,
         "plugin-dispatch" => {
             let name = opts.plugin_name.as_deref().unwrap_or("");

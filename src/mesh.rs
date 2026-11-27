@@ -30,6 +30,7 @@ const ENVELOPE_MAGIC: &[u8; 4] = b"dt6\0";
 const BEAT_TYPE: u8 = 1;
 const INVENTORY_TYPE: u8 = 2;
 const DEPLOY_TYPE: u8 = 3;
+const MANIFEST_TYPE: u8 = 4;
 /// Beats sent more than this far from local time (either direction) are rejected.
 pub const REPLAY_WINDOW_MS: u64 = 5 * 60 * 1000;
 pub const DIALTONE_INVITE_SCHEMA_V1: &str = "dialtone.invite.v1";
@@ -898,6 +899,11 @@ pub struct MeshConfig {
     pub daemon_installed: bool,
     pub daemon_service_path: Option<String>,
     pub processes: Vec<crate::service::ProcessSpec>,
+    /// Optional list of daemon-managed plugins (e.g. `["task", "agent"]`) started per joined
+    /// channel with `DIALTONE_CHANNEL_*` env vars when permitted by the channel manifest.
+    /// Default empty (off).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub managed_plugins: Vec<String>,
     pub updated_at_unix: u64,
 }
 
@@ -1626,6 +1632,8 @@ pub enum Message {
     Inventory(Inventory),
     /// On the events topic: a program the sender deploys to the mesh, or removes from it.
     Deploy(Deploy),
+    /// On the events topic: a signed channel policy manifest (`dialtone.channel.manifest.v1`).
+    Manifest(crate::channel_manifest::ManifestEnvelope),
 }
 
 impl Message {
@@ -1634,6 +1642,7 @@ impl Message {
             Message::Beat(b) => &b.node_id,
             Message::Inventory(i) => &i.node_id,
             Message::Deploy(d) => &d.node_id,
+            Message::Manifest(m) => &m.node_id,
         }
     }
 
@@ -1642,6 +1651,7 @@ impl Message {
             Message::Beat(b) => &b.node,
             Message::Inventory(i) => &i.node,
             Message::Deploy(d) => &d.node,
+            Message::Manifest(m) => &m.node,
         }
     }
 
@@ -1650,6 +1660,7 @@ impl Message {
             Message::Beat(b) => b.sent_unix_ms,
             Message::Inventory(i) => i.sent_unix_ms,
             Message::Deploy(d) => d.sent_unix_ms,
+            Message::Manifest(m) => m.sent_unix_ms,
         }
     }
 
@@ -1664,6 +1675,10 @@ impl Message {
             Message::Deploy(d) => (
                 DEPLOY_TYPE,
                 serde_json::to_vec(d).map_err(|e| e.to_string())?,
+            ),
+            Message::Manifest(m) => (
+                MANIFEST_TYPE,
+                serde_json::to_vec(m).map_err(|e| e.to_string())?,
             ),
         };
         let mut out = Vec::with_capacity(1 + body.len());
@@ -1681,6 +1696,9 @@ impl Message {
             Some((&DEPLOY_TYPE, body)) => Ok(Message::Deploy(
                 serde_json::from_slice(body).map_err(|e| format!("invalid deploy: {e}"))?,
             )),
+            Some((&MANIFEST_TYPE, body)) => Ok(Message::Manifest(
+                serde_json::from_slice(body).map_err(|e| format!("invalid manifest: {e}"))?,
+            )),
             Some((kind, _)) => Err(format!("unknown message type {kind}")),
             None => Err("empty message".to_string()),
         }
@@ -1693,6 +1711,7 @@ impl Message {
         match self {
             Message::Inventory(i) => format!("{}#inventory", i.node_id),
             Message::Deploy(d) => format!("{}#deploy#{}", d.node_id, d.process.name),
+            Message::Manifest(m) => format!("{}#manifest", m.node_id),
             Message::Beat(b) => b.node_id.clone(),
         }
     }
@@ -1701,7 +1720,7 @@ impl Message {
     pub fn into_beat(self) -> Option<Beat> {
         match self {
             Message::Beat(b) => Some(b),
-            Message::Inventory(_) | Message::Deploy(_) => None,
+            Message::Inventory(_) | Message::Deploy(_) | Message::Manifest(_) => None,
         }
     }
 
@@ -1718,6 +1737,9 @@ impl Message {
             Message::Deploy(d) => {
                 d.process = process_advert(&d.process);
                 d.sent_unix_ms = sent_unix_ms;
+            }
+            Message::Manifest(m) => {
+                m.sent_unix_ms = sent_unix_ms;
             }
         }
         msg

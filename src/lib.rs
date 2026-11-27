@@ -1,6 +1,7 @@
 pub mod api;
 pub mod blob;
 pub mod channel_log;
+pub mod channel_manifest;
 pub mod deploy;
 pub mod devices;
 pub mod exec;

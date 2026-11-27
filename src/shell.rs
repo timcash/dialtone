@@ -1056,12 +1056,14 @@ impl Drop for ShellManager {
     }
 }
 
-/// QUIC protocol handler for `dialtone/shell/1`, gated by verified `shell` plugin installation.
+/// QUIC protocol handler for `dialtone/shell/1`, gated by verified `shell` plugin installation
+/// and fail-closed against the active channel's signed manifest (`dialtone.channel.manifest.v1`).
 #[derive(Clone, Debug)]
 pub struct ShellHandler {
     manager: Arc<ShellManager>,
     blobs: Blobs,
     plugins_dir: PathBuf,
+    policy: Option<crate::channel_manifest::ChannelPolicyGuard>,
 }
 
 impl ShellHandler {
@@ -1070,7 +1072,13 @@ impl ShellHandler {
             manager,
             blobs,
             plugins_dir,
+            policy: None,
         }
+    }
+
+    pub fn with_policy(mut self, policy: crate::channel_manifest::ChannelPolicyGuard) -> Self {
+        self.policy = Some(policy);
+        self
     }
 
     async fn serve(&self, conn: Connection) -> Result<(), String> {
@@ -1091,6 +1099,16 @@ impl ShellHandler {
                     continue;
                 }
             };
+
+            if let Some(ref guard) = self.policy {
+                if let Err(error) = guard.check_and_log(SHELL_PLUGIN_NAME, None, None) {
+                    let payload =
+                        serde_json::to_vec(&ShellResponse::Error { error }).unwrap_or_default();
+                    let _ = send.write_all(&payload).await;
+                    let _ = send.finish();
+                    continue;
+                }
+            }
 
             let blobs = self.blobs.clone();
             let plugins_dir = self.plugins_dir.clone();

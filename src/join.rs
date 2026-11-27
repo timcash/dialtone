@@ -31,6 +31,8 @@ pub struct JoinAnswer {
     pub channel: String,
     pub derived_keys: ChannelKeysHex,
     pub seeds: Vec<Seed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<crate::channel_manifest::ChannelManifest>,
 }
 
 /// Mints invites and answers them. Keys and allowlist are read from `config.json` on each
@@ -96,10 +98,21 @@ impl Joins {
         let invite: OpenInvite = text.parse()?;
         let keys = self.open_channel_keys()?;
         invite.check(&keys, crate::now_unix())?;
+        let state_dir = self
+            .config_path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(crate::mesh::default_state_dir);
+        let cid = keys.fingerprint();
+        let manifest = crate::channel_manifest::load_channel_manifest(&state_dir, &cid)
+            .ok()
+            .flatten()
+            .filter(|m| m.verify_for_channel(&cid).is_ok());
         Ok(JoinAnswer {
             channel: keys.channel.clone(),
             derived_keys: keys.to_hex_bundle(),
             seeds: self.seeds(),
+            manifest,
         })
     }
 }
