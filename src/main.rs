@@ -48,6 +48,7 @@ fn print_usage() {
          \x20 secret                   Generate a new channel secret (dt-...)\n\
          \x20 allowlist [list|add|remove] [<node_id>] Manage the allowlist in ~/.dialtone/config.json\n\
          \x20 blob [share|pull] <arg>  Share a file or text as a blob, or pull a blob by ticket\n\
+         \x20 log [--channel <id>] [--follow] [--json] Read the encrypted channel-scoped log\n\
          \x20 link export <name> --udp|--tcp <ip:port>    Offer a local source to peers over a direct link\n\
          \x20 link import <node>/<name> --udp|--tcp <ip:port>  Open a peer's source and deliver it here\n\
          \x20 link [list|close <id>]   Show links (path direct or relay, Rtt, packets), or close one\n\
@@ -139,6 +140,11 @@ struct CliOptions {
     shell_name: Option<String>,
     shell_lines: usize,
     shell_command: Vec<String>,
+    log_channel: Option<String>,
+    log_source: Option<String>,
+    log_task_id: Option<String>,
+    log_limit: Option<usize>,
+    follow: bool,
     force: bool,
     json: bool,
     invite_ttl_secs: u64,
@@ -211,6 +217,11 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
         shell_name: None,
         shell_lines: 100,
         shell_command: Vec::new(),
+        log_channel: None,
+        log_source: None,
+        log_task_id: None,
+        log_limit: None,
+        follow: false,
         force: false,
         json: false,
         invite_ttl_secs: 86_400,
@@ -289,6 +300,29 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
             "invite" if !action_set => {
                 opts.action = "invite".to_string();
                 action_set = true;
+            }
+            "log" if !action_set => {
+                opts.action = "log".to_string();
+                action_set = true;
+            }
+            "--follow" | "-f" if opts.action == "log" => {
+                opts.follow = true;
+            }
+            "--source" if opts.action == "log" => {
+                idx += 1;
+                opts.log_source = Some(args.get(idx).ok_or("missing --source value")?.clone());
+            }
+            "--task-id" if opts.action == "log" => {
+                idx += 1;
+                opts.log_task_id = Some(args.get(idx).ok_or("missing --task-id value")?.clone());
+            }
+            "--limit" if opts.action == "log" => {
+                idx += 1;
+                let raw = args.get(idx).ok_or("missing --limit value")?;
+                opts.log_limit = Some(
+                    raw.parse::<usize>()
+                        .map_err(|e| format!("invalid --limit value: {e}"))?,
+                );
             }
             "exec" if !action_set => {
                 opts.action = "exec".to_string();
@@ -460,6 +494,7 @@ fn parse_cli(args: Vec<String>) -> Result<CliOptions, String> {
                 idx += 1;
                 let ch = args.get(idx).ok_or("missing --channel value")?;
                 opts.channel = normalize_channel_name(Some(ch));
+                opts.log_channel = Some(ch.trim().to_string());
             }
             "--secret" => {
                 idx += 1;
@@ -727,13 +762,15 @@ fn local_daemon_http_json(
     } else {
         format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
     };
-    stream
-        .write_all(req.as_bytes())
-        .map_err(|e| format!("write HTTP request to {listen_addr}: {e}"))?;
+    let write_err = stream.write_all(req.as_bytes()).err();
     let mut resp_bytes = Vec::new();
-    stream
-        .read_to_end(&mut resp_bytes)
-        .map_err(|e| format!("read HTTP response from {listen_addr}: {e}"))?;
+    let read_res = stream.read_to_end(&mut resp_bytes);
+    if resp_bytes.is_empty() {
+        if let Some(e) = write_err {
+            return Err(format!("write HTTP request to {listen_addr}: {e}"));
+        }
+        read_res.map_err(|e| format!("read HTTP response from {listen_addr}: {e}"))?;
+    }
     let resp_str = String::from_utf8_lossy(&resp_bytes);
     let (headers, body) = resp_str
         .split_once("\r\n\r\n")
@@ -1213,7 +1250,15 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
     if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
         st.gossip_metrics = Some(gossip.metrics().clone());
     }
-    let blobs_proto = iroh_blobs::BlobsProtocol::new(blobs.api(), None);
+    let blobs_proto = dialtone::blob::ChannelBlobsProtocol::new(
+        active_keys
+            .as_ref()
+            .map(|k| k.fingerprint())
+            .unwrap_or_else(|| format!("{active_channel}:locked-standby")),
+        iroh_blobs::BlobsProtocol::new(blobs.api(), None),
+        live_allowlist.clone(),
+        members.clone(),
+    );
     let links = dialtone::link::Links::new(endpoint.clone());
     if let Some(st) = shared_state.as_ref().and_then(|s| s.lock().ok()).as_mut() {
         st.links = Some(links.clone());
@@ -1234,7 +1279,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
     let plugins_dir = dialtone::plugin::plugins_dir_for_store(blobs.dir());
     let router = Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
-        .accept(iroh_blobs::ALPN, blobs_proto)
+        .accept(iroh_blobs::ALPN, blobs_proto.clone())
         .accept(
             dialtone::fetch::ALPN,
             dialtone::fetch::FetchHandler::new(shared_state.clone()),
@@ -1251,6 +1296,21 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         )
         .spawn();
 
+    if let Some(st_arc) = &shared_state {
+        if let Ok(mut st) = st_arc.lock() {
+            st.node_key = Some(node_key.clone());
+            if let Some(ref keys) = active_keys {
+                let cid = keys.fingerprint();
+                let log_path = dialtone::channel_log::channel_log_path(
+                    &dialtone::mesh::default_state_dir(),
+                    &cid,
+                );
+                if let Ok(store) = dialtone::channel_log::ChannelLogStore::open(&log_path, cid) {
+                    st.channel_log = Some(Arc::new(Mutex::new(store)));
+                }
+            }
+        }
+    }
     if let Some(st_arc) = &shared_state {
         let bridge = Store::new(
             endpoint.clone(),
@@ -1515,6 +1575,7 @@ async fn run_node(mut opts: CliOptions) -> Result<(), String> {
         blobs: blobs.clone(),
         allowlist: live_allowlist.clone(),
         members,
+        blobs_proto,
         state: shared_state.clone(),
         net: shared_state
             .as_ref()
@@ -1709,20 +1770,20 @@ async fn main() {
                         "usage: dialtone blob share <file-path-or-payload>".to_string()
                     })?;
                     let path = PathBuf::from(arg);
-                    let raw_bytes = if path.exists() && path.is_file() {
-                        std::fs::read(&path)
-                            .map_err(|e| format!("read file {}: {e}", path.display()))?
+                    let body = if path.exists() && path.is_file() {
+                        let abs = std::fs::canonicalize(&path).unwrap_or(path);
+                        json!({ "file_path": abs.to_string_lossy() })
                     } else {
-                        arg.as_bytes().to_vec()
+                        let b64 = dialtone::base64_encode(arg.as_bytes());
+                        json!({ "bytes_base64": b64 })
                     };
-                    let b64 = dialtone::base64_encode(&raw_bytes);
                     let resp = local_daemon_http_json(
                         &opts.listen,
                         "POST",
                         "/api/blob/share",
-                        Some(&json!({ "bytes_base64": b64 })),
+                        Some(&body),
                         &api_token,
-                        15,
+                        120,
                     )?;
                     println!("{}", serde_json::to_string_pretty(&resp).unwrap());
                     Ok(())
@@ -1741,7 +1802,7 @@ async fn main() {
                             "force": opts.force
                         })),
                         &api_token,
-                        30,
+                        150,
                     )?;
                     println!("{}", serde_json::to_string_pretty(&resp).unwrap());
                     Ok(())
@@ -1750,6 +1811,117 @@ async fn main() {
                     "unknown blob subcommand {other:?}; use: dialtone blob [share|pull] <arg>"
                 )),
             }
+        })(),
+        "log" => (|| -> Result<(), String> {
+            let api_token = opts
+                .api_token
+                .clone()
+                .or_else(|| load_or_create_api_token().ok())
+                .unwrap_or_default();
+            let cfg = load_mesh_config(&default_config_path());
+            let listen = match (&cfg.listen_addr, opts.listen_explicit) {
+                (Some(saved), false) => saved.clone(),
+                _ => opts.listen.clone(),
+            };
+            let target_channel = opts.log_channel.clone().unwrap_or_else(|| {
+                cfg.active_channel_keys()
+                    .map(|k| k.fingerprint())
+                    .unwrap_or_else(|| cfg.channel_fingerprint.clone())
+            });
+            let fetch_entries = |since_ms: Option<u64>| -> Result<(String, Vec<dialtone::channel_log::ChannelLogEntry>), String> {
+                let mut params: Vec<String> = Vec::new();
+                if !target_channel.is_empty() && target_channel != "unconfigured" {
+                    params.push(format!("channel={target_channel}"));
+                }
+                if let Some(ref src) = opts.log_source {
+                    params.push(format!("source={src}"));
+                }
+                if let Some(ref tid) = opts.log_task_id {
+                    params.push(format!("task_id={tid}"));
+                }
+                if let Some(ms) = since_ms {
+                    params.push(format!("since_ms={ms}"));
+                }
+                if let Some(lim) = opts.log_limit {
+                    params.push(format!("limit={lim}"));
+                }
+                let path = if params.is_empty() {
+                    "/api/channel/log".to_string()
+                } else {
+                    format!("/api/channel/log?{}", params.join("&"))
+                };
+                match local_daemon_http_json(&listen, "GET", &path, None, &api_token, 10) {
+                    Ok(resp) => {
+                        let cid = resp
+                            .get("channel_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(&target_channel)
+                            .to_string();
+                        let entries: Vec<dialtone::channel_log::ChannelLogEntry> = resp
+                            .get("entries")
+                            .cloned()
+                            .and_then(|v| serde_json::from_value(v).ok())
+                            .unwrap_or_default();
+                        Ok((cid, entries))
+                    }
+                    Err(_) => {
+                        let log_path = dialtone::channel_log::channel_log_path(
+                            &dialtone::mesh::default_state_dir(),
+                            &target_channel,
+                        );
+                        let store = dialtone::channel_log::ChannelLogStore::open(
+                            &log_path,
+                            target_channel.clone(),
+                        )?;
+                        let entries = store.query(&dialtone::channel_log::ChannelLogQuery {
+                            source: opts.log_source.clone(),
+                            task_id: opts.log_task_id.clone(),
+                            since_ms,
+                            limit: opts.log_limit,
+                        });
+                        Ok((target_channel.clone(), entries))
+                    }
+                }
+            };
+            let print_entry = |e: &dialtone::channel_log::ChannelLogEntry| {
+                if opts.json {
+                    println!("{}", serde_json::to_string(e).unwrap_or_default());
+                } else {
+                    let task_part = e
+                        .task_id
+                        .as_deref()
+                        .map(|t| format!(" task={t}"))
+                        .unwrap_or_default();
+                    println!(
+                        "{} [{}] {}/{}{task_part} ({}): {}",
+                        e.hlc_ms, e.channel_id, e.source, e.kind, e.author_node, e.message
+                    );
+                }
+            };
+            let mut last_ms: Option<u64> = None;
+            loop {
+                let (cid, entries) = fetch_entries(last_ms)?;
+                if opts.json && !opts.follow {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({
+                            "channel_id": cid,
+                            "entries": entries
+                        }))
+                        .unwrap_or_default()
+                    );
+                    break;
+                }
+                for e in &entries {
+                    print_entry(e);
+                    last_ms = Some(last_ms.map_or(e.hlc_ms, |m| m.max(e.hlc_ms)));
+                }
+                if !opts.follow {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Ok(())
         })(),
         "link" => (|| -> Result<(), String> {
             let api_token = opts
@@ -2619,6 +2791,7 @@ async fn main() {
                 plugins_dir,
                 api_url,
                 node_name: opts.node.clone(),
+                channel_keys: cfg.active_channel_keys(),
             };
             match dialtone::plugin::dispatch_plugin(&ctx, name, &opts.plugin_args) {
                 Ok(0) => Ok(()),

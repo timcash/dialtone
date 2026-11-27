@@ -176,3 +176,39 @@ fn cli_builtin_command_always_wins_over_same_named_plugin() {
         "plugin shadowed builtin command: {stdout}"
     );
 }
+
+#[test]
+fn cli_dispatches_plugin_with_channel_derived_key_and_hides_raw_secret() {
+    let dir = TempDir::new("dispatch-cli-channel-key");
+    let raw_secret = "dt-Cli_Channel_Plugin_Key_Test_2026!";
+    let mut cfg = dialtone::mesh::MeshConfig::default();
+    let keys = cfg.apply_secret("metal", raw_secret);
+    dialtone::mesh::save_mesh_config(&dir.path().join("config.json"), &cfg).unwrap();
+
+    install_mock_plugin(
+        dir.path(),
+        "task",
+        "#!/bin/sh\necho \"CID=$DIALTONE_CHANNEL_ID\"\necho \"PKEY=$DIALTONE_CHANNEL_PLUGIN_KEY\"\necho \"DDIR=$DIALTONE_CHANNEL_DATA_DIR\"\necho \"SEC=$DIALTONE_SECRET\"\n",
+        "@echo off\r\necho CID=%DIALTONE_CHANNEL_ID%\r\necho PKEY=%DIALTONE_CHANNEL_PLUGIN_KEY%\r\necho DDIR=%DIALTONE_CHANNEL_DATA_DIR%\r\necho SEC=%DIALTONE_SECRET%\r\n",
+    );
+
+    let (code, stdout, stderr) = run_cli(
+        dir.path(),
+        &["task", "status"],
+        &[("DIALTONE_SECRET", raw_secret)],
+    );
+    assert_eq!(code, 0, "stderr={stderr}");
+    let expected_cid = keys.fingerprint();
+    let expected_key = dialtone::mesh::derive_channel_plugin_key_hex(&keys, "task");
+    let expected_ddir = dialtone::mesh::channel_plugin_data_dir(dir.path(), &expected_cid, "task");
+    assert!(stdout.contains(&format!("CID={expected_cid}")), "{stdout}");
+    assert!(stdout.contains(&format!("PKEY={expected_key}")), "{stdout}");
+    assert!(
+        stdout.contains(&format!("DDIR={}", expected_ddir.display())),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains(raw_secret),
+        "raw channel secret leaked to plugin env: {stdout}"
+    );
+}

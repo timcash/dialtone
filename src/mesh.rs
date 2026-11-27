@@ -244,6 +244,78 @@ impl ChannelKeys {
     }
 }
 
+pub const PLUGIN_KEY_LABEL_PREFIX: &str = "dialtone/plugin-key/v1/";
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    const BLOCK_LEN: usize = 64;
+    let mut k_block = [0u8; BLOCK_LEN];
+    if key.len() > BLOCK_LEN {
+        let hashed: [u8; 32] = Sha256::digest(key).into();
+        k_block[..32].copy_from_slice(&hashed);
+    } else {
+        k_block[..key.len()].copy_from_slice(key);
+    }
+    let mut i_key_pad = [0x36u8; BLOCK_LEN];
+    let mut o_key_pad = [0x5cu8; BLOCK_LEN];
+    for i in 0..BLOCK_LEN {
+        i_key_pad[i] ^= k_block[i];
+        o_key_pad[i] ^= k_block[i];
+    }
+    let mut inner = Sha256::new();
+    inner.update(i_key_pad);
+    inner.update(data);
+    let inner_hash: [u8; 32] = inner.finalize().into();
+
+    let mut outer = Sha256::new();
+    outer.update(o_key_pad);
+    outer.update(inner_hash);
+    outer.finalize().into()
+}
+
+/// Derive a 32-byte per-plugin key for a channel using RFC 5869 HKDF-SHA256 from the
+/// channel's derived keys (never the raw channel secret) with label
+/// `"dialtone/plugin-key/v1/<plugin_name>"`.
+pub fn derive_channel_plugin_key(keys: &ChannelKeys, plugin_name: &str) -> [u8; 32] {
+    let canonical = plugin_name.trim().to_ascii_lowercase();
+    let mut ikm = [0u8; 64];
+    ikm[..32].copy_from_slice(&keys.enc_key);
+    ikm[32..].copy_from_slice(&keys.auth_key);
+    let prk = hmac_sha256(keys.topic_id.as_bytes(), &ikm);
+
+    let info = format!("{PLUGIN_KEY_LABEL_PREFIX}{canonical}");
+    let mut msg = Vec::with_capacity(info.len() + 1);
+    msg.extend_from_slice(info.as_bytes());
+    msg.push(0x01);
+    hmac_sha256(&prk, &msg)
+}
+
+/// Hex-encoded 32-byte derived plugin key (64 lowercase hex characters).
+pub fn derive_channel_plugin_key_hex(keys: &ChannelKeys, plugin_name: &str) -> String {
+    crate::hex_encode(&derive_channel_plugin_key(keys, plugin_name))
+}
+
+/// Channel-scoped root directory: `<state_dir>/channels/<channel_id>`.
+pub fn channel_dir(state_dir: &Path, channel_id: &str) -> PathBuf {
+    state_dir.join("channels").join(channel_id)
+}
+
+/// Channel-scoped blob store directory: `<state_dir>/channels/<channel_id>/blobs`.
+pub fn channel_blobs_dir(state_dir: &Path, channel_id: &str) -> PathBuf {
+    channel_dir(state_dir, channel_id).join("blobs")
+}
+
+/// Channel-scoped plugins directory: `<state_dir>/channels/<channel_id>/plugins`.
+pub fn channel_plugins_dir(state_dir: &Path, channel_id: &str) -> PathBuf {
+    channel_dir(state_dir, channel_id).join("plugins")
+}
+
+/// Channel-scoped plugin data directory: `<state_dir>/channels/<channel_id>/data/<plugin_name>`.
+pub fn channel_plugin_data_dir(state_dir: &Path, channel_id: &str, plugin_name: &str) -> PathBuf {
+    channel_dir(state_dir, channel_id)
+        .join("data")
+        .join(plugin_name)
+}
+
 fn kdf_cache() -> &'static Mutex<HashMap<(String, String), ChannelKeys>> {
     static CACHE: OnceLock<Mutex<HashMap<(String, String), ChannelKeys>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -2046,6 +2118,13 @@ impl LiveAllowlist {
         // compat: iroh type
         if let Ok(mut set) = self.0.write() {
             set.insert(node_id);
+        }
+    }
+
+    /// Clear all NodeIds (used when switching channels so previous-channel members lose access).
+    pub fn clear(&self) {
+        if let Ok(mut set) = self.0.write() {
+            set.clear();
         }
     }
 
